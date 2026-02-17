@@ -43,9 +43,13 @@ public class ConsoleReportGenerator : IReportGenerator
         var summaryTable = new Table().Border(TableBorder.Rounded);
         summaryTable.AddColumn("Metric");
         summaryTable.AddColumn("Count");
-        summaryTable.AddRow("Total Tables", deps.Count.ToString());
-        summaryTable.AddRow("Connected Tables", connected.Count.ToString());
-        summaryTable.AddRow("Standalone Tables", orphaned.Count.ToString());
+        summaryTable.AddRow("Total Objects", deps.Count.ToString());
+        summaryTable.AddRow("Tables", deps.Count(d => d.ObjectType == "Table").ToString());
+        summaryTable.AddRow("Views", deps.Count(d => d.ObjectType == "View").ToString());
+        summaryTable.AddRow("Procedures", deps.Count(d => d.ObjectType == "Procedure").ToString());
+        summaryTable.AddRow("Functions", deps.Count(d => d.ObjectType == "Function").ToString());
+        summaryTable.AddRow("Connected", connected.Count.ToString());
+        summaryTable.AddRow("Standalone", orphaned.Count.ToString());
         summaryTable.AddRow("Foreign Keys", result.Relationships!.ExplicitRelationships.Count.ToString());
         AnsiConsole.Write(summaryTable);
         AnsiConsole.WriteLine();
@@ -53,12 +57,13 @@ public class ConsoleReportGenerator : IReportGenerator
         // Importance ranking
         if (connected.Count > 0)
         {
-            AnsiConsole.MarkupLine("[bold]Table Importance Ranking[/]");
-            AnsiConsole.MarkupLine("[grey]Tables ranked by centrality. Referenced By = other tables depend on this one.[/]");
+            AnsiConsole.MarkupLine("[bold]Object Importance Ranking[/]");
+            AnsiConsole.MarkupLine("[grey]Objects ranked by centrality. Referenced By = other objects depend on this one.[/]");
 
             var rankTable = new Table().Border(TableBorder.Rounded);
             rankTable.AddColumn("#");
-            rankTable.AddColumn("Table");
+            rankTable.AddColumn("Object");
+            rankTable.AddColumn("Type");
             rankTable.AddColumn(new TableColumn("Referenced By").RightAligned());
             rankTable.AddColumn(new TableColumn("Depends On").RightAligned());
             rankTable.AddColumn(new TableColumn("Impact").RightAligned());
@@ -68,9 +73,11 @@ public class ConsoleReportGenerator : IReportGenerator
             foreach (var dep in connected.OrderByDescending(d => d.ImportanceScore))
             {
                 var impactColor = dep.TransitiveImpact.Count > 10 ? "red" : dep.TransitiveImpact.Count > 5 ? "yellow" : "green";
+                var typeColor = dep.ObjectType switch { "View" => "green", "Procedure" => "yellow", "Function" => "blue", "External" => "red", _ => "white" };
                 rankTable.AddRow(
                     rank++.ToString(),
                     $"[bold]{Markup.Escape(dep.FullName)}[/]",
+                    $"[{typeColor}]{dep.ObjectType}[/]",
                     dep.ReferencedBy.Count.ToString(),
                     dep.DependsOn.Count.ToString(),
                     $"[{impactColor}]{dep.TransitiveImpact.Count}[/]",
@@ -132,6 +139,7 @@ public class ConsoleReportGenerator : IReportGenerator
         summaryTable.AddRow("Tables", schema.Tables.Count.ToString());
         summaryTable.AddRow("Views", schema.Views.Count.ToString());
         summaryTable.AddRow("Stored Procedures", schema.StoredProcedures.Count.ToString());
+        summaryTable.AddRow("Functions", schema.Functions.Count.ToString());
         summaryTable.AddRow("Total Columns", schema.Tables.Sum(t => t.Columns.Count).ToString());
         summaryTable.AddRow("Total Indexes", schema.Tables.Sum(t => t.Indexes.Count).ToString());
         summaryTable.AddRow("Total Foreign Keys", schema.Tables.Sum(t => t.ForeignKeys.Count).ToString());
@@ -212,6 +220,18 @@ public class ConsoleReportGenerator : IReportGenerator
             {
                 var modified = sp.LastModified?.ToString("yyyy-MM-dd") ?? "N/A";
                 AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(sp.FullName)}[/] (modified: {modified})");
+            }
+            AnsiConsole.WriteLine();
+        }
+
+        // Functions
+        if (schema.Functions.Count > 0)
+        {
+            AnsiConsole.Write(new Rule("[bold green]Functions[/]").LeftJustified());
+            foreach (var fn in schema.Functions)
+            {
+                var modified = fn.LastModified?.ToString("yyyy-MM-dd") ?? "N/A";
+                AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(fn.FullName)}[/] ({fn.FunctionType}, modified: {modified})");
             }
             AnsiConsole.WriteLine();
         }

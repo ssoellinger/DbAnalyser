@@ -6,4 +6,5 @@ public class DatabaseSchema
     public List<TableInfo> Tables { get; set; } = [];
     public List<ViewInfo> Views { get; set; } = [];
     public List<StoredProcedureInfo> StoredProcedures { get; set; } = [];
+    public List<FunctionInfo> Functions { get; set; } = [];
 }

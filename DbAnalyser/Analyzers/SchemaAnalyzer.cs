@@ -18,8 +18,9 @@ public class SchemaAnalyzer : IAnalyzer
         var allForeignKeysTask = GetAllForeignKeysAsync(provider, ct);
         var viewsTask = GetAllViewsAsync(provider, ct);
         var sprocsTask = GetStoredProceduresAsync(provider, ct);
+        var functionsTask = GetFunctionsAsync(provider, ct);
 
-        await Task.WhenAll(allColumnsTask, allIndexesTask, allForeignKeysTask, viewsTask, sprocsTask);
+        await Task.WhenAll(allColumnsTask, allIndexesTask, allForeignKeysTask, viewsTask, sprocsTask, functionsTask);
 
         var allColumns = await allColumnsTask;
         var allIndexes = await allIndexesTask;
@@ -58,6 +59,7 @@ public class SchemaAnalyzer : IAnalyzer
         )).ToList();
 
         schema.StoredProcedures = await sprocsTask;
+        schema.Functions = await functionsTask;
 
         result.Schema = schema;
     }
@@ -239,6 +241,38 @@ public class SchemaAnalyzer : IAnalyzer
         return data.Rows.Cast<DataRow>().Select(r => new StoredProcedureInfo(
             SchemaName: r["SchemaName"].ToString()!,
             ProcedureName: r["ProcedureName"].ToString()!,
+            Definition: r["Definition"].ToString()!,
+            LastModified: r["LastModified"] as DateTime?
+        )).ToList();
+    }
+
+    private async Task<List<FunctionInfo>> GetFunctionsAsync(
+        IDbProvider provider, CancellationToken ct)
+    {
+        var data = await provider.ExecuteQueryAsync("""
+            SELECT
+                s.name AS SchemaName,
+                o.name AS FunctionName,
+                CASE o.type
+                    WHEN 'FN' THEN 'Scalar'
+                    WHEN 'IF' THEN 'Inline Table'
+                    WHEN 'TF' THEN 'Table'
+                    ELSE o.type_desc
+                END AS FunctionType,
+                ISNULL(m.definition, '') AS Definition,
+                o.modify_date AS LastModified
+            FROM sys.objects o
+            JOIN sys.schemas s ON o.schema_id = s.schema_id
+            LEFT JOIN sys.sql_modules m ON o.object_id = m.object_id
+            WHERE o.type IN ('FN', 'IF', 'TF')
+              AND o.is_ms_shipped = 0
+            ORDER BY s.name, o.name
+            """, ct);
+
+        return data.Rows.Cast<DataRow>().Select(r => new FunctionInfo(
+            SchemaName: r["SchemaName"].ToString()!,
+            FunctionName: r["FunctionName"].ToString()!,
+            FunctionType: r["FunctionType"].ToString()!,
             Definition: r["Definition"].ToString()!,
             LastModified: r["LastModified"] as DateTime?
         )).ToList();

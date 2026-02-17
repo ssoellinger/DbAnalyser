@@ -7,4 +7,5 @@ public class RelationshipMap
     public List<ForeignKeyInfo> ExplicitRelationships { get; set; } = [];
     public List<ImplicitRelationship> ImplicitRelationships { get; set; } = [];
     public List<TableDependency> Dependencies { get; set; } = [];
+    public List<ObjectDependency> ViewDependencies { get; set; } = [];
 }

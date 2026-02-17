@@ -85,31 +85,79 @@ public class HtmlReportGenerator : IReportGenerator
         sb.AppendLine("<section id=\"dependencies\">");
         sb.AppendLine("<h2>Dependency Overview</h2>");
 
+        var tableCount = deps.Count(d => d.ObjectType == "Table");
+        var viewCount = deps.Count(d => d.ObjectType == "View");
+        var sprocCount = deps.Count(d => d.ObjectType == "Procedure");
+        var funcCount = deps.Count(d => d.ObjectType == "Function");
+        var externalCount = deps.Count(d => d.ObjectType == "External");
+        var crossDbDeps = result.Relationships!.ViewDependencies.Where(d => d.IsCrossDatabase).ToList();
+
         // Summary cards
         sb.AppendLine("<div class=\"summary-grid\">");
-        sb.AppendLine($"<div class=\"card\"><h3>{deps.Count}</h3><p>Total Tables</p></div>");
+        sb.AppendLine($"<div class=\"card\"><h3>{tableCount}</h3><p>Tables</p></div>");
+        sb.AppendLine($"<div class=\"card\"><h3>{viewCount}</h3><p>Views</p></div>");
+        sb.AppendLine($"<div class=\"card\"><h3>{sprocCount}</h3><p>Procedures</p></div>");
+        sb.AppendLine($"<div class=\"card\"><h3>{funcCount}</h3><p>Functions</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{connected.Count}</h3><p>Connected</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{orphaned.Count}</h3><p>Standalone</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{result.Relationships!.ExplicitRelationships.Count}</h3><p>Foreign Keys</p></div>");
+        sb.AppendLine($"<div class=\"card\"><h3>{result.Relationships!.ViewDependencies.Count}</h3><p>Object Dependencies</p></div>");
+        if (externalCount > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{externalCount}</h3><p>Cross-DB References</p></div>");
         sb.AppendLine("</div>");
 
         // Interactive graph
         sb.AppendLine("<h3>Relationship Graph</h3>");
-        sb.AppendLine("<p class=\"meta\">Drag nodes to rearrange. Hover for details. Scroll to zoom. Node size = importance.</p>");
+        sb.AppendLine("<p class=\"meta\">Scroll to zoom. Drag empty space to pan. Drag nodes to rearrange. Hover for details. Node size = importance.</p>");
+
+        // Node type filters
+        sb.AppendLine("<div class=\"graph-filters\">");
+        sb.AppendLine("<span class=\"meta\">Objects:</span>");
+        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#e94560\"><input type=\"checkbox\" value=\"table\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9679; Tables ({tableCount})</span></label>");
+        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4ecca3\"><input type=\"checkbox\" value=\"view\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9670; Views ({viewCount})</span></label>");
+        if (sprocCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9632; Procedures ({sprocCount})</span></label>");
+        if (funcCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9650; Functions ({funcCount})</span></label>");
+        if (externalCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9674; External ({externalCount})</span></label>");
+        sb.AppendLine("</div>");
+
+        // Edge type filters
+        var fkEdgeCount = result.Relationships!.ExplicitRelationships.Count;
+        var viewEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "View");
+        var sprocEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Procedure");
+        var funcEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Function");
+        var extEdgeCount = result.Relationships!.ViewDependencies.Count(d => d.IsCrossDatabase);
+
+        sb.AppendLine("<div class=\"graph-filters\">");
+        sb.AppendLine("<span class=\"meta\">Relations:</span>");
+        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4fc3f7\"><input type=\"checkbox\" value=\"fk\" checked onchange=\"toggleEdgeFilter(this)\"><span>Table &harr; Table / FK ({fkEdgeCount})</span></label>");
+        if (viewEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4ecca3\"><input type=\"checkbox\" value=\"view\" checked onchange=\"toggleEdgeFilter(this)\"><span>View &rarr; Object ({viewEdgeCount})</span></label>");
+        if (sprocEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleEdgeFilter(this)\"><span>Procedure &rarr; Object ({sprocEdgeCount})</span></label>");
+        if (funcEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleEdgeFilter(this)\"><span>Function &rarr; Object ({funcEdgeCount})</span></label>");
+        if (extEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleEdgeFilter(this)\"><span>Cross-DB ({extEdgeCount})</span></label>");
+        sb.AppendLine("</div>");
+
         sb.AppendLine("<div id=\"graph-container\"><svg id=\"dep-graph\"></svg></div>");
 
         // Dependency ranking table
         if (connected.Count > 0)
         {
-            sb.AppendLine("<h3>Table Importance Ranking</h3>");
-            sb.AppendLine("<p class=\"meta\">Tables ranked by how central they are. \"Referenced By\" = other tables depend on this one. \"Impact\" = total tables transitively affected.</p>");
-            sb.AppendLine("<table><thead><tr><th>Rank</th><th>Table</th><th>Referenced By</th><th>Depends On</th><th>Transitive Impact</th><th>Score</th></tr></thead><tbody>");
+            sb.AppendLine("<h3>Importance Ranking</h3>");
+            sb.AppendLine("<p class=\"meta\">Objects ranked by how central they are. \"Referenced By\" = other objects depend on this one. \"Impact\" = total objects transitively affected.</p>");
+            sb.AppendLine("<table><thead><tr><th>Rank</th><th>Object</th><th>Type</th><th>Referenced By</th><th>Depends On</th><th>Transitive Impact</th><th>Score</th></tr></thead><tbody>");
 
             var rank = 1;
             foreach (var dep in connected.OrderByDescending(d => d.ImportanceScore))
             {
                 var impactClass = dep.TransitiveImpact.Count > 10 ? "error" : dep.TransitiveImpact.Count > 5 ? "warn" : "";
-                sb.AppendLine($"<tr><td>{rank++}</td><td><strong>{E(dep.FullName)}</strong></td>");
+                var typeClass = dep.ObjectType switch { "View" => "ok", "Procedure" => "warn", "Function" => "info", "External" => "error", _ => "" };
+                sb.AppendLine($"<tr><td>{rank++}</td><td><strong>{E(dep.FullName)}</strong></td><td class=\"{typeClass}\">{dep.ObjectType}</td>");
                 sb.AppendLine($"<td>{dep.ReferencedBy.Count}</td>");
                 sb.AppendLine($"<td>{dep.DependsOn.Count}</td>");
                 sb.AppendLine($"<td class=\"{impactClass}\">{dep.TransitiveImpact.Count}</td>");
@@ -181,6 +229,7 @@ public class HtmlReportGenerator : IReportGenerator
         sb.AppendLine($"<div class=\"card\"><h3>{schema.Tables.Count}</h3><p>Tables</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{schema.Views.Count}</h3><p>Views</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{schema.StoredProcedures.Count}</h3><p>Stored Procedures</p></div>");
+        sb.AppendLine($"<div class=\"card\"><h3>{schema.Functions.Count}</h3><p>Functions</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{schema.Tables.Sum(t => t.Columns.Count)}</h3><p>Total Columns</p></div>");
         sb.AppendLine("</div>");
 
@@ -274,6 +323,19 @@ public class HtmlReportGenerator : IReportGenerator
             sb.AppendLine("</tbody></table>");
         }
 
+        if (map.ViewDependencies.Count > 0)
+        {
+            sb.AppendLine("<h3>Object Dependencies (Views, Procedures, Functions)</h3>");
+            sb.AppendLine("<table><thead><tr><th>Object</th><th>Type</th><th>Depends On</th><th>Target Type</th><th>Database</th></tr></thead><tbody>");
+            foreach (var vd in map.ViewDependencies)
+            {
+                var dbLabel = vd.IsCrossDatabase ? $"<span class=\"error\">{E(vd.ToDatabase!)}</span>" : "<span class=\"meta\">local</span>";
+                sb.AppendLine($"<tr><td>{E(vd.FromSchema)}.{E(vd.FromName)}</td><td>{vd.FromType}</td>");
+                sb.AppendLine($"<td>{E(vd.ToFullName)}</td><td>{vd.ToType}</td><td>{dbLabel}</td></tr>");
+            }
+            sb.AppendLine("</tbody></table>");
+        }
+
         if (map.ImplicitRelationships.Count > 0)
         {
             sb.AppendLine("<h3>Implicit (Detected) Relationships</h3>");
@@ -338,6 +400,7 @@ public class HtmlReportGenerator : IReportGenerator
     {
         var deps = result.Relationships!.Dependencies;
         var fks = result.Relationships!.ExplicitRelationships;
+        var viewDeps = result.Relationships!.ViewDependencies;
 
         // Build nodes array
         var connected = deps.Where(d => d.DirectConnections > 0).ToList();
@@ -350,7 +413,8 @@ public class HtmlReportGenerator : IReportGenerator
             nodes.Add(new
             {
                 id = d.FullName,
-                label = d.TableName,
+                label = d.IsExternal ? d.FullName : $"{d.SchemaName}.{d.TableName}",
+                type = d.ObjectType.ToLowerInvariant(),
                 refBy = d.ReferencedBy.Count,
                 depOn = d.DependsOn.Count,
                 impact = d.TransitiveImpact.Count,
@@ -358,7 +422,7 @@ public class HtmlReportGenerator : IReportGenerator
             });
         }
 
-        // Build edges (deduplicated at table level)
+        // Build edges (deduplicated at object level)
         var edgeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var edges = new List<object>();
         foreach (var fk in fks)
@@ -368,7 +432,19 @@ public class HtmlReportGenerator : IReportGenerator
             var key = $"{from}->{to}";
             if (!edgeSet.Add(key)) continue;
             if (!nodeIndex.ContainsKey(from) || !nodeIndex.ContainsKey(to)) continue;
-            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to] });
+            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = "fk" });
+        }
+
+        // Add object dependency edges (views, procedures, functions, cross-DB)
+        foreach (var vd in viewDeps)
+        {
+            var from = $"{vd.FromSchema}.{vd.FromName}";
+            var to = vd.ToFullName;
+            var key = $"{from}->{to}";
+            if (!edgeSet.Add(key)) continue;
+            if (!nodeIndex.ContainsKey(from) || !nodeIndex.ContainsKey(to)) continue;
+            var edgeType = vd.IsCrossDatabase ? "external" : vd.FromType.ToLowerInvariant();
+            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = edgeType });
         }
 
         var nodesJson = JsonSerializer.Serialize(nodes);
@@ -385,7 +461,20 @@ const graphEdges = {{edgesJson}};
     const height = Math.max(600, Math.min(graphNodes.length * 12, 1000));
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+    // Zoom/pan state
+    let vb = { x: 0, y: 0, w: width, h: height };
+    const updateViewBox = () => svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    updateViewBox();
+
+    // Convert screen coords to world (SVG) coords
+    function screenToWorld(sx, sy) {
+        const rect = svg.getBoundingClientRect();
+        return {
+            x: vb.x + (sx - rect.left) / rect.width * vb.w,
+            y: vb.y + (sy - rect.top) / rect.height * vb.h
+        };
+    }
 
     const maxScore = Math.max(...graphNodes.map(n => n.score), 1);
 
@@ -400,7 +489,7 @@ const graphEdges = {{edgesJson}};
         n.radius = 6 + (n.score / maxScore) * 20;
     });
 
-    // SVG groups
+    // SVG defs
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
     marker.setAttribute('id', 'arrow');
@@ -429,12 +518,21 @@ const graphEdges = {{edgesJson}};
     tooltip.className = 'graph-tooltip';
     container.appendChild(tooltip);
 
+    // Zoom controls
+    const controls = document.createElement('div');
+    controls.className = 'graph-controls';
+    controls.innerHTML = '<button id="zoom-in" title="Zoom in">+</button><button id="zoom-out" title="Zoom out">&minus;</button><button id="zoom-fit" title="Fit all">&#8634;</button>';
+    container.appendChild(controls);
+
     // Create edge elements
+    const edgeColors = { fk: '#4fc3f7', view: '#4ecca3', procedure: '#f0a500', function: '#bb86fc', external: '#ff6b6b' };
     const edgeEls = graphEdges.map(e => {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('stroke', '#4fc3f7');
+        const color = edgeColors[e.type] || '#4fc3f7';
+        line.setAttribute('stroke', color);
         line.setAttribute('stroke-opacity', '0.4');
         line.setAttribute('stroke-width', '1.5');
+        if (e.type !== 'fk') line.setAttribute('stroke-dasharray', '6,3');
         line.setAttribute('marker-end', 'url(#arrow)');
         edgeGroup.appendChild(line);
         return line;
@@ -442,45 +540,82 @@ const graphEdges = {{edgesJson}};
 
     // Create node elements
     const nodeEls = graphNodes.map((n, i) => {
+        if (n.type === 'view') {
+            const diamond = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            diamond.setAttribute('fill', '#4ecca3');
+            diamond.setAttribute('stroke', '#e0e0e0');
+            diamond.setAttribute('stroke-width', '1');
+            diamond.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(diamond);
+            return diamond;
+        }
+        if (n.type === 'procedure') {
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('fill', '#f0a500');
+            rect.setAttribute('stroke', '#e0e0e0');
+            rect.setAttribute('stroke-width', '1');
+            rect.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(rect);
+            return rect;
+        }
+        if (n.type === 'function') {
+            const tri = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            tri.setAttribute('fill', '#bb86fc');
+            tri.setAttribute('stroke', '#e0e0e0');
+            tri.setAttribute('stroke-width', '1');
+            tri.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(tri);
+            return tri;
+        }
+        if (n.type === 'external') {
+            const diamond = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            diamond.setAttribute('fill', 'none');
+            diamond.setAttribute('stroke', '#ff6b6b');
+            diamond.setAttribute('stroke-width', '2');
+            diamond.setAttribute('stroke-dasharray', '4,2');
+            diamond.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(diamond);
+            return diamond;
+        }
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('r', n.radius);
         const hue = n.refBy > 0 ? (n.refBy > 5 ? 0 : 30) : 200;
-        const sat = 70;
-        const light = 50 + (n.score / maxScore) * 20;
-        circle.setAttribute('fill', `hsl(${hue}, ${sat}%, ${light}%)`);
+        circle.setAttribute('fill', `hsl(${hue}, 70%, ${50 + (n.score / maxScore) * 20}%)`);
         circle.setAttribute('stroke', '#e0e0e0');
         circle.setAttribute('stroke-width', '1');
         circle.setAttribute('cursor', 'grab');
+        nodeGroup.appendChild(circle);
+        return circle;
+    });
 
-        circle.addEventListener('mouseenter', (ev) => {
-            tooltip.innerHTML = `<strong>${n.id}</strong><br>Referenced by: ${n.refBy}<br>Depends on: ${n.depOn}<br>Impact: ${n.impact}<br>Score: ${n.score}`;
+    // Hover/tooltip
+    nodeEls.forEach((el, i) => {
+        const n = graphNodes[i];
+        el.addEventListener('mouseenter', (ev) => {
+            tooltip.innerHTML = `<strong>${n.id}</strong><br>Type: ${n.type}<br>Referenced by: ${n.refBy}<br>Depends on: ${n.depOn}<br>Impact: ${n.impact}<br>Score: ${n.score}`;
             tooltip.style.display = 'block';
-            tooltip.style.left = (ev.offsetX + 15) + 'px';
-            tooltip.style.top = (ev.offsetY - 10) + 'px';
-            // Highlight connected edges
+            const cr = container.getBoundingClientRect();
+            tooltip.style.left = (ev.clientX - cr.left + 15) + 'px';
+            tooltip.style.top = (ev.clientY - cr.top - 10) + 'px';
             graphEdges.forEach((e, ei) => {
                 if (e.source === i || e.target === i) {
                     edgeEls[ei].setAttribute('stroke-opacity', '1');
                     edgeEls[ei].setAttribute('stroke-width', '2.5');
                 }
             });
-            circle.setAttribute('stroke-width', '3');
+            el.setAttribute('stroke-width', '3');
         });
-
-        circle.addEventListener('mouseleave', () => {
+        el.addEventListener('mouseleave', () => {
             tooltip.style.display = 'none';
             graphEdges.forEach((e, ei) => {
                 edgeEls[ei].setAttribute('stroke-opacity', '0.4');
                 edgeEls[ei].setAttribute('stroke-width', '1.5');
             });
-            circle.setAttribute('stroke-width', '1');
+            el.setAttribute('stroke-width', '1');
         });
-
-        nodeGroup.appendChild(circle);
-        return circle;
     });
 
-    // Create labels
+    // Labels
     const labelEls = graphNodes.map(n => {
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.textContent = n.label;
@@ -492,29 +627,76 @@ const graphEdges = {{edgesJson}};
         return text;
     });
 
-    // Drag
+    // --- Zoom ---
+    function zoomBy(factor, cx, cy) {
+        const newW = vb.w / factor, newH = vb.h / factor;
+        vb.x = cx - (cx - vb.x) / factor;
+        vb.y = cy - (cy - vb.y) / factor;
+        vb.w = newW;
+        vb.h = newH;
+        updateViewBox();
+    }
+
+    svg.addEventListener('wheel', (ev) => {
+        ev.preventDefault();
+        const p = screenToWorld(ev.clientX, ev.clientY);
+        const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+        zoomBy(factor, p.x, p.y);
+    }, { passive: false });
+
+    document.getElementById('zoom-in').addEventListener('click', () => {
+        const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2;
+        zoomBy(1.3, cx, cy);
+    });
+    document.getElementById('zoom-out').addEventListener('click', () => {
+        const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2;
+        zoomBy(1 / 1.3, cx, cy);
+    });
+    document.getElementById('zoom-fit').addEventListener('click', () => {
+        vb = { x: 0, y: 0, w: width, h: height };
+        updateViewBox();
+    });
+
+    // --- Drag nodes + Pan ---
     let dragNode = null, dragOffset = {x:0,y:0};
+    let isPanning = false, panStart = {x:0,y:0}, vbStart = {x:0,y:0};
+
     svg.addEventListener('mousedown', (ev) => {
-        const rect = svg.getBoundingClientRect();
-        const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+        const p = screenToWorld(ev.clientX, ev.clientY);
+        // Check if clicking a node
         for (let i = 0; i < graphNodes.length; i++) {
             const n = graphNodes[i];
-            if (Math.hypot(mx - n.x, my - n.y) < n.radius + 5) {
+            if (Math.hypot(p.x - n.x, p.y - n.y) < n.radius + 5) {
                 dragNode = i;
-                dragOffset = { x: mx - n.x, y: my - n.y };
+                dragOffset = { x: p.x - n.x, y: p.y - n.y };
                 graphNodes[i].fx = n.x;
                 graphNodes[i].fy = n.y;
                 svg.style.cursor = 'grabbing';
-                break;
+                return;
             }
         }
+        // Otherwise start panning
+        isPanning = true;
+        panStart = { x: ev.clientX, y: ev.clientY };
+        vbStart = { x: vb.x, y: vb.y };
+        svg.style.cursor = 'move';
     });
+
     svg.addEventListener('mousemove', (ev) => {
-        if (dragNode === null) return;
-        const rect = svg.getBoundingClientRect();
-        graphNodes[dragNode].fx = ev.clientX - rect.left - dragOffset.x;
-        graphNodes[dragNode].fy = ev.clientY - rect.top - dragOffset.y;
+        if (dragNode !== null) {
+            const p = screenToWorld(ev.clientX, ev.clientY);
+            graphNodes[dragNode].fx = p.x - dragOffset.x;
+            graphNodes[dragNode].fy = p.y - dragOffset.y;
+        } else if (isPanning) {
+            const rect = svg.getBoundingClientRect();
+            const dx = (ev.clientX - panStart.x) / rect.width * vb.w;
+            const dy = (ev.clientY - panStart.y) / rect.height * vb.h;
+            vb.x = vbStart.x - dx;
+            vb.y = vbStart.y - dy;
+            updateViewBox();
+        }
     });
+
     svg.addEventListener('mouseup', () => {
         if (dragNode !== null) {
             graphNodes[dragNode].x = graphNodes[dragNode].fx;
@@ -523,13 +705,25 @@ const graphEdges = {{edgesJson}};
             delete graphNodes[dragNode].fy;
         }
         dragNode = null;
+        isPanning = false;
+        svg.style.cursor = 'default';
+    });
+
+    svg.addEventListener('mouseleave', () => {
+        isPanning = false;
+        if (dragNode !== null) {
+            graphNodes[dragNode].x = graphNodes[dragNode].fx;
+            graphNodes[dragNode].y = graphNodes[dragNode].fy;
+            delete graphNodes[dragNode].fx;
+            delete graphNodes[dragNode].fy;
+            dragNode = null;
+        }
         svg.style.cursor = 'default';
     });
 
     // Force simulation
     function tick() {
         const N = graphNodes.length;
-        // Repulsion (all pairs)
         for (let i = 0; i < N; i++) {
             for (let j = i + 1; j < N; j++) {
                 let dx = graphNodes[i].x - graphNodes[j].x;
@@ -544,7 +738,6 @@ const graphEdges = {{edgesJson}};
                 graphNodes[j].vy -= fy;
             }
         }
-        // Attraction (edges)
         graphEdges.forEach(e => {
             let s = graphNodes[e.source], t = graphNodes[e.target];
             let dx = t.x - s.x, dy = t.y - s.y;
@@ -555,12 +748,10 @@ const graphEdges = {{edgesJson}};
             s.vx += fx; s.vy += fy;
             t.vx -= fx; t.vy -= fy;
         });
-        // Center gravity
         graphNodes.forEach(n => {
             n.vx += (width/2 - n.x) * 0.001;
             n.vy += (height/2 - n.y) * 0.001;
         });
-        // Apply velocity
         graphNodes.forEach((n, i) => {
             if (i === dragNode) {
                 n.x = n.fx; n.y = n.fy;
@@ -571,8 +762,6 @@ const graphEdges = {{edgesJson}};
             n.vy *= 0.85;
             n.x += n.vx;
             n.y += n.vy;
-            n.x = Math.max(n.radius, Math.min(width - n.radius, n.x));
-            n.y = Math.max(n.radius, Math.min(height - n.radius, n.y));
         });
         // Update SVG
         graphEdges.forEach((e, i) => {
@@ -586,8 +775,27 @@ const graphEdges = {{edgesJson}};
             edgeEls[i].setAttribute('y2', t.y - dy * offsetT);
         });
         nodeEls.forEach((el, i) => {
-            el.setAttribute('cx', graphNodes[i].x);
-            el.setAttribute('cy', graphNodes[i].y);
+            const n = graphNodes[i];
+            if (n.type === 'view') {
+                const r = n.radius;
+                el.setAttribute('points', `${n.x},${n.y-r} ${n.x+r},${n.y} ${n.x},${n.y+r} ${n.x-r},${n.y}`);
+            } else if (n.type === 'procedure') {
+                const r = n.radius;
+                el.setAttribute('x', n.x - r);
+                el.setAttribute('y', n.y - r);
+                el.setAttribute('width', r * 2);
+                el.setAttribute('height', r * 2);
+                el.setAttribute('rx', '3');
+            } else if (n.type === 'function') {
+                const r = n.radius;
+                el.setAttribute('points', `${n.x},${n.y-r} ${n.x+r},${n.y+r} ${n.x-r},${n.y+r}`);
+            } else if (n.type === 'external') {
+                const r = n.radius;
+                el.setAttribute('points', `${n.x},${n.y-r} ${n.x+r},${n.y} ${n.x},${n.y+r} ${n.x-r},${n.y}`);
+            } else {
+                el.setAttribute('cx', n.x);
+                el.setAttribute('cy', n.y);
+            }
         });
         labelEls.forEach((el, i) => {
             el.setAttribute('x', graphNodes[i].x);
@@ -596,6 +804,36 @@ const graphEdges = {{edgesJson}};
         requestAnimationFrame(tick);
     }
     tick();
+
+    // --- Filtering ---
+    const hiddenNodeTypes = new Set();
+    const hiddenEdgeTypes = new Set();
+
+    function applyFilters() {
+        graphNodes.forEach((n, i) => {
+            const vis = !hiddenNodeTypes.has(n.type);
+            nodeEls[i].setAttribute('visibility', vis ? 'visible' : 'hidden');
+            labelEls[i].setAttribute('visibility', vis ? 'visible' : 'hidden');
+        });
+        graphEdges.forEach((e, i) => {
+            const sVis = !hiddenNodeTypes.has(graphNodes[e.source].type);
+            const tVis = !hiddenNodeTypes.has(graphNodes[e.target].type);
+            const edgeVis = !hiddenEdgeTypes.has(e.type);
+            edgeEls[i].setAttribute('visibility', (sVis && tVis && edgeVis) ? 'visible' : 'hidden');
+        });
+    }
+
+    window.toggleNodeFilter = function(cb) {
+        if (cb.checked) hiddenNodeTypes.delete(cb.value);
+        else hiddenNodeTypes.add(cb.value);
+        applyFilters();
+    };
+
+    window.toggleEdgeFilter = function(cb) {
+        if (cb.checked) hiddenEdgeTypes.delete(cb.value);
+        else hiddenEdgeTypes.add(cb.value);
+        applyFilters();
+    };
 })();
 """;
     }
@@ -631,6 +869,14 @@ const graphEdges = {{edgesJson}};
         #graph-container { position: relative; background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px; margin: 1rem 0; overflow: hidden; }
         #dep-graph { display: block; }
         .graph-tooltip { display: none; position: absolute; background: #16213e; border: 1px solid #0f3460; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85em; pointer-events: none; z-index: 10; color: #e0e0e0; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .graph-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 10; }
+        .graph-controls button { width: 32px; height: 32px; border: 1px solid #0f3460; background: #16213e; color: #e0e0e0; font-size: 18px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .graph-controls button:hover { background: #0f3460; }
+        .graph-filters { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin: 0.5rem 0; padding: 0.5rem 0.8rem; background: #16213e; border-radius: 6px; border: 1px solid #0f3460; }
+        .filter-toggle { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; padding: 0.25rem 0.6rem; border-radius: 4px; border: 1px solid var(--clr); color: var(--clr); font-size: 0.85em; user-select: none; transition: all 0.15s; }
+        .filter-toggle:has(input:checked) { background: color-mix(in srgb, var(--clr) 20%, transparent); }
+        .filter-toggle:has(input:not(:checked)) { opacity: 0.4; border-style: dashed; }
+        .filter-toggle input { display: none; }
         .impact-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; padding: 0.8rem; background: #0d0d1a; border-radius: 6px; margin: 0.5rem 0; }
         .impact-detail ul { list-style: none; padding-left: 0.5rem; }
         .impact-detail li { padding: 0.15rem 0; }

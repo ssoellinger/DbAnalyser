@@ -1,14 +1,16 @@
+using System.Data;
+using System.Text.RegularExpressions;
 using DbAnalyser.Models.Relationships;
 using DbAnalyser.Models.Schema;
 using DbAnalyser.Providers;
 
 namespace DbAnalyser.Analyzers;
 
-public class RelationshipAnalyzer : IAnalyzer
+public partial class RelationshipAnalyzer : IAnalyzer
 {
     public string Name => "relationships";
 
-    public Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default)
+    public async Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default)
     {
         if (result.Schema is null)
             throw new InvalidOperationException("Schema analysis must run before relationship analysis.");
@@ -24,11 +26,23 @@ public class RelationshipAnalyzer : IAnalyzer
         // Detect implicit relationships by naming convention
         map.ImplicitRelationships = DetectImplicitRelationships(result.Schema.Tables, map.ExplicitRelationships);
 
-        // Build dependency graph
-        map.Dependencies = BuildDependencyGraph(result.Schema.Tables, map.ExplicitRelationships);
+        // Get view/sproc -> table dependencies from both sources and merge
+        var sysDeps = await GetObjectDependenciesAsync(provider, ct);
+        var parsedDeps = ParseViewDependencies(result.Schema);
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        map.ViewDependencies = [];
+        foreach (var dep in sysDeps.Concat(parsedDeps))
+        {
+            var key = $"{dep.FromSchema}.{dep.FromName}->{dep.ToFullName}";
+            if (seen.Add(key))
+                map.ViewDependencies.Add(dep);
+        }
+
+        // Build dependency graph (tables + views)
+        map.Dependencies = BuildDependencyGraph(result.Schema, map.ExplicitRelationships, map.ViewDependencies);
 
         result.Relationships = map;
-        return Task.CompletedTask;
     }
 
     private List<ImplicitRelationship> DetectImplicitRelationships(
@@ -129,19 +143,102 @@ public class RelationshipAnalyzer : IAnalyzer
         return null;
     }
 
+    private async Task<List<ObjectDependency>> GetObjectDependenciesAsync(
+        IDbProvider provider, CancellationToken ct)
+    {
+        var data = await provider.ExecuteQueryAsync("""
+            SELECT DISTINCT
+                OBJECT_SCHEMA_NAME(d.referencing_id) AS FromSchema,
+                OBJECT_NAME(d.referencing_id) AS FromName,
+                CASE o1.type
+                    WHEN 'V' THEN 'View'
+                    WHEN 'P' THEN 'Procedure'
+                    WHEN 'FN' THEN 'Function'
+                    WHEN 'IF' THEN 'Function'
+                    WHEN 'TF' THEN 'Function'
+                    ELSE o1.type_desc
+                END AS FromType,
+                ISNULL(d.referenced_schema_name, 'dbo') AS ToSchema,
+                d.referenced_entity_name AS ToName,
+                CASE ISNULL(o2.type, 'U')
+                    WHEN 'U' THEN 'Table'
+                    WHEN 'V' THEN 'View'
+                    WHEN 'P' THEN 'Procedure'
+                    WHEN 'FN' THEN 'Function'
+                    WHEN 'IF' THEN 'Function'
+                    WHEN 'TF' THEN 'Function'
+                    ELSE ISNULL(o2.type_desc, 'Table')
+                END AS ToType,
+                d.referenced_database_name AS ToDatabase
+            FROM sys.sql_expression_dependencies d
+            JOIN sys.objects o1 ON d.referencing_id = o1.object_id
+            LEFT JOIN sys.objects o2
+                ON o2.object_id = OBJECT_ID(ISNULL(d.referenced_schema_name, 'dbo') + '.' + d.referenced_entity_name)
+            WHERE o1.type IN ('V', 'P', 'FN', 'IF', 'TF')
+              AND d.referenced_entity_name IS NOT NULL
+              AND OBJECT_NAME(d.referencing_id) IS NOT NULL
+            ORDER BY FromSchema, FromName, ToSchema, ToName
+            """, ct);
+
+        return data.Rows.Cast<DataRow>().Select(r => new ObjectDependency(
+            FromSchema: r["FromSchema"].ToString()!,
+            FromName: r["FromName"].ToString()!,
+            FromType: r["FromType"].ToString()!,
+            ToSchema: r["ToSchema"].ToString()!,
+            ToName: r["ToName"].ToString()!,
+            ToType: r["ToType"].ToString()!,
+            ToDatabase: r["ToDatabase"] is DBNull ? null : r["ToDatabase"].ToString()
+        )).ToList();
+    }
+
     private List<TableDependency> BuildDependencyGraph(
-        List<TableInfo> tables,
-        List<ForeignKeyInfo> fks)
+        DatabaseSchema schema,
+        List<ForeignKeyInfo> fks,
+        List<ObjectDependency> viewDeps)
     {
         var deps = new Dictionary<string, TableDependency>(StringComparer.OrdinalIgnoreCase);
 
         // Initialize all tables
-        foreach (var table in tables)
+        foreach (var table in schema.Tables)
         {
             deps[table.FullName] = new TableDependency
             {
                 SchemaName = table.SchemaName,
-                TableName = table.TableName
+                TableName = table.TableName,
+                ObjectType = "Table"
+            };
+        }
+
+        // Initialize views
+        foreach (var view in schema.Views)
+        {
+            deps[view.FullName] = new TableDependency
+            {
+                SchemaName = view.SchemaName,
+                TableName = view.ViewName,
+                ObjectType = "View"
+            };
+        }
+
+        // Initialize stored procedures
+        foreach (var sp in schema.StoredProcedures)
+        {
+            deps[sp.FullName] = new TableDependency
+            {
+                SchemaName = sp.SchemaName,
+                TableName = sp.ProcedureName,
+                ObjectType = "Procedure"
+            };
+        }
+
+        // Initialize functions
+        foreach (var fn in schema.Functions)
+        {
+            deps[fn.FullName] = new TableDependency
+            {
+                SchemaName = fn.SchemaName,
+                TableName = fn.FunctionName,
+                ObjectType = "Function"
             };
         }
 
@@ -158,7 +255,32 @@ public class RelationshipAnalyzer : IAnalyzer
                 toDep.ReferencedBy.Add(from);
         }
 
-        // Compute transitive impact (BFS: all tables reachable via ReferencedBy chains)
+        // Add object dependencies (views, sprocs, functions)
+        foreach (var vd in viewDeps)
+        {
+            var from = $"{vd.FromSchema}.{vd.FromName}";
+            var to = vd.ToFullName;
+
+            // Create placeholder node for cross-database targets
+            if (vd.IsCrossDatabase && !deps.ContainsKey(to))
+            {
+                deps[to] = new TableDependency
+                {
+                    SchemaName = vd.ToSchema,
+                    TableName = vd.ToName,
+                    ObjectType = "External",
+                    ExternalDatabase = vd.ToDatabase
+                };
+            }
+
+            if (deps.TryGetValue(from, out var fromDep) && !fromDep.DependsOn.Contains(to, StringComparer.OrdinalIgnoreCase))
+                fromDep.DependsOn.Add(to);
+
+            if (deps.TryGetValue(to, out var toDep) && !toDep.ReferencedBy.Contains(from, StringComparer.OrdinalIgnoreCase))
+                toDep.ReferencedBy.Add(from);
+        }
+
+        // Compute transitive impact (BFS: all objects reachable via ReferencedBy chains)
         foreach (var dep in deps.Values)
         {
             dep.TransitiveImpact = ComputeTransitiveImpact(dep.FullName, deps);
@@ -200,4 +322,180 @@ public class RelationshipAnalyzer : IAnalyzer
 
         return visited.Order().ToList();
     }
+
+    private List<ObjectDependency> ParseViewDependencies(DatabaseSchema schema)
+    {
+        var result = new List<ObjectDependency>();
+        var currentDb = schema.DatabaseName;
+
+        // Build lookup of known object names (tables, views, sprocs, functions)
+        var knownObjects = new Dictionary<string, (string Schema, string Name, string Type)>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var t in schema.Tables)
+        {
+            knownObjects[t.TableName] = (t.SchemaName, t.TableName, "Table");
+            knownObjects[t.FullName] = (t.SchemaName, t.TableName, "Table");
+            knownObjects[$"[{t.SchemaName}].[{t.TableName}]"] = (t.SchemaName, t.TableName, "Table");
+            knownObjects[$"[{t.TableName}]"] = (t.SchemaName, t.TableName, "Table");
+        }
+
+        foreach (var v in schema.Views)
+        {
+            knownObjects[v.ViewName] = (v.SchemaName, v.ViewName, "View");
+            knownObjects[v.FullName] = (v.SchemaName, v.ViewName, "View");
+            knownObjects[$"[{v.SchemaName}].[{v.ViewName}]"] = (v.SchemaName, v.ViewName, "View");
+            knownObjects[$"[{v.ViewName}]"] = (v.SchemaName, v.ViewName, "View");
+        }
+
+        foreach (var sp in schema.StoredProcedures)
+        {
+            knownObjects[sp.ProcedureName] = (sp.SchemaName, sp.ProcedureName, "Procedure");
+            knownObjects[sp.FullName] = (sp.SchemaName, sp.ProcedureName, "Procedure");
+            knownObjects[$"[{sp.SchemaName}].[{sp.ProcedureName}]"] = (sp.SchemaName, sp.ProcedureName, "Procedure");
+            knownObjects[$"[{sp.ProcedureName}]"] = (sp.SchemaName, sp.ProcedureName, "Procedure");
+        }
+
+        foreach (var fn in schema.Functions)
+        {
+            knownObjects[fn.FunctionName] = (fn.SchemaName, fn.FunctionName, "Function");
+            knownObjects[fn.FullName] = (fn.SchemaName, fn.FunctionName, "Function");
+            knownObjects[$"[{fn.SchemaName}].[{fn.FunctionName}]"] = (fn.SchemaName, fn.FunctionName, "Function");
+            knownObjects[$"[{fn.FunctionName}]"] = (fn.SchemaName, fn.FunctionName, "Function");
+        }
+
+        // Parse view definitions
+        foreach (var view in schema.Views)
+        {
+            if (string.IsNullOrWhiteSpace(view.Definition)) continue;
+
+            var refs = ExtractTableReferences(view.Definition, knownObjects, currentDb);
+            foreach (var (refSchema, refName, refType, refDb) in refs)
+            {
+                if (refDb is null
+                    && string.Equals(refName, view.ViewName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(refSchema, view.SchemaName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                result.Add(new ObjectDependency(
+                    FromSchema: view.SchemaName,
+                    FromName: view.ViewName,
+                    FromType: "View",
+                    ToSchema: refSchema,
+                    ToName: refName,
+                    ToType: refType,
+                    ToDatabase: refDb));
+            }
+        }
+
+        // Parse stored procedure definitions
+        foreach (var sp in schema.StoredProcedures)
+        {
+            if (string.IsNullOrWhiteSpace(sp.Definition)) continue;
+
+            var refs = ExtractTableReferences(sp.Definition, knownObjects, currentDb);
+            foreach (var (refSchema, refName, refType, refDb) in refs)
+            {
+                if (refDb is null
+                    && string.Equals(refName, sp.ProcedureName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(refSchema, sp.SchemaName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                result.Add(new ObjectDependency(
+                    FromSchema: sp.SchemaName,
+                    FromName: sp.ProcedureName,
+                    FromType: "Procedure",
+                    ToSchema: refSchema,
+                    ToName: refName,
+                    ToType: refType,
+                    ToDatabase: refDb));
+            }
+        }
+
+        // Parse function definitions
+        foreach (var fn in schema.Functions)
+        {
+            if (string.IsNullOrWhiteSpace(fn.Definition)) continue;
+
+            var refs = ExtractTableReferences(fn.Definition, knownObjects, currentDb);
+            foreach (var (refSchema, refName, refType, refDb) in refs)
+            {
+                if (refDb is null
+                    && string.Equals(refName, fn.FunctionName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(refSchema, fn.SchemaName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                result.Add(new ObjectDependency(
+                    FromSchema: fn.SchemaName,
+                    FromName: fn.FunctionName,
+                    FromType: "Function",
+                    ToSchema: refSchema,
+                    ToName: refName,
+                    ToType: refType,
+                    ToDatabase: refDb));
+            }
+        }
+
+        return result;
+    }
+
+    private HashSet<(string Schema, string Name, string Type, string? Database)> ExtractTableReferences(
+        string definition,
+        Dictionary<string, (string Schema, string Name, string Type)> knownObjects,
+        string currentDatabase)
+    {
+        var found = new HashSet<(string Schema, string Name, string Type, string? Database)>();
+
+        var matches = FromJoinRegex().Matches(definition);
+        foreach (Match match in matches)
+        {
+            var reference = match.Groups[1].Value.Trim();
+            var clean = reference.Replace("[", "").Replace("]", "").Trim();
+            var parts = clean.Split('.');
+
+            // 3-part name: database.schema.table
+            if (parts.Length == 3)
+            {
+                var db = parts[0];
+                var schema = parts[1];
+                var name = parts[2];
+
+                // Check if it's a reference to the current database (treat as local)
+                if (string.Equals(db, currentDatabase, StringComparison.OrdinalIgnoreCase))
+                {
+                    var localKey = $"{schema}.{name}";
+                    if (knownObjects.TryGetValue(localKey, out var localObj))
+                    {
+                        found.Add((localObj.Schema, localObj.Name, localObj.Type, null));
+                        continue;
+                    }
+                }
+
+                // Cross-database reference
+                found.Add((schema, name, "External", db));
+                continue;
+            }
+
+            // 1 or 2-part name: try local lookup
+            if (knownObjects.TryGetValue(reference, out var obj))
+            {
+                found.Add((obj.Schema, obj.Name, obj.Type, null));
+                continue;
+            }
+
+            if (knownObjects.TryGetValue(clean, out obj))
+            {
+                found.Add((obj.Schema, obj.Name, obj.Type, null));
+            }
+        }
+
+        return found;
+    }
+
+    // Match FROM or JOIN followed by a table reference (with optional database, schema, brackets)
+    // Supports: table, schema.table, database.schema.table (with optional brackets)
+    [GeneratedRegex(
+        @"(?:FROM|JOIN)\s+((?:\[?\w+\]?\.)?(?:\[?\w+\]?\.)?(?:\[?\w+\]?))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex FromJoinRegex();
 }
