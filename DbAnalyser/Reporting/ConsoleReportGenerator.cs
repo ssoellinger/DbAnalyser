@@ -48,6 +48,8 @@ public class ConsoleReportGenerator : IReportGenerator
         summaryTable.AddRow("Views", deps.Count(d => d.ObjectType == "View").ToString());
         summaryTable.AddRow("Procedures", deps.Count(d => d.ObjectType == "Procedure").ToString());
         summaryTable.AddRow("Functions", deps.Count(d => d.ObjectType == "Function").ToString());
+        summaryTable.AddRow("Triggers", deps.Count(d => d.ObjectType == "Trigger").ToString());
+        summaryTable.AddRow("Synonyms", deps.Count(d => d.ObjectType == "Synonym").ToString());
         summaryTable.AddRow("Connected", connected.Count.ToString());
         summaryTable.AddRow("Standalone", orphaned.Count.ToString());
         summaryTable.AddRow("Foreign Keys", result.Relationships!.ExplicitRelationships.Count.ToString());
@@ -73,7 +75,7 @@ public class ConsoleReportGenerator : IReportGenerator
             foreach (var dep in connected.OrderByDescending(d => d.ImportanceScore))
             {
                 var impactColor = dep.TransitiveImpact.Count > 10 ? "red" : dep.TransitiveImpact.Count > 5 ? "yellow" : "green";
-                var typeColor = dep.ObjectType switch { "View" => "green", "Procedure" => "yellow", "Function" => "blue", "External" => "red", _ => "white" };
+                var typeColor = dep.ObjectType switch { "View" => "green", "Procedure" => "yellow", "Function" => "blue", "Trigger" => "olive", "Synonym" => "grey", "Job" => "teal", "External" => "red", _ => "white" };
                 rankTable.AddRow(
                     rank++.ToString(),
                     $"[bold]{Markup.Escape(dep.FullName)}[/]",
@@ -140,6 +142,11 @@ public class ConsoleReportGenerator : IReportGenerator
         summaryTable.AddRow("Views", schema.Views.Count.ToString());
         summaryTable.AddRow("Stored Procedures", schema.StoredProcedures.Count.ToString());
         summaryTable.AddRow("Functions", schema.Functions.Count.ToString());
+        summaryTable.AddRow("Triggers", schema.Triggers.Count.ToString());
+        summaryTable.AddRow("Synonyms", schema.Synonyms.Count.ToString());
+        summaryTable.AddRow("Sequences", schema.Sequences.Count.ToString());
+        summaryTable.AddRow("User-Defined Types", schema.UserDefinedTypes.Count.ToString());
+        summaryTable.AddRow("SQL Agent Jobs", schema.Jobs.Count.ToString());
         summaryTable.AddRow("Total Columns", schema.Tables.Sum(t => t.Columns.Count).ToString());
         summaryTable.AddRow("Total Indexes", schema.Tables.Sum(t => t.Indexes.Count).ToString());
         summaryTable.AddRow("Total Foreign Keys", schema.Tables.Sum(t => t.ForeignKeys.Count).ToString());
@@ -232,6 +239,64 @@ public class ConsoleReportGenerator : IReportGenerator
             {
                 var modified = fn.LastModified?.ToString("yyyy-MM-dd") ?? "N/A";
                 AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(fn.FullName)}[/] ({fn.FunctionType}, modified: {modified})");
+            }
+            AnsiConsole.WriteLine();
+        }
+
+        // Triggers
+        if (schema.Triggers.Count > 0)
+        {
+            AnsiConsole.Write(new Rule("[bold green]Triggers[/]").LeftJustified());
+            foreach (var tr in schema.Triggers)
+            {
+                var status = tr.IsEnabled ? "[green]Enabled[/]" : "[red]Disabled[/]";
+                AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(tr.FullName)}[/] on {Markup.Escape(tr.ParentFullName)} ({tr.TriggerType} {Markup.Escape(tr.TriggerEvents)}, {status})");
+            }
+            AnsiConsole.WriteLine();
+        }
+
+        // Synonyms
+        if (schema.Synonyms.Count > 0)
+        {
+            AnsiConsole.Write(new Rule("[bold green]Synonyms[/]").LeftJustified());
+            foreach (var syn in schema.Synonyms)
+            {
+                AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(syn.FullName)}[/] -> {Markup.Escape(syn.BaseObjectName)}");
+            }
+            AnsiConsole.WriteLine();
+        }
+
+        // Sequences
+        if (schema.Sequences.Count > 0)
+        {
+            AnsiConsole.Write(new Rule("[bold green]Sequences[/]").LeftJustified());
+            foreach (var seq in schema.Sequences)
+            {
+                AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(seq.FullName)}[/] ({seq.DataType}, current: {seq.CurrentValue}, increment: {seq.Increment}{(seq.IsCycling ? ", cycling" : "")})");
+            }
+            AnsiConsole.WriteLine();
+        }
+
+        // User-Defined Types
+        if (schema.UserDefinedTypes.Count > 0)
+        {
+            AnsiConsole.Write(new Rule("[bold green]User-Defined Types[/]").LeftJustified());
+            foreach (var udt in schema.UserDefinedTypes)
+            {
+                var kind = udt.IsTableType ? "Table Type" : $"based on {udt.BaseType}";
+                AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(udt.FullName)}[/] ({kind}{(udt.IsNullable ? ", nullable" : "")})");
+            }
+            AnsiConsole.WriteLine();
+        }
+
+        // SQL Agent Jobs
+        if (schema.Jobs.Count > 0)
+        {
+            AnsiConsole.Write(new Rule("[bold green]SQL Agent Jobs[/]").LeftJustified());
+            foreach (var job in schema.Jobs)
+            {
+                var status = job.IsEnabled ? "[green]Enabled[/]" : "[red]Disabled[/]";
+                AnsiConsole.MarkupLine($"  [cyan]{Markup.Escape(job.JobName)}[/] ({status}, {job.Steps.Count} steps)");
             }
             AnsiConsole.WriteLine();
         }

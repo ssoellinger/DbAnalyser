@@ -89,7 +89,10 @@ public class HtmlReportGenerator : IReportGenerator
         var viewCount = deps.Count(d => d.ObjectType == "View");
         var sprocCount = deps.Count(d => d.ObjectType == "Procedure");
         var funcCount = deps.Count(d => d.ObjectType == "Function");
+        var triggerCount = deps.Count(d => d.ObjectType == "Trigger");
+        var synonymCount = deps.Count(d => d.ObjectType == "Synonym");
         var externalCount = deps.Count(d => d.ObjectType == "External");
+        var jobCount = deps.Count(d => d.ObjectType == "Job");
         var crossDbDeps = result.Relationships!.ViewDependencies.Where(d => d.IsCrossDatabase).ToList();
 
         // Summary cards
@@ -98,6 +101,12 @@ public class HtmlReportGenerator : IReportGenerator
         sb.AppendLine($"<div class=\"card\"><h3>{viewCount}</h3><p>Views</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{sprocCount}</h3><p>Procedures</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{funcCount}</h3><p>Functions</p></div>");
+        if (triggerCount > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{triggerCount}</h3><p>Triggers</p></div>");
+        if (synonymCount > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{synonymCount}</h3><p>Synonyms</p></div>");
+        if (jobCount > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{jobCount}</h3><p>Jobs</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{connected.Count}</h3><p>Connected</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{orphaned.Count}</h3><p>Standalone</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{result.Relationships!.ExplicitRelationships.Count}</h3><p>Foreign Keys</p></div>");
@@ -119,6 +128,12 @@ public class HtmlReportGenerator : IReportGenerator
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9632; Procedures ({sprocCount})</span></label>");
         if (funcCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9650; Functions ({funcCount})</span></label>");
+        if (triggerCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff7043\"><input type=\"checkbox\" value=\"trigger\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9889; Triggers ({triggerCount})</span></label>");
+        if (synonymCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#78909c\"><input type=\"checkbox\" value=\"synonym\" checked onchange=\"toggleNodeFilter(this)\"><span>&#8801; Synonyms ({synonymCount})</span></label>");
+        if (jobCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#26a69a\"><input type=\"checkbox\" value=\"job\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9881; Jobs ({jobCount})</span></label>");
         if (externalCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleNodeFilter(this)\"><span>&#9674; External ({externalCount})</span></label>");
         sb.AppendLine("</div>");
@@ -128,6 +143,9 @@ public class HtmlReportGenerator : IReportGenerator
         var viewEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "View");
         var sprocEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Procedure");
         var funcEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Function");
+        var triggerEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Trigger");
+        var synonymEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Synonym");
+        var jobEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Job");
         var extEdgeCount = result.Relationships!.ViewDependencies.Count(d => d.IsCrossDatabase);
 
         sb.AppendLine("<div class=\"graph-filters\">");
@@ -139,6 +157,12 @@ public class HtmlReportGenerator : IReportGenerator
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleEdgeFilter(this)\"><span>Procedure &rarr; Object ({sprocEdgeCount})</span></label>");
         if (funcEdgeCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleEdgeFilter(this)\"><span>Function &rarr; Object ({funcEdgeCount})</span></label>");
+        if (triggerEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff7043\"><input type=\"checkbox\" value=\"trigger\" checked onchange=\"toggleEdgeFilter(this)\"><span>Trigger &rarr; Object ({triggerEdgeCount})</span></label>");
+        if (synonymEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#78909c\"><input type=\"checkbox\" value=\"synonym\" checked onchange=\"toggleEdgeFilter(this)\"><span>Synonym &rarr; Object ({synonymEdgeCount})</span></label>");
+        if (jobEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#26a69a\"><input type=\"checkbox\" value=\"job\" checked onchange=\"toggleEdgeFilter(this)\"><span>Job &rarr; Object ({jobEdgeCount})</span></label>");
         if (extEdgeCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleEdgeFilter(this)\"><span>Cross-DB ({extEdgeCount})</span></label>");
         sb.AppendLine("</div>");
@@ -156,7 +180,7 @@ public class HtmlReportGenerator : IReportGenerator
             foreach (var dep in connected.OrderByDescending(d => d.ImportanceScore))
             {
                 var impactClass = dep.TransitiveImpact.Count > 10 ? "error" : dep.TransitiveImpact.Count > 5 ? "warn" : "";
-                var typeClass = dep.ObjectType switch { "View" => "ok", "Procedure" => "warn", "Function" => "info", "External" => "error", _ => "" };
+                var typeClass = dep.ObjectType switch { "View" => "ok", "Procedure" => "warn", "Function" => "info", "Trigger" => "warn", "Synonym" => "info", "Job" => "ok", "External" => "error", _ => "" };
                 sb.AppendLine($"<tr><td>{rank++}</td><td><strong>{E(dep.FullName)}</strong></td><td class=\"{typeClass}\">{dep.ObjectType}</td>");
                 sb.AppendLine($"<td>{dep.ReferencedBy.Count}</td>");
                 sb.AppendLine($"<td>{dep.DependsOn.Count}</td>");
@@ -230,6 +254,16 @@ public class HtmlReportGenerator : IReportGenerator
         sb.AppendLine($"<div class=\"card\"><h3>{schema.Views.Count}</h3><p>Views</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{schema.StoredProcedures.Count}</h3><p>Stored Procedures</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{schema.Functions.Count}</h3><p>Functions</p></div>");
+        if (schema.Triggers.Count > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{schema.Triggers.Count}</h3><p>Triggers</p></div>");
+        if (schema.Synonyms.Count > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{schema.Synonyms.Count}</h3><p>Synonyms</p></div>");
+        if (schema.Sequences.Count > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{schema.Sequences.Count}</h3><p>Sequences</p></div>");
+        if (schema.UserDefinedTypes.Count > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{schema.UserDefinedTypes.Count}</h3><p>User-Defined Types</p></div>");
+        if (schema.Jobs.Count > 0)
+            sb.AppendLine($"<div class=\"card\"><h3>{schema.Jobs.Count}</h3><p>SQL Agent Jobs</p></div>");
         sb.AppendLine($"<div class=\"card\"><h3>{schema.Tables.Sum(t => t.Columns.Count)}</h3><p>Total Columns</p></div>");
         sb.AppendLine("</div>");
 
@@ -265,6 +299,55 @@ public class HtmlReportGenerator : IReportGenerator
                 }
                 sb.AppendLine("</tbody></table></details>");
             }
+        }
+
+        // Triggers
+        if (schema.Triggers.Count > 0)
+        {
+            sb.AppendLine("<h3>Triggers</h3>");
+            sb.AppendLine("<table><thead><tr><th>Trigger</th><th>Parent Table</th><th>Type</th><th>Events</th><th>Enabled</th></tr></thead><tbody>");
+            foreach (var tr in schema.Triggers)
+            {
+                var enabledLabel = tr.IsEnabled ? "<span class=\"ok\">Yes</span>" : "<span class=\"error\">No</span>";
+                sb.AppendLine($"<tr><td>{E(tr.FullName)}</td><td>{E(tr.ParentFullName)}</td><td>{tr.TriggerType}</td><td>{E(tr.TriggerEvents)}</td><td>{enabledLabel}</td></tr>");
+            }
+            sb.AppendLine("</tbody></table>");
+        }
+
+        // Synonyms
+        if (schema.Synonyms.Count > 0)
+        {
+            sb.AppendLine("<h3>Synonyms</h3>");
+            sb.AppendLine("<table><thead><tr><th>Synonym</th><th>Base Object</th></tr></thead><tbody>");
+            foreach (var syn in schema.Synonyms)
+            {
+                sb.AppendLine($"<tr><td>{E(syn.FullName)}</td><td>{E(syn.BaseObjectName)}</td></tr>");
+            }
+            sb.AppendLine("</tbody></table>");
+        }
+
+        // Sequences
+        if (schema.Sequences.Count > 0)
+        {
+            sb.AppendLine("<h3>Sequences</h3>");
+            sb.AppendLine("<table><thead><tr><th>Sequence</th><th>Data Type</th><th>Current</th><th>Increment</th><th>Min</th><th>Max</th><th>Cycling</th></tr></thead><tbody>");
+            foreach (var seq in schema.Sequences)
+            {
+                sb.AppendLine($"<tr><td>{E(seq.FullName)}</td><td>{seq.DataType}</td><td>{seq.CurrentValue:N0}</td><td>{seq.Increment}</td><td>{seq.MinValue:N0}</td><td>{seq.MaxValue:N0}</td><td>{(seq.IsCycling ? "Yes" : "No")}</td></tr>");
+            }
+            sb.AppendLine("</tbody></table>");
+        }
+
+        // User-Defined Types
+        if (schema.UserDefinedTypes.Count > 0)
+        {
+            sb.AppendLine("<h3>User-Defined Types</h3>");
+            sb.AppendLine("<table><thead><tr><th>Type</th><th>Base Type</th><th>Table Type</th><th>Nullable</th><th>Max Length</th></tr></thead><tbody>");
+            foreach (var udt in schema.UserDefinedTypes)
+            {
+                sb.AppendLine($"<tr><td>{E(udt.FullName)}</td><td>{udt.BaseType}</td><td>{(udt.IsTableType ? "Yes" : "No")}</td><td>{(udt.IsNullable ? "Yes" : "No")}</td><td>{(udt.MaxLength.HasValue ? udt.MaxLength.ToString() : "N/A")}</td></tr>");
+            }
+            sb.AppendLine("</tbody></table>");
         }
 
         sb.AppendLine("</section>");
@@ -525,7 +608,7 @@ const graphEdges = {{edgesJson}};
     container.appendChild(controls);
 
     // Create edge elements
-    const edgeColors = { fk: '#4fc3f7', view: '#4ecca3', procedure: '#f0a500', function: '#bb86fc', external: '#ff6b6b' };
+    const edgeColors = { fk: '#4fc3f7', view: '#4ecca3', procedure: '#f0a500', function: '#bb86fc', trigger: '#ff7043', synonym: '#78909c', job: '#26a69a', external: '#ff6b6b' };
     const edgeEls = graphEdges.map(e => {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         const color = edgeColors[e.type] || '#4fc3f7';
@@ -566,6 +649,35 @@ const graphEdges = {{edgesJson}};
             tri.setAttribute('cursor', 'grab');
             nodeGroup.appendChild(tri);
             return tri;
+        }
+        if (n.type === 'trigger') {
+            // Star/bolt shape (rotated diamond with notch)
+            const star = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            star.setAttribute('fill', '#ff7043');
+            star.setAttribute('stroke', '#e0e0e0');
+            star.setAttribute('stroke-width', '1');
+            star.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(star);
+            return star;
+        }
+        if (n.type === 'synonym') {
+            // Rounded rect (pill shape)
+            const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            pill.setAttribute('fill', '#78909c');
+            pill.setAttribute('stroke', '#e0e0e0');
+            pill.setAttribute('stroke-width', '1');
+            pill.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(pill);
+            return pill;
+        }
+        if (n.type === 'job') {
+            const hex = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            hex.setAttribute('fill', '#26a69a');
+            hex.setAttribute('stroke', '#e0e0e0');
+            hex.setAttribute('stroke-width', '1');
+            hex.setAttribute('cursor', 'grab');
+            nodeGroup.appendChild(hex);
+            return hex;
         }
         if (n.type === 'external') {
             const diamond = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
@@ -789,6 +901,33 @@ const graphEdges = {{edgesJson}};
             } else if (n.type === 'function') {
                 const r = n.radius;
                 el.setAttribute('points', `${n.x},${n.y-r} ${n.x+r},${n.y+r} ${n.x-r},${n.y+r}`);
+            } else if (n.type === 'trigger') {
+                const r = n.radius;
+                // 5-point star
+                let pts = '';
+                for (let k = 0; k < 5; k++) {
+                    const outerAngle = (Math.PI * 2 * k / 5) - Math.PI / 2;
+                    const innerAngle = outerAngle + Math.PI / 5;
+                    pts += `${n.x + r * Math.cos(outerAngle)},${n.y + r * Math.sin(outerAngle)} `;
+                    pts += `${n.x + r * 0.45 * Math.cos(innerAngle)},${n.y + r * 0.45 * Math.sin(innerAngle)} `;
+                }
+                el.setAttribute('points', pts.trim());
+            } else if (n.type === 'synonym') {
+                const r = n.radius;
+                el.setAttribute('x', n.x - r * 1.3);
+                el.setAttribute('y', n.y - r * 0.7);
+                el.setAttribute('width', r * 2.6);
+                el.setAttribute('height', r * 1.4);
+                el.setAttribute('rx', r * 0.7);
+            } else if (n.type === 'job') {
+                const r = n.radius;
+                const a = Math.PI / 3;
+                let pts = '';
+                for (let k = 0; k < 6; k++) {
+                    const angle = a * k - Math.PI / 6;
+                    pts += `${n.x + r * Math.cos(angle)},${n.y + r * Math.sin(angle)} `;
+                }
+                el.setAttribute('points', pts.trim());
             } else if (n.type === 'external') {
                 const r = n.radius;
                 el.setAttribute('points', `${n.x},${n.y-r} ${n.x+r},${n.y} ${n.x},${n.y+r} ${n.x-r},${n.y}`);

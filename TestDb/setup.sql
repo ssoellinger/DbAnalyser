@@ -484,6 +484,124 @@ END;
 GO
 
 -- ============================================================
+-- TRIGGERS
+-- ============================================================
+
+CREATE TRIGGER dbo.trg_Orders_AfterInsert
+ON dbo.Orders
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Log new orders to ErrorLog for auditing
+    INSERT INTO dbo.ErrorLog (Message, OccurredAt)
+    SELECT 'New order created: ' + CAST(i.Id AS NVARCHAR(20)) + ' for customer ' + CAST(i.CustomerId AS NVARCHAR(20)),
+           GETUTCDATE()
+    FROM inserted i;
+END;
+GO
+
+CREATE TRIGGER dbo.trg_Products_AfterUpdate
+ON dbo.Products
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- When a product price changes, log it and update stock timestamps
+    IF UPDATE(Price)
+    BEGIN
+        INSERT INTO dbo.ErrorLog (Message, OccurredAt)
+        SELECT 'Price changed for product: ' + i.Name + ' from ' + CAST(d.Price AS NVARCHAR(20)) + ' to ' + CAST(i.Price AS NVARCHAR(20)),
+               GETUTCDATE()
+        FROM inserted i
+        JOIN deleted d ON d.Id = i.Id;
+
+        UPDATE inventory.Stock
+        SET LastUpdated = GETUTCDATE()
+        WHERE ProductId IN (SELECT Id FROM inserted);
+    END
+END;
+GO
+
+CREATE TRIGGER inventory.trg_Stock_InsteadOfDelete
+ON inventory.Stock
+INSTEAD OF DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Instead of deleting, set quantity to 0
+    UPDATE inventory.Stock
+    SET Quantity = 0, LastUpdated = GETUTCDATE()
+    WHERE Id IN (SELECT Id FROM deleted);
+END;
+GO
+
+-- ============================================================
+-- SYNONYMS
+-- ============================================================
+
+-- Local synonym
+CREATE SYNONYM dbo.syn_CustomerOrders FOR dbo.vw_CustomerOrders;
+GO
+
+CREATE SYNONYM dbo.syn_Products FOR dbo.Products;
+GO
+
+-- Cross-database synonym
+CREATE SYNONYM dbo.syn_ExternalAudit FOR DbAnalyserExternal.dbo.ExternalAuditLog;
+GO
+
+CREATE SYNONYM dbo.syn_ExternalConfig FOR DbAnalyserExternal.dbo.ExternalConfig;
+GO
+
+-- ============================================================
+-- SEQUENCES
+-- ============================================================
+
+CREATE SEQUENCE dbo.seq_OrderNumber
+    AS INT
+    START WITH 10000
+    INCREMENT BY 1
+    MINVALUE 10000
+    MAXVALUE 99999
+    NO CYCLE;
+GO
+
+CREATE SEQUENCE dbo.seq_InvoiceNumber
+    AS BIGINT
+    START WITH 1
+    INCREMENT BY 1
+    MINVALUE 1
+    MAXVALUE 9999999999
+    CYCLE;
+GO
+
+CREATE SEQUENCE inventory.seq_BatchId
+    AS INT
+    START WITH 1
+    INCREMENT BY 1
+    NO CYCLE;
+GO
+
+-- ============================================================
+-- USER-DEFINED TYPES
+-- ============================================================
+
+CREATE TYPE dbo.EmailAddress FROM NVARCHAR(200) NOT NULL;
+GO
+
+CREATE TYPE dbo.MoneyAmount FROM DECIMAL(18,2) NULL;
+GO
+
+CREATE TYPE dbo.OrderItemTableType AS TABLE (
+    ProductId INT NOT NULL,
+    Quantity INT NOT NULL,
+    UnitPrice DECIMAL(18,2) NOT NULL,
+    Discount DECIMAL(5,2) NOT NULL DEFAULT 0
+);
+GO
+
+-- ============================================================
 -- SEED DATA
 -- ============================================================
 
@@ -561,6 +679,7 @@ GO
 
 PRINT '=== DbAnalyserTestDb setup complete! ===';
 PRINT 'Tables: 15 (2 schemas), Views: 4, Procedures: 6, Functions: 5';
+PRINT 'Triggers: 3, Synonyms: 4 (2 local, 2 cross-DB), Sequences: 3, UDTs: 3';
 PRINT 'Cross-DB refs: 3 (to DbAnalyserExternal)';
 PRINT 'Implicit FKs: ShippingAddresses.CustomerId, ShippingAddresses.CountryId';
 GO

@@ -12,15 +12,21 @@ public class SchemaAnalyzer : IAnalyzer
     {
         var schema = new DatabaseSchema { DatabaseName = provider.DatabaseName };
 
-        // Bulk-fetch all metadata in parallel (5 queries total instead of 3 per table)
+        // Bulk-fetch all metadata in parallel
         var allColumnsTask = GetAllColumnsAsync(provider, ct);
         var allIndexesTask = GetAllIndexesAsync(provider, ct);
         var allForeignKeysTask = GetAllForeignKeysAsync(provider, ct);
         var viewsTask = GetAllViewsAsync(provider, ct);
         var sprocsTask = GetStoredProceduresAsync(provider, ct);
         var functionsTask = GetFunctionsAsync(provider, ct);
+        var triggersTask = GetTriggersAsync(provider, ct);
+        var synonymsTask = GetSynonymsAsync(provider, ct);
+        var sequencesTask = GetSequencesAsync(provider, ct);
+        var udtsTask = GetUserDefinedTypesAsync(provider, ct);
 
-        await Task.WhenAll(allColumnsTask, allIndexesTask, allForeignKeysTask, viewsTask, sprocsTask, functionsTask);
+        await Task.WhenAll(allColumnsTask, allIndexesTask, allForeignKeysTask,
+            viewsTask, sprocsTask, functionsTask,
+            triggersTask, synonymsTask, sequencesTask, udtsTask);
 
         var allColumns = await allColumnsTask;
         var allIndexes = await allIndexesTask;
@@ -60,6 +66,11 @@ public class SchemaAnalyzer : IAnalyzer
 
         schema.StoredProcedures = await sprocsTask;
         schema.Functions = await functionsTask;
+        schema.Triggers = await triggersTask;
+        schema.Synonyms = await synonymsTask;
+        schema.Sequences = await sequencesTask;
+        schema.UserDefinedTypes = await udtsTask;
+        schema.Jobs = await GetJobsAsync(provider, ct);
 
         result.Schema = schema;
     }
@@ -276,5 +287,196 @@ public class SchemaAnalyzer : IAnalyzer
             Definition: r["Definition"].ToString()!,
             LastModified: r["LastModified"] as DateTime?
         )).ToList();
+    }
+
+    private async Task<List<TriggerInfo>> GetTriggersAsync(IDbProvider provider, CancellationToken ct)
+    {
+        var data = await provider.ExecuteQueryAsync("""
+            SELECT
+                s.name AS SchemaName,
+                tr.name AS TriggerName,
+                OBJECT_NAME(tr.parent_id) AS ParentTable,
+                CASE WHEN tr.is_instead_of_trigger = 1 THEN 'INSTEAD OF' ELSE 'AFTER' END AS TriggerType,
+                STUFF((
+                    SELECT ', ' + type_desc
+                    FROM sys.trigger_events te
+                    WHERE te.object_id = tr.object_id
+                    FOR XML PATH(''), TYPE
+                ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS TriggerEvents,
+                CAST(CASE WHEN tr.is_disabled = 0 THEN 1 ELSE 0 END AS BIT) AS IsEnabled,
+                ISNULL(m.definition, '') AS Definition
+            FROM sys.triggers tr
+            JOIN sys.objects o ON tr.parent_id = o.object_id
+            JOIN sys.schemas s ON o.schema_id = s.schema_id
+            LEFT JOIN sys.sql_modules m ON tr.object_id = m.object_id
+            WHERE tr.parent_class = 1
+            ORDER BY s.name, OBJECT_NAME(tr.parent_id), tr.name
+            """, ct);
+
+        return data.Rows.Cast<DataRow>().Select(r => new TriggerInfo(
+            SchemaName: r["SchemaName"].ToString()!,
+            TriggerName: r["TriggerName"].ToString()!,
+            ParentTable: r["ParentTable"].ToString()!,
+            TriggerType: r["TriggerType"].ToString()!,
+            TriggerEvents: r["TriggerEvents"].ToString()!,
+            IsEnabled: Convert.ToBoolean(r["IsEnabled"]),
+            Definition: r["Definition"].ToString()!
+        )).ToList();
+    }
+
+    private async Task<List<SynonymInfo>> GetSynonymsAsync(IDbProvider provider, CancellationToken ct)
+    {
+        var data = await provider.ExecuteQueryAsync("""
+            SELECT
+                s.name AS SchemaName,
+                syn.name AS SynonymName,
+                syn.base_object_name AS BaseObjectName
+            FROM sys.synonyms syn
+            JOIN sys.schemas s ON syn.schema_id = s.schema_id
+            ORDER BY s.name, syn.name
+            """, ct);
+
+        return data.Rows.Cast<DataRow>().Select(r => new SynonymInfo(
+            SchemaName: r["SchemaName"].ToString()!,
+            SynonymName: r["SynonymName"].ToString()!,
+            BaseObjectName: r["BaseObjectName"].ToString()!
+        )).ToList();
+    }
+
+    private async Task<List<SequenceInfo>> GetSequencesAsync(IDbProvider provider, CancellationToken ct)
+    {
+        var data = await provider.ExecuteQueryAsync("""
+            SELECT
+                s.name AS SchemaName,
+                seq.name AS SequenceName,
+                TYPE_NAME(seq.system_type_id) AS DataType,
+                CAST(seq.current_value AS BIGINT) AS CurrentValue,
+                CAST(seq.increment AS BIGINT) AS Increment,
+                CAST(seq.minimum_value AS BIGINT) AS MinValue,
+                CAST(seq.maximum_value AS BIGINT) AS MaxValue,
+                seq.is_cycling AS IsCycling
+            FROM sys.sequences seq
+            JOIN sys.schemas s ON seq.schema_id = s.schema_id
+            ORDER BY s.name, seq.name
+            """, ct);
+
+        return data.Rows.Cast<DataRow>().Select(r => new SequenceInfo(
+            SchemaName: r["SchemaName"].ToString()!,
+            SequenceName: r["SequenceName"].ToString()!,
+            DataType: r["DataType"].ToString()!,
+            CurrentValue: Convert.ToInt64(r["CurrentValue"]),
+            Increment: Convert.ToInt64(r["Increment"]),
+            MinValue: Convert.ToInt64(r["MinValue"]),
+            MaxValue: Convert.ToInt64(r["MaxValue"]),
+            IsCycling: Convert.ToBoolean(r["IsCycling"])
+        )).ToList();
+    }
+
+    private async Task<List<UserDefinedTypeInfo>> GetUserDefinedTypesAsync(
+        IDbProvider provider, CancellationToken ct)
+    {
+        var data = await provider.ExecuteQueryAsync("""
+            SELECT
+                s.name AS SchemaName,
+                t.name AS TypeName,
+                CASE
+                    WHEN t.is_table_type = 1 THEN 'table'
+                    ELSE TYPE_NAME(t.system_type_id)
+                END AS BaseType,
+                t.is_table_type AS IsTableType,
+                t.is_nullable AS IsNullable,
+                t.max_length AS MaxLength
+            FROM sys.types t
+            JOIN sys.schemas s ON t.schema_id = s.schema_id
+            WHERE t.is_user_defined = 1
+            ORDER BY s.name, t.name
+            """, ct);
+
+        return data.Rows.Cast<DataRow>().Select(r => new UserDefinedTypeInfo(
+            SchemaName: r["SchemaName"].ToString()!,
+            TypeName: r["TypeName"].ToString()!,
+            BaseType: r["BaseType"].ToString()!,
+            IsTableType: Convert.ToBoolean(r["IsTableType"]),
+            IsNullable: Convert.ToBoolean(r["IsNullable"]),
+            MaxLength: r["MaxLength"] is DBNull ? null : Convert.ToInt32(r["MaxLength"])
+        )).ToList();
+    }
+
+    private async Task<List<JobInfo>> GetJobsAsync(IDbProvider provider, CancellationToken ct)
+    {
+        try
+        {
+            var dbName = provider.DatabaseName;
+
+            var data = await provider.ExecuteQueryAsync($"""
+                SELECT
+                    j.name AS JobName,
+                    ISNULL(j.description, '') AS Description,
+                    j.enabled AS IsEnabled,
+                    js.step_id AS StepId,
+                    js.step_name AS StepName,
+                    js.subsystem AS SubsystemType,
+                    ISNULL(js.database_name, '') AS DatabaseName,
+                    ISNULL(js.command, '') AS Command,
+                    jh.LastRunDate,
+                    STUFF((
+                        SELECT ', ' + ss.name
+                        FROM msdb.dbo.sysjobschedules jsc
+                        JOIN msdb.dbo.sysschedules ss ON jsc.schedule_id = ss.schedule_id
+                        WHERE jsc.job_id = j.job_id
+                        FOR XML PATH(''), TYPE
+                    ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS ScheduleDescription
+                FROM msdb.dbo.sysjobs j
+                JOIN msdb.dbo.sysjobsteps js ON j.job_id = js.job_id
+                LEFT JOIN (
+                    SELECT job_id, MAX(
+                        CAST(CAST(run_date AS VARCHAR) AS DATETIME)
+                    ) AS LastRunDate
+                    FROM msdb.dbo.sysjobhistory
+                    WHERE step_id = 0
+                    GROUP BY job_id
+                ) jh ON j.job_id = jh.job_id
+                WHERE js.database_name = '{dbName}'
+                   OR js.command LIKE '%{dbName}%'
+                ORDER BY j.name, js.step_id
+                """, ct);
+
+            var jobs = new Dictionary<string, (JobInfo Job, List<JobStepInfo> Steps)>(
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (DataRow r in data.Rows)
+            {
+                var jobName = r["JobName"].ToString()!;
+                var step = new JobStepInfo(
+                    StepId: Convert.ToInt32(r["StepId"]),
+                    StepName: r["StepName"].ToString()!,
+                    SubsystemType: r["SubsystemType"].ToString()!,
+                    DatabaseName: r["DatabaseName"] is DBNull ? null : r["DatabaseName"].ToString(),
+                    Command: r["Command"].ToString()!);
+
+                if (!jobs.TryGetValue(jobName, out var entry))
+                {
+                    var job = new JobInfo(
+                        JobName: jobName,
+                        Description: r["Description"].ToString()!,
+                        IsEnabled: Convert.ToBoolean(r["IsEnabled"]),
+                        Steps: [],
+                        LastRunDate: r["LastRunDate"] is DBNull ? null : Convert.ToDateTime(r["LastRunDate"]),
+                        ScheduleDescription: r["ScheduleDescription"] is DBNull ? null : r["ScheduleDescription"].ToString());
+                    jobs[jobName] = (job, [step]);
+                }
+                else
+                {
+                    entry.Steps.Add(step);
+                }
+            }
+
+            return jobs.Values.Select(e => e.Job with { Steps = e.Steps }).ToList();
+        }
+        catch
+        {
+            // msdb not accessible (Azure SQL, permissions, etc.) — skip silently
+            return [];
+        }
     }
 }
