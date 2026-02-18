@@ -616,7 +616,7 @@ const graphEdges = {{edgesJson}};
     // Zoom controls
     const controls = document.createElement('div');
     controls.className = 'graph-controls';
-    controls.innerHTML = '<button id="zoom-in" title="Zoom in">+</button><button id="zoom-out" title="Zoom out">&minus;</button><button id="zoom-fit" title="Fit all">&#8634;</button>';
+    controls.innerHTML = '<button id="zoom-in" title="Zoom in">+</button><button id="zoom-out" title="Zoom out">&minus;</button><button id="zoom-fit" title="Fit all">&#8634;</button><button id="dep-reorder" title="Auto-layout (connection-aware)">&#9638;</button><button id="dep-fs" title="Fullscreen">&#x26F6;</button>';
     container.appendChild(controls);
 
     // Create edge elements
@@ -801,9 +801,62 @@ const graphEdges = {{edgesJson}};
         const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2;
         zoomBy(1 / 1.3, cx, cy);
     });
-    document.getElementById('zoom-fit').addEventListener('click', () => {
-        vb = { x: 0, y: 0, w: width, h: height };
+    function fitAllDep() {
+        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+        graphNodes.forEach((n,i) => {
+            if (nodeEls[i].getAttribute('visibility') === 'hidden') return;
+            minX=Math.min(minX,n.x-n.radius-20); minY=Math.min(minY,n.y-n.radius-20);
+            maxX=Math.max(maxX,n.x+n.radius+20); maxY=Math.max(maxY,n.y+n.radius+20);
+        });
+        if (minX===Infinity) { vb={x:0,y:0,w:width,h:height}; updateViewBox(); return; }
+        const pad=60;
+        vb={x:minX-pad, y:minY-pad, w:maxX-minX+pad*2, h:maxY-minY+pad*2};
         updateViewBox();
+    }
+    document.getElementById('zoom-fit').addEventListener('click', () => { fitAllDep(); });
+
+    // --- Auto-layout (force-directed re-spread) ---
+    let simRunning = true;
+    document.getElementById('dep-reorder').addEventListener('click', () => {
+        const cw = container.clientWidth || 1200;
+        const ch = container.clientHeight || 800;
+        const area = Math.max(cw, ch) * Math.sqrt(graphNodes.length) * 1.0;
+        const cx0 = area / 2, cy0 = area / 2;
+        graphNodes.forEach((n, i) => {
+            const angle = (2 * Math.PI * i) / graphNodes.length;
+            const radius = area * 0.38;
+            n.x = cx0 + Math.cos(angle) * radius * (0.8 + Math.random() * 0.4);
+            n.y = cy0 + Math.sin(angle) * radius * (0.8 + Math.random() * 0.4);
+            n.vx = 0; n.vy = 0;
+        });
+        simRunning = true;
+        setTimeout(() => fitAllDep(), 2000);
+    });
+
+    // --- Fullscreen ---
+    const depFsBtn = document.getElementById('dep-fs');
+    depFsBtn.addEventListener('click', () => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            container.requestFullscreen().catch(() => {});
+        }
+    });
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement === container) {
+            container.style.height = '100vh';
+            container.style.borderRadius = '0';
+            svg.setAttribute('width', screen.width);
+            svg.setAttribute('height', screen.height);
+            depFsBtn.textContent = '\u2716'; depFsBtn.title = 'Exit fullscreen';
+        } else if (!document.fullscreenElement || document.fullscreenElement.id !== 'graph-container') {
+            container.style.height = '';
+            container.style.borderRadius = '';
+            svg.setAttribute('width', container.clientWidth || width);
+            svg.setAttribute('height', height);
+            depFsBtn.textContent = '\u26F6'; depFsBtn.title = 'Fullscreen';
+        }
+        fitAllDep();
     });
 
     // --- Drag nodes + Pan ---
@@ -878,7 +931,7 @@ const graphEdges = {{edgesJson}};
                 let dx = graphNodes[i].x - graphNodes[j].x;
                 let dy = graphNodes[i].y - graphNodes[j].y;
                 let dist = Math.sqrt(dx*dx + dy*dy) || 1;
-                let force = 800 / (dist * dist);
+                let force = 2500 / (dist * dist);
                 let fx = dx / dist * force;
                 let fy = dy / dist * force;
                 graphNodes[i].vx += fx;
@@ -891,15 +944,15 @@ const graphEdges = {{edgesJson}};
             let s = graphNodes[e.source], t = graphNodes[e.target];
             let dx = t.x - s.x, dy = t.y - s.y;
             let dist = Math.sqrt(dx*dx + dy*dy) || 1;
-            let force = (dist - 120) * 0.005;
+            let force = (dist - 180) * 0.004;
             let fx = dx / dist * force;
             let fy = dy / dist * force;
             s.vx += fx; s.vy += fy;
             t.vx -= fx; t.vy -= fy;
         });
         graphNodes.forEach(n => {
-            n.vx += (width/2 - n.x) * 0.001;
-            n.vy += (height/2 - n.y) * 0.001;
+            n.vx += (width/2 - n.x) * 0.0006;
+            n.vy += (height/2 - n.y) * 0.0006;
         });
         graphNodes.forEach((n, i) => {
             if (i === dragNode) {
@@ -1234,7 +1287,7 @@ const erdDeps = {{depsJson}};
 
     const tip = document.createElement('div'); tip.className = 'graph-tooltip'; container.appendChild(tip);
     const ctrl = document.createElement('div'); ctrl.className = 'graph-controls';
-    ctrl.innerHTML = '<button id="erd-zi" title="Zoom in">+</button><button id="erd-zo" title="Zoom out">&minus;</button><button id="erd-zr" title="Fit all">&#8634;</button>';
+    ctrl.innerHTML = '<button id="erd-zi" title="Zoom in">+</button><button id="erd-zo" title="Zoom out">&minus;</button><button id="erd-zr" title="Fit all">&#8634;</button><button id="erd-reorder" title="Auto-layout (connection-aware)">&#9638;</button><button id="erd-fs" title="Fullscreen">&#x26F6;</button>';
     container.appendChild(ctrl);
 
     const boxIdx = {};
@@ -1443,7 +1496,166 @@ const erdDeps = {{depsJson}};
     svg.addEventListener('wheel', (ev) => { ev.preventDefault(); const p=s2w(ev.clientX,ev.clientY); zoomBy(ev.deltaY<0?1.15:1/1.15,p.x,p.y); }, {passive:false});
     document.getElementById('erd-zi').addEventListener('click', () => { zoomBy(1.3,vb.x+vb.w/2,vb.y+vb.h/2); });
     document.getElementById('erd-zo').addEventListener('click', () => { zoomBy(1/1.3,vb.x+vb.w/2,vb.y+vb.h/2); });
-    document.getElementById('erd-zr').addEventListener('click', () => { vb={x:0,y:0,w:W,h:totalH}; updateVB(); });
+    document.getElementById('erd-zr').addEventListener('click', () => { fitAll(); });
+
+    function fitAll() {
+        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+        erdBoxes.forEach(b => {
+            if (b._g.getAttribute('visibility') === 'hidden') return;
+            minX=Math.min(minX,b.x); minY=Math.min(minY,b.y);
+            maxX=Math.max(maxX,b.x+b.w); maxY=Math.max(maxY,b.y+b.h);
+        });
+        if (minX===Infinity) { vb={x:0,y:0,w:W,h:totalH}; updateVB(); return; }
+        const pad=40;
+        vb={x:minX-pad, y:minY-pad, w:maxX-minX+pad*2, h:maxY-minY+pad*2};
+        updateVB();
+    }
+
+    // --- Auto-layout (connection-aware force-directed) ---
+    document.getElementById('erd-reorder').addEventListener('click', () => {
+        const cw = container.clientWidth || 1400;
+        const ch = container.clientHeight || 800;
+        const visible = [];
+        erdBoxes.forEach((b,i) => { if (b._g.getAttribute('visibility') !== 'hidden') visible.push(i); });
+        if (visible.length === 0) return;
+
+        // Build adjacency from lines
+        const adj = new Map();
+        visible.forEach(i => adj.set(i, new Set()));
+        allLines.forEach(ln => {
+            if (adj.has(ln.fromIdx) && adj.has(ln.toIdx)) {
+                adj.get(ln.fromIdx).add(ln.toIdx);
+                adj.get(ln.toIdx).add(ln.fromIdx);
+            }
+        });
+
+        // Init positions — spread across available area
+        const area = Math.max(cw, ch) * Math.sqrt(visible.length) * 0.7;
+        const cx0 = area / 2, cy0 = area / 2;
+        visible.forEach((idx, i) => {
+            const angle = (2 * Math.PI * i) / visible.length;
+            const radius = area * 0.35;
+            erdBoxes[idx].x = cx0 + Math.cos(angle) * radius;
+            erdBoxes[idx].y = cy0 + Math.sin(angle) * radius;
+        });
+
+        // Force-directed simulation
+        const ITERATIONS = 200;
+        const REPULSION = 80000;
+        const ATTRACTION = 0.003;
+        const DAMPING = 0.9;
+        const MIN_DIST = 50;
+
+        const vel = {};
+        visible.forEach(i => { vel[i] = {x:0, y:0}; });
+
+        for (let iter = 0; iter < ITERATIONS; iter++) {
+            const temp = 1 - iter / ITERATIONS; // cooling
+            const forces = {};
+            visible.forEach(i => { forces[i] = {x:0, y:0}; });
+
+            // Repulsion between all pairs
+            for (let ai = 0; ai < visible.length; ai++) {
+                for (let bi = ai+1; bi < visible.length; bi++) {
+                    const a = visible[ai], b = visible[bi];
+                    const ba = erdBoxes[a], bb = erdBoxes[b];
+                    let dx = (ba.x + ba.w/2) - (bb.x + bb.w/2);
+                    let dy = (ba.y + ba.h/2) - (bb.y + bb.h/2);
+                    const dist = Math.max(MIN_DIST, Math.sqrt(dx*dx + dy*dy));
+                    const f = REPULSION / (dist * dist);
+                    const fx = (dx/dist) * f, fy = (dy/dist) * f;
+                    forces[a].x += fx; forces[a].y += fy;
+                    forces[b].x -= fx; forces[b].y -= fy;
+                }
+            }
+
+            // Attraction along edges
+            allLines.forEach(ln => {
+                if (!adj.has(ln.fromIdx) || !adj.has(ln.toIdx)) return;
+                const ba = erdBoxes[ln.fromIdx], bb = erdBoxes[ln.toIdx];
+                const dx = (bb.x + bb.w/2) - (ba.x + ba.w/2);
+                const dy = (bb.y + bb.h/2) - (ba.y + ba.h/2);
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < 1) return;
+                const idealDist = 300;
+                const f = ATTRACTION * (dist - idealDist);
+                const fx = (dx/dist) * f, fy = (dy/dist) * f;
+                forces[ln.fromIdx].x += fx; forces[ln.fromIdx].y += fy;
+                forces[ln.toIdx].x -= fx; forces[ln.toIdx].y -= fy;
+            });
+
+            // Apply forces with damping and cooling
+            visible.forEach(i => {
+                vel[i].x = (vel[i].x + forces[i].x) * DAMPING * temp;
+                vel[i].y = (vel[i].y + forces[i].y) * DAMPING * temp;
+                const maxV = 50 * temp;
+                const speed = Math.sqrt(vel[i].x*vel[i].x + vel[i].y*vel[i].y);
+                if (speed > maxV) { vel[i].x *= maxV/speed; vel[i].y *= maxV/speed; }
+                erdBoxes[i].x += vel[i].x;
+                erdBoxes[i].y += vel[i].y;
+            });
+
+            // Prevent box overlap — push apart
+            const OVERLAP_GAP = GAP;
+            for (let ai = 0; ai < visible.length; ai++) {
+                for (let bi = ai+1; bi < visible.length; bi++) {
+                    const a = visible[ai], b = visible[bi];
+                    const ba = erdBoxes[a], bb = erdBoxes[b];
+                    const ox = (ba.w/2 + bb.w/2 + OVERLAP_GAP) - Math.abs((ba.x+ba.w/2)-(bb.x+bb.w/2));
+                    const oy = (ba.h/2 + bb.h/2 + OVERLAP_GAP) - Math.abs((ba.y+ba.h/2)-(bb.y+bb.h/2));
+                    if (ox > 0 && oy > 0) {
+                        if (ox < oy) {
+                            const push = ox / 2 + 1;
+                            if (ba.x < bb.x) { ba.x -= push; bb.x += push; }
+                            else { ba.x += push; bb.x -= push; }
+                        } else {
+                            const push = oy / 2 + 1;
+                            if (ba.y < bb.y) { ba.y -= push; bb.y += push; }
+                            else { ba.y += push; bb.y -= push; }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shift so top-left is at GAP,GAP
+        let minX=Infinity, minY=Infinity;
+        visible.forEach(i => { minX=Math.min(minX,erdBoxes[i].x); minY=Math.min(minY,erdBoxes[i].y); });
+        visible.forEach(i => { erdBoxes[i].x -= minX - GAP; erdBoxes[i].y -= minY - GAP; });
+
+        // Update SVG
+        visible.forEach(i => {
+            boxGroups[i].setAttribute('transform', `translate(${erdBoxes[i].x},${erdBoxes[i].y})`);
+        });
+        updateLines();
+        fitAll();
+    });
+
+    // --- Fullscreen ---
+    const fsBtn = document.getElementById('erd-fs');
+    fsBtn.addEventListener('click', () => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            container.requestFullscreen().catch(() => {});
+        }
+    });
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement === container) {
+            container.style.height = '100vh';
+            container.style.borderRadius = '0';
+            svg.setAttribute('width', screen.width);
+            svg.setAttribute('height', screen.height);
+            fsBtn.textContent = '\u2716'; fsBtn.title = 'Exit fullscreen';
+        } else {
+            container.style.height = '';
+            container.style.borderRadius = '';
+            svg.setAttribute('width', container.clientWidth || W);
+            svg.setAttribute('height', totalH);
+            fsBtn.textContent = '\u26F6'; fsBtn.title = 'Fullscreen';
+        }
+        fitAll();
+    });
 
     // --- Filtering ---
     const hiddenTypes = new Set();
@@ -1495,6 +1707,8 @@ const erdDeps = {{depsJson}};
         summary { cursor: pointer; color: #4fc3f7; padding: 0.3rem 0; }
         footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #0f3460; margin-top: 2rem; }
         #graph-container, #erd-container { position: relative; background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+        #graph-container:fullscreen, #erd-container:fullscreen { background: #0d0d1a; padding: 0; }
+        #graph-container:fullscreen #dep-graph, #erd-container:fullscreen #erd-svg { width: 100vw; height: 100vh; }
         #dep-graph, #erd-svg { display: block; }
         .graph-tooltip { display: none; position: absolute; background: #16213e; border: 1px solid #0f3460; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85em; pointer-events: none; z-index: 10; color: #e0e0e0; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         .graph-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 10; }
