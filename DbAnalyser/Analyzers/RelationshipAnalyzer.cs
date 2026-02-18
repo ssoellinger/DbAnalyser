@@ -52,8 +52,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
     {
         var implicit_ = new List<ImplicitRelationship>();
 
-        // Build lookup of table names to their PK columns
-        var tablePkLookup = new Dictionary<string, (string Schema, string Table, string PkColumn)>(
+        // Build lookup of table names to their PK column info
+        var tablePkLookup = new Dictionary<string, (string Schema, string Table, string PkColumn, ColumnInfo PkColumnInfo)>(
             StringComparer.OrdinalIgnoreCase);
 
         foreach (var table in tables)
@@ -61,7 +61,7 @@ public partial class RelationshipAnalyzer : IAnalyzer
             var pk = table.Columns.FirstOrDefault(c => c.IsPrimaryKey);
             if (pk is not null)
             {
-                tablePkLookup[table.TableName] = (table.SchemaName, table.TableName, pk.Name);
+                tablePkLookup[table.TableName] = (table.SchemaName, table.TableName, pk.Name, pk);
             }
         }
 
@@ -79,6 +79,30 @@ public partial class RelationshipAnalyzer : IAnalyzer
                 var match = TryMatchColumnToTable(column.Name, tablePkLookup);
                 if (match is null) continue;
 
+                // Type compatibility check
+                var typeResult = CheckTypeCompatibility(column, match.Value.PkColumnInfo);
+                if (typeResult == TypeCompatibility.Mismatch) continue;
+
+                var confidence = match.Value.Confidence;
+
+                // Reduce confidence for compatible-but-not-exact type matches
+                if (typeResult == TypeCompatibility.Compatible)
+                    confidence -= 0.1;
+
+                // Confidence modifiers based on column properties
+                var hasIndex = table.Indexes.Any(idx =>
+                    idx.Columns.Count > 0 &&
+                    string.Equals(idx.Columns[0], column.Name, StringComparison.OrdinalIgnoreCase));
+                if (hasIndex) confidence += 0.05;
+
+                if (column.IsNullable)
+                    confidence -= 0.05;
+                else
+                    confidence += 0.05;
+
+                // Cap at 0.95
+                confidence = Math.Min(confidence, 0.95);
+
                 var key = $"{table.SchemaName}.{table.TableName}.{column.Name}->{match.Value.Schema}.{match.Value.Table}.{match.Value.PkColumn}";
                 if (existingFks.Contains(key)) continue;
 
@@ -94,7 +118,7 @@ public partial class RelationshipAnalyzer : IAnalyzer
                     ToSchema: match.Value.Schema,
                     ToTable: match.Value.Table,
                     ToColumn: match.Value.PkColumn,
-                    Confidence: match.Value.Confidence,
+                    Confidence: confidence,
                     Reason: match.Value.Reason));
             }
         }
@@ -102,42 +126,144 @@ public partial class RelationshipAnalyzer : IAnalyzer
         return implicit_;
     }
 
-    private (string Schema, string Table, string PkColumn, double Confidence, string Reason)?
+    private enum TypeCompatibility { Exact, Compatible, Mismatch }
+
+    private static TypeCompatibility CheckTypeCompatibility(ColumnInfo candidate, ColumnInfo pkColumn)
+    {
+        var candidateType = candidate.DataType.ToUpperInvariant();
+        var pkType = pkColumn.DataType.ToUpperInvariant();
+
+        if (string.Equals(candidateType, pkType, StringComparison.OrdinalIgnoreCase))
+            return TypeCompatibility.Exact;
+
+        // Compatible integer promotions
+        var intTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "TINYINT", "SMALLINT", "INT", "BIGINT" };
+        if (intTypes.Contains(candidateType) && intTypes.Contains(pkType))
+            return TypeCompatibility.Compatible;
+
+        // Compatible string types
+        var stringTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "CHAR", "VARCHAR", "NCHAR", "NVARCHAR" };
+        if (stringTypes.Contains(candidateType) && stringTypes.Contains(pkType))
+            return TypeCompatibility.Compatible;
+
+        // Compatible decimal types
+        var decimalTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "DECIMAL", "NUMERIC", "FLOAT", "REAL", "MONEY", "SMALLMONEY" };
+        if (decimalTypes.Contains(candidateType) && decimalTypes.Contains(pkType))
+            return TypeCompatibility.Compatible;
+
+        // UNIQUEIDENTIFIER is only compatible with itself (already covered by exact match)
+        return TypeCompatibility.Mismatch;
+    }
+
+    private static readonly string[] PrefixesToStrip =
+        ["Ref", "Fk", "Source", "Target", "Parent", "Child"];
+
+    private (string Schema, string Table, string PkColumn, ColumnInfo PkColumnInfo, double Confidence, string Reason)?
         TryMatchColumnToTable(
             string columnName,
-            Dictionary<string, (string Schema, string Table, string PkColumn)> tablePkLookup)
+            Dictionary<string, (string Schema, string Table, string PkColumn, ColumnInfo PkColumnInfo)> tablePkLookup)
     {
-        // Pattern 1: Column named "TableNameId" or "TableName_Id"
+        // Pattern 1 (90%): Column named "TableNameId" or "TableName_Id"
         foreach (var (tableName, info) in tablePkLookup)
         {
             if (string.Equals(columnName, $"{tableName}Id", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(columnName, $"{tableName}_Id", StringComparison.OrdinalIgnoreCase))
             {
-                return (info.Schema, info.Table, info.PkColumn, 0.9,
+                return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.9,
                     $"Column name '{columnName}' matches pattern '{{TableName}}Id'");
             }
 
-            // Pattern 2: Singular form match (e.g., column "CategoryId" -> table "Categories")
+            // Pattern 2 (80%): Singular form match (e.g., column "CategoryId" -> table "Categories")
             if (tableName.EndsWith("s", StringComparison.OrdinalIgnoreCase))
             {
                 var singular = tableName[..^1];
                 if (string.Equals(columnName, $"{singular}Id", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(columnName, $"{singular}_Id", StringComparison.OrdinalIgnoreCase))
                 {
-                    return (info.Schema, info.Table, info.PkColumn, 0.8,
+                    return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.8,
                         $"Column name '{columnName}' matches singular form of table '{tableName}'");
                 }
             }
         }
 
-        // Pattern 3: Column named "FK_Something" or ending in "_fk"
+        // Pattern 3 (70%): Column named "FK_Something"
         if (columnName.StartsWith("FK_", StringComparison.OrdinalIgnoreCase))
         {
             var remainder = columnName[3..];
             if (tablePkLookup.TryGetValue(remainder, out var info))
             {
-                return (info.Schema, info.Table, info.PkColumn, 0.7,
+                return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.7,
                     $"Column name '{columnName}' has FK_ prefix matching table '{remainder}'");
+            }
+        }
+
+        // Pattern 4 (85%): Column named "TableNameID" (all-caps ID variant)
+        foreach (var (tableName, info) in tablePkLookup)
+        {
+            if (string.Equals(columnName, $"{tableName}ID", StringComparison.Ordinal))
+            {
+                return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.85,
+                    $"Column name '{columnName}' matches pattern '{{TableName}}ID'");
+            }
+        }
+
+        // Pattern 5 (75%): Column ends with Id/_Id and prefix matches a table after stripping common prefixes
+        foreach (var prefix in PrefixesToStrip)
+        {
+            if (columnName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                columnName.Length > prefix.Length)
+            {
+                var stripped = columnName[prefix.Length..];
+                // Try "StrippedId" -> table "Stripped"
+                if (stripped.EndsWith("Id", StringComparison.OrdinalIgnoreCase) ||
+                    stripped.EndsWith("_Id", StringComparison.OrdinalIgnoreCase))
+                {
+                    var candidate = stripped.EndsWith("_Id", StringComparison.OrdinalIgnoreCase)
+                        ? stripped[..^3]
+                        : stripped[..^2];
+
+                    if (tablePkLookup.TryGetValue(candidate, out var info))
+                    {
+                        return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.75,
+                            $"Column name '{columnName}' matches table '{candidate}' after stripping prefix '{prefix}'");
+                    }
+
+                    // Also try plural form
+                    if (tablePkLookup.TryGetValue($"{candidate}s", out info))
+                    {
+                        return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.75,
+                            $"Column name '{columnName}' matches table '{info.Table}' after stripping prefix '{prefix}'");
+                    }
+                }
+            }
+        }
+
+        // Pattern 6 (70%): Column named "TableNameKey" or "TableName_Key"
+        foreach (var (tableName, info) in tablePkLookup)
+        {
+            if (string.Equals(columnName, $"{tableName}Key", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, $"{tableName}_Key", StringComparison.OrdinalIgnoreCase))
+            {
+                return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.7,
+                    $"Column name '{columnName}' matches pattern '{{TableName}}Key'");
+            }
+        }
+
+        // Pattern 7 (65%): Column named "TableNameNo", "TableNameNumber", or "TableNameCode"
+        foreach (var (tableName, info) in tablePkLookup)
+        {
+            if (string.Equals(columnName, $"{tableName}No", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, $"{tableName}Number", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, $"{tableName}Code", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, $"{tableName}_No", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, $"{tableName}_Number", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, $"{tableName}_Code", StringComparison.OrdinalIgnoreCase))
+            {
+                return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.65,
+                    $"Column name '{columnName}' matches pattern '{{TableName}}No/Number/Code'");
             }
         }
 

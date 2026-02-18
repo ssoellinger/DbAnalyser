@@ -141,6 +141,24 @@ public class HtmlReportGenerator : IReportGenerator
         // Cycle warning banner (populated by JS at runtime)
         sb.AppendLine("<div id=\"cycle-warning\" style=\"display:none\"></div>");
 
+        // Missing FK warning banner
+        var implicitFks = result.Relationships!.ImplicitRelationships;
+        if (implicitFks.Count > 0)
+        {
+            var highConfidence = implicitFks.Where(r => r.Confidence >= 0.8).OrderByDescending(r => r.Confidence).ToList();
+            var lowConfidence = implicitFks.Where(r => r.Confidence < 0.8).OrderByDescending(r => r.Confidence).ToList();
+
+            sb.AppendLine("<div id=\"missing-fk-warning\" class=\"missing-fk-warning\">");
+            sb.AppendLine($"<strong>\u26A0 {implicitFks.Count} Potential Missing Foreign Key{(implicitFks.Count == 1 ? "" : "s")} Detected</strong>");
+            sb.AppendLine("<details><summary>Show details</summary><ul>");
+            foreach (var rel in highConfidence.Concat(lowConfidence))
+            {
+                var confClass = rel.Confidence >= 0.8 ? "confidence-high" : rel.Confidence >= 0.7 ? "confidence-medium" : "confidence-low";
+                sb.AppendLine($"<li><span class=\"{confClass}\">{E(rel.FromSchema)}.{E(rel.FromTable)}.{E(rel.FromColumn)}</span> &rarr; {E(rel.ToSchema)}.{E(rel.ToTable)}.{E(rel.ToColumn)} <span class=\"meta\">({rel.Confidence:P0})</span></li>");
+            }
+            sb.AppendLine("</ul></details></div>");
+        }
+
         // Interactive graph
         sb.AppendLine("<h3>Relationship Graph</h3>");
         sb.AppendLine("<p class=\"meta\">Scroll to zoom. Drag empty space to pan. Drag nodes to rearrange. Hover for details. Node size = importance.</p>");
@@ -173,6 +191,7 @@ public class HtmlReportGenerator : IReportGenerator
         var synonymEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Synonym");
         var jobEdgeCount = result.Relationships!.ViewDependencies.Count(d => !d.IsCrossDatabase && d.FromType == "Job");
         var extEdgeCount = result.Relationships!.ViewDependencies.Count(d => d.IsCrossDatabase);
+        var implicitFkEdgeCount = result.Relationships!.ImplicitRelationships.Count(r => r.Confidence >= 0.7);
 
         sb.AppendLine("<div class=\"graph-filters\">");
         sb.AppendLine("<span class=\"meta\">Relations:</span>");
@@ -191,6 +210,8 @@ public class HtmlReportGenerator : IReportGenerator
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#26a69a\"><input type=\"checkbox\" value=\"job\" checked onchange=\"toggleEdgeFilter(this)\"><span>Job &rarr; Table/Proc ({jobEdgeCount})</span></label>");
         if (extEdgeCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleEdgeFilter(this)\"><span>Cross-DB ({extEdgeCount})</span></label>");
+        if (implicitFkEdgeCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"implicit\" onchange=\"toggleEdgeFilter(this)\"><span>Suggested FKs ({implicitFkEdgeCount})</span></label>");
         sb.AppendLine("<label class=\"filter-toggle\" style=\"--clr:#e94560\"><input type=\"checkbox\" value=\"cycles\" onchange=\"toggleCycleFilter(this)\"><span>&#10227; Cycles</span></label>");
         sb.AppendLine("</div>");
 
@@ -449,12 +470,17 @@ public class HtmlReportGenerator : IReportGenerator
         if (map.ImplicitRelationships.Count > 0)
         {
             sb.AppendLine("<h3>Implicit (Detected) Relationships</h3>");
-            sb.AppendLine("<table><thead><tr><th>From</th><th>To</th><th>Confidence</th><th>Reason</th></tr></thead><tbody>");
-            foreach (var rel in map.ImplicitRelationships)
+            sb.AppendLine("<table><thead><tr><th>From</th><th>To</th><th>Confidence</th><th>Reason</th><th>SQL</th></tr></thead><tbody>");
+            foreach (var rel in map.ImplicitRelationships.OrderByDescending(r => r.Confidence))
             {
+                var confClass = rel.Confidence >= 0.8 ? "confidence-high" : rel.Confidence >= 0.7 ? "confidence-medium" : "confidence-low";
+                var constraintName = $"FK_{rel.FromTable}_{rel.ToTable}_{rel.FromColumn}";
+                var sql = $"ALTER TABLE [{rel.FromSchema}].[{rel.FromTable}] ADD CONSTRAINT [{constraintName}] FOREIGN KEY ([{rel.FromColumn}]) REFERENCES [{rel.ToSchema}].[{rel.ToTable}] ([{rel.ToColumn}]);";
+                var sqlId = $"sql-{rel.FromSchema}-{rel.FromTable}-{rel.FromColumn}".Replace(".", "-");
                 sb.AppendLine($"<tr><td>{E(rel.FromSchema)}.{E(rel.FromTable)}.{E(rel.FromColumn)}</td>");
                 sb.AppendLine($"<td>{E(rel.ToSchema)}.{E(rel.ToTable)}.{E(rel.ToColumn)}</td>");
-                sb.AppendLine($"<td>{rel.Confidence:P0}</td><td>{E(rel.Reason)}</td></tr>");
+                sb.AppendLine($"<td><span class=\"{confClass}\">{rel.Confidence:P0}</span></td><td>{E(rel.Reason)}</td>");
+                sb.AppendLine($"<td><code id=\"{E(sqlId)}\">{E(sql)}</code> <button class=\"copy-sql\" onclick=\"navigator.clipboard.writeText(document.getElementById('{E(sqlId)}').textContent).then(()=>{{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)}})\">Copy</button></td></tr>");
             }
             sb.AppendLine("</tbody></table>");
         }
@@ -557,6 +583,18 @@ public class HtmlReportGenerator : IReportGenerator
             edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = edgeType, fromType = vd.FromType, toType = vd.ToType, label = $"{from} → {to}" });
         }
 
+        // Add implicit FK edges (≥70% confidence)
+        var implicitRels = result.Relationships!.ImplicitRelationships.Where(r => r.Confidence >= 0.7);
+        foreach (var rel in implicitRels)
+        {
+            var from = $"{rel.FromSchema}.{rel.FromTable}";
+            var to = $"{rel.ToSchema}.{rel.ToTable}";
+            var key = $"{from}->{to}";
+            if (!edgeSet.Add(key)) continue;
+            if (!nodeIndex.ContainsKey(from) || !nodeIndex.ContainsKey(to)) continue;
+            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = "implicit", fromType = "Table", toType = "Table", label = $"Suggested FK: {from}.{rel.FromColumn} → {to}.{rel.ToColumn} ({rel.Confidence:P0})" });
+        }
+
         var nodesJson = JsonSerializer.Serialize(nodes);
         var edgesJson = JsonSerializer.Serialize(edges);
 
@@ -635,14 +673,14 @@ const graphEdges = {{edgesJson}};
     container.appendChild(controls);
 
     // Create edge elements
-    const edgeColors = { fk: '#4fc3f7', view: '#4ecca3', procedure: '#f0a500', function: '#bb86fc', trigger: '#ff7043', synonym: '#78909c', job: '#26a69a', external: '#ff6b6b' };
+    const edgeColors = { fk: '#4fc3f7', view: '#4ecca3', procedure: '#f0a500', function: '#bb86fc', trigger: '#ff7043', synonym: '#78909c', job: '#26a69a', external: '#ff6b6b', implicit: '#f0a500' };
     const edgeEls = graphEdges.map((e, i) => {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         const color = edgeColors[e.type] || '#4fc3f7';
         line.setAttribute('stroke', color);
-        line.setAttribute('stroke-opacity', '0.4');
+        line.setAttribute('stroke-opacity', e.type === 'implicit' ? '0.3' : '0.4');
         line.setAttribute('stroke-width', '1.5');
-        if (e.type !== 'fk') line.setAttribute('stroke-dasharray', '6,3');
+        if (e.type !== 'fk') line.setAttribute('stroke-dasharray', e.type === 'implicit' ? '4,4' : '6,3');
         line.setAttribute('marker-end', 'url(#arrow)');
         line.style.cursor = 'pointer';
         edgeGroup.appendChild(line);
@@ -1248,6 +1286,9 @@ const graphEdges = {{edgesJson}};
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff7043\"><input type=\"checkbox\" value=\"trigger\" checked onchange=\"toggleErdFilter(this)\"><span>Triggers ({schema.Triggers.Count})</span></label>");
         if (schema.Synonyms.Count > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#78909c\"><input type=\"checkbox\" value=\"synonym\" checked onchange=\"toggleErdFilter(this)\"><span>Synonyms ({schema.Synonyms.Count})</span></label>");
+        var erdImplicitCount = result.Relationships?.ImplicitRelationships.Count(r => r.Confidence >= 0.7) ?? 0;
+        if (erdImplicitCount > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"implicit\" onchange=\"toggleErdImplicitFilter(this)\"><span>Suggested FKs ({erdImplicitCount})</span></label>");
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div id=\"erd-container\"><svg id=\"erd-svg\"></svg></div>");
@@ -1290,6 +1331,14 @@ const graphEdges = {{edgesJson}};
             return c.DataType;
         }
 
+        // Build lookup of implicit FK columns: "Schema.Table.Column" -> true
+        var implicitFkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (result.Relationships?.ImplicitRelationships is not null)
+        {
+            foreach (var rel in result.Relationships.ImplicitRelationships)
+                implicitFkCols.Add($"{rel.FromSchema}.{rel.FromTable}.{rel.FromColumn}");
+        }
+
         // Build ERD boxes for all object types
         var boxes = new List<object>();
 
@@ -1300,7 +1349,8 @@ const graphEdges = {{edgesJson}};
             {
                 var fk = t.ForeignKeys.FirstOrDefault(f =>
                     string.Equals(f.FromColumn, c.Name, StringComparison.OrdinalIgnoreCase));
-                return new { name = c.Name, type = ColType(c), pk = c.IsPrimaryKey, fk = fk is not null, nullable = c.IsNullable };
+                var sfk = !c.IsPrimaryKey && fk is null && implicitFkCols.Contains($"{t.SchemaName}.{t.TableName}.{c.Name}");
+                return new { name = c.Name, type = ColType(c), pk = c.IsPrimaryKey, fk = fk is not null, sfk, nullable = c.IsNullable };
             }).ToList<object>();
             boxes.Add(new { fullName = t.FullName, objType = "table", label = t.FullName, columns = cols, subtitle = "" });
         }
@@ -1381,14 +1431,39 @@ const graphEdges = {{edgesJson}};
             }
         }
 
+        // Build implicit FK edges (≥70% confidence)
+        var implicitEdges = new List<object>();
+        if (result.Relationships?.ImplicitRelationships is not null)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rel in result.Relationships.ImplicitRelationships.Where(r => r.Confidence >= 0.7))
+            {
+                var from = $"{rel.FromSchema}.{rel.FromTable}";
+                var to = $"{rel.ToSchema}.{rel.ToTable}";
+                var key = $"{from}->{to}";
+                if (!seen.Add(key)) continue;
+                implicitEdges.Add(new
+                {
+                    fromObj = from,
+                    fromCol = rel.FromColumn,
+                    toObj = to,
+                    toCol = rel.ToColumn,
+                    confidence = rel.Confidence,
+                    edgeType = "implicit"
+                });
+            }
+        }
+
         var boxesJson = JsonSerializer.Serialize(boxes);
         var fksJson = JsonSerializer.Serialize(fks);
         var depsJson = JsonSerializer.Serialize(deps);
+        var implicitJson = JsonSerializer.Serialize(implicitEdges);
 
         return $$"""
 const erdBoxes = {{boxesJson}};
 const erdFks = {{fksJson}};
 const erdDeps = {{depsJson}};
+const erdImplicit = {{implicitJson}};
 
 (function() {
     const svg = document.getElementById('erd-svg');
@@ -1397,7 +1472,7 @@ const erdDeps = {{depsJson}};
     const COL_W = 230, HDR_H = 32, ROW_H = 22, PAD = 8, GAP = 40, SUB_H = 18;
     const typeColors = { table:'#0f3460', view:'#1a5c45', procedure:'#5c3d00', function:'#3d1f6d', trigger:'#5c2310', synonym:'#37474f' };
     const titleColors = { table:'#e94560', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c' };
-    const edgeColors = { fk:'#4fc3f7', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c' };
+    const edgeColors = { fk:'#4fc3f7', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c', implicit:'#f0a500' };
 
     // Compute box sizes
     erdBoxes.forEach(b => {
@@ -1528,18 +1603,20 @@ const erdDeps = {{depsJson}};
                 if (c.pk && c.fk) icon = 'PF';
                 else if (c.pk) icon = 'PK';
                 else if (c.fk) icon = 'FK';
+                else if (c.sfk) icon = 'SF';
                 if (icon) {
                     const ic = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                     ic.textContent = icon;
                     ic.setAttribute('x', 8); ic.setAttribute('y', ry);
-                    ic.setAttribute('fill', c.pk ? '#4ecca3' : '#f0a500');
+                    ic.setAttribute('fill', c.pk ? '#4ecca3' : c.sfk ? '#e8a030' : '#f0a500');
                     ic.setAttribute('font-size', '9'); ic.setAttribute('font-weight', 'bold');
+                    if (c.sfk) ic.setAttribute('opacity', '0.7');
                     g.appendChild(ic);
                 }
                 const nm = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 nm.textContent = c.name;
                 nm.setAttribute('x', 32); nm.setAttribute('y', ry);
-                nm.setAttribute('fill', c.pk ? '#4ecca3' : c.fk ? '#f0a500' : '#e0e0e0');
+                nm.setAttribute('fill', c.pk ? '#4ecca3' : c.fk ? '#f0a500' : c.sfk ? '#e8a030' : '#e0e0e0');
                 nm.setAttribute('font-size', '11');
                 if (c.pk) nm.setAttribute('font-weight', 'bold');
                 g.appendChild(nm);
@@ -1629,6 +1706,29 @@ const erdDeps = {{depsJson}};
         allLines.push({ el: path, kind: 'dep', edgeType: dep.edgeType, fromIdx: fi, toIdx: ti });
     });
 
+    // Draw implicit FK lines (hidden by default, toggled via filter)
+    erdImplicit.forEach(imp => {
+        const fi = boxIdx[imp.fromObj], ti = boxIdx[imp.toObj];
+        if (fi === undefined || ti === undefined) return;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#f0a500');
+        path.setAttribute('stroke-width', '1.2'); path.setAttribute('stroke-opacity', '0.3');
+        path.setAttribute('stroke-dasharray', '4,4');
+        path.setAttribute('marker-end', 'url(#erd-arrow)');
+        path.style.cursor = 'pointer';
+        path.setAttribute('visibility', 'hidden');
+        lineGroup.appendChild(path);
+        path.addEventListener('mouseenter', (ev) => {
+            tip.innerHTML = `<strong>Suggested FK</strong><br>${imp.fromObj}.${imp.fromCol} &rarr; ${imp.toObj}.${imp.toCol}<br>Confidence: ${Math.round(imp.confidence * 100)}%`;
+            tip.style.display = 'block'; const cr = container.getBoundingClientRect();
+            tip.style.left = (ev.clientX-cr.left+15)+'px'; tip.style.top = (ev.clientY-cr.top-10)+'px';
+            path.setAttribute('stroke-opacity','0.8'); path.setAttribute('stroke-width','2.5');
+        });
+        path.addEventListener('mousemove', (ev) => { const cr = container.getBoundingClientRect(); tip.style.left=(ev.clientX-cr.left+15)+'px'; tip.style.top=(ev.clientY-cr.top-10)+'px'; });
+        path.addEventListener('mouseleave', () => { tip.style.display='none'; path.setAttribute('stroke-opacity','0.3'); path.setAttribute('stroke-width','1.2'); });
+        allLines.push({ el: path, kind: 'dep', edgeType: 'implicit', fromIdx: fi, toIdx: ti, fromCol: imp.fromCol, toCol: imp.toCol });
+    });
+
     function updateLines() {
         allLines.forEach(ln => {
             const fromB = erdBoxes[ln.fromIdx], toB = erdBoxes[ln.toIdx];
@@ -1700,32 +1800,34 @@ const erdDeps = {{depsJson}};
         erdBoxes.forEach((b,i) => { if (b._g.getAttribute('visibility') !== 'hidden') visible.push(i); });
         if (visible.length === 0) return;
 
-        // Build adjacency from lines
+        // Build adjacency from lines (exclude implicit/suggested FKs)
         const adj = new Map();
         visible.forEach(i => adj.set(i, new Set()));
         allLines.forEach(ln => {
+            if (ln.edgeType === 'implicit') return;
             if (adj.has(ln.fromIdx) && adj.has(ln.toIdx)) {
                 adj.get(ln.fromIdx).add(ln.toIdx);
                 adj.get(ln.toIdx).add(ln.fromIdx);
             }
         });
 
-        // Init positions — spread across available area
-        const area = Math.max(cw, ch) * Math.sqrt(visible.length) * 0.7;
-        const cx0 = area / 2, cy0 = area / 2;
+        // Init positions — tight grid so center is filled
+        const cols = Math.max(1, Math.ceil(Math.sqrt(visible.length)));
+        const cellW = COL_W + GAP, cellH = 200 + GAP;
+        const cx0 = (cols * cellW) / 2, cy0 = (Math.ceil(visible.length / cols) * cellH) / 2;
         visible.forEach((idx, i) => {
-            const angle = (2 * Math.PI * i) / visible.length;
-            const radius = area * 0.35;
-            erdBoxes[idx].x = cx0 + Math.cos(angle) * radius;
-            erdBoxes[idx].y = cy0 + Math.sin(angle) * radius;
+            const col = i % cols, row = Math.floor(i / cols);
+            erdBoxes[idx].x = col * cellW + GAP;
+            erdBoxes[idx].y = row * cellH + GAP;
         });
 
-        // Force-directed simulation
-        const ITERATIONS = 200;
-        const REPULSION = 80000;
-        const ATTRACTION = 0.003;
-        const DAMPING = 0.9;
-        const MIN_DIST = 50;
+        // Force-directed simulation — compact layout with breathing room
+        const ITERATIONS = 300;
+        const REPULSION = 18000;
+        const ATTRACTION = 0.015;
+        const GRAVITY = 0.006;
+        const DAMPING = 0.8;
+        const MIN_DIST = 40;
 
         const vel = {};
         visible.forEach(i => { vel[i] = {x:0, y:0}; });
@@ -1735,7 +1837,16 @@ const erdDeps = {{depsJson}};
             const forces = {};
             visible.forEach(i => { forces[i] = {x:0, y:0}; });
 
-            // Repulsion between all pairs
+            // Gravity — pull everything toward center
+            visible.forEach(i => {
+                const ba = erdBoxes[i];
+                const dx = cx0 - (ba.x + ba.w/2);
+                const dy = cy0 - (ba.y + ba.h/2);
+                forces[i].x += dx * GRAVITY;
+                forces[i].y += dy * GRAVITY;
+            });
+
+            // Repulsion between all pairs — only when close
             for (let ai = 0; ai < visible.length; ai++) {
                 for (let bi = ai+1; bi < visible.length; bi++) {
                     const a = visible[ai], b = visible[bi];
@@ -1743,6 +1854,7 @@ const erdDeps = {{depsJson}};
                     let dx = (ba.x + ba.w/2) - (bb.x + bb.w/2);
                     let dy = (ba.y + ba.h/2) - (bb.y + bb.h/2);
                     const dist = Math.max(MIN_DIST, Math.sqrt(dx*dx + dy*dy));
+                    if (dist > 600) continue; // skip far-away pairs
                     const f = REPULSION / (dist * dist);
                     const fx = (dx/dist) * f, fy = (dy/dist) * f;
                     forces[a].x += fx; forces[a].y += fy;
@@ -1750,15 +1862,16 @@ const erdDeps = {{depsJson}};
                 }
             }
 
-            // Attraction along edges
+            // Attraction along edges (exclude implicit/suggested FKs)
             allLines.forEach(ln => {
+                if (ln.edgeType === 'implicit') return;
                 if (!adj.has(ln.fromIdx) || !adj.has(ln.toIdx)) return;
                 const ba = erdBoxes[ln.fromIdx], bb = erdBoxes[ln.toIdx];
                 const dx = (bb.x + bb.w/2) - (ba.x + ba.w/2);
                 const dy = (bb.y + bb.h/2) - (ba.y + ba.h/2);
                 const dist = Math.sqrt(dx*dx + dy*dy);
                 if (dist < 1) return;
-                const idealDist = 300;
+                const idealDist = 160;
                 const f = ATTRACTION * (dist - idealDist);
                 const fx = (dx/dist) * f, fy = (dy/dist) * f;
                 forces[ln.fromIdx].x += fx; forces[ln.fromIdx].y += fy;
@@ -1769,7 +1882,7 @@ const erdDeps = {{depsJson}};
             visible.forEach(i => {
                 vel[i].x = (vel[i].x + forces[i].x) * DAMPING * temp;
                 vel[i].y = (vel[i].y + forces[i].y) * DAMPING * temp;
-                const maxV = 50 * temp;
+                const maxV = 20 * temp;
                 const speed = Math.sqrt(vel[i].x*vel[i].x + vel[i].y*vel[i].y);
                 if (speed > maxV) { vel[i].x *= maxV/speed; vel[i].y *= maxV/speed; }
                 erdBoxes[i].x += vel[i].x;
@@ -1840,6 +1953,7 @@ const erdDeps = {{depsJson}};
 
     // --- Filtering ---
     const hiddenTypes = new Set();
+    let showImplicit = false;
     function applyErdFilters() {
         erdBoxes.forEach((b, i) => {
             const vis = !hiddenTypes.has(b.objType);
@@ -1848,11 +1962,17 @@ const erdDeps = {{depsJson}};
         allLines.forEach(ln => {
             const sVis = !hiddenTypes.has(erdBoxes[ln.fromIdx].objType);
             const tVis = !hiddenTypes.has(erdBoxes[ln.toIdx].objType);
-            ln.el.setAttribute('visibility', (sVis && tVis) ? 'visible' : 'hidden');
+            const isImplicit = ln.edgeType === 'implicit';
+            const edgeVis = isImplicit ? showImplicit : true;
+            ln.el.setAttribute('visibility', (sVis && tVis && edgeVis) ? 'visible' : 'hidden');
         });
     }
     window.toggleErdFilter = function(cb) {
         if (cb.checked) hiddenTypes.delete(cb.value); else hiddenTypes.add(cb.value);
+        applyErdFilters();
+    };
+    window.toggleErdImplicitFilter = function(cb) {
+        showImplicit = cb.checked;
         applyErdFilters();
     };
 })();
@@ -2670,5 +2790,15 @@ const lineageEdges = {{edgesJson}};
         .impact-detail ul { list-style: none; padding-left: 0.5rem; }
         .impact-detail li { padding: 0.15rem 0; }
         .impact-detail li::before { content: "→ "; color: #4fc3f7; }
+        .missing-fk-warning { background: rgba(240,165,0,0.12); border: 1px solid #f0a500; border-radius: 6px; padding: 0.8rem 1.2rem; margin: 0.8rem 0; color: #f0a500; }
+        .missing-fk-warning details { margin-top: 0.4rem; }
+        .missing-fk-warning summary { color: #f0a500; cursor: pointer; }
+        .missing-fk-warning ul { color: #e0e0e0; margin: 0.4rem 0 0; padding-left: 1.5rem; }
+        .missing-fk-warning li { margin: 0.2rem 0; }
+        .confidence-high { color: #4ecca3; font-weight: bold; }
+        .confidence-medium { color: #f0a500; font-weight: bold; }
+        .confidence-low { color: #888; }
+        .copy-sql { background: #0f3460; border: 1px solid #4fc3f7; color: #e0e0e0; padding: 0.15rem 0.5rem; border-radius: 3px; cursor: pointer; font-size: 0.8em; margin-left: 0.3rem; }
+        .copy-sql:hover { background: #1a5c8e; }
         """;
 }

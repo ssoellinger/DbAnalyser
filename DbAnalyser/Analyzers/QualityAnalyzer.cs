@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DbAnalyser.Models.Quality;
+using DbAnalyser.Models.Relationships;
 using DbAnalyser.Models.Schema;
 using DbAnalyser.Providers;
 
@@ -25,6 +26,7 @@ public partial class QualityAnalyzer : IAnalyzer
         }
 
         CheckOrphanedTables(result.Schema.Tables, issues);
+        CheckMissingForeignKeys(result.Relationships, issues);
 
         result.QualityIssues = issues;
         return Task.CompletedTask;
@@ -134,6 +136,25 @@ public partial class QualityAnalyzer : IAnalyzer
                     Description: "Table has no foreign key relationships (orphaned).",
                     Recommendation: "Verify this table is intentionally standalone."));
             }
+        }
+    }
+
+    private void CheckMissingForeignKeys(RelationshipMap? relationships, List<QualityIssue> issues)
+    {
+        if (relationships is null) return;
+
+        foreach (var rel in relationships.ImplicitRelationships)
+        {
+            var severity = rel.Confidence >= 0.8 ? IssueSeverity.Warning : IssueSeverity.Info;
+            var constraintName = $"FK_{rel.FromTable}_{rel.ToTable}_{rel.FromColumn}";
+            var sql = $"ALTER TABLE [{rel.FromSchema}].[{rel.FromTable}] ADD CONSTRAINT [{constraintName}] FOREIGN KEY ([{rel.FromColumn}]) REFERENCES [{rel.ToSchema}].[{rel.ToTable}] ([{rel.ToColumn}]);";
+
+            issues.Add(new QualityIssue(
+                Category: "Referential Integrity",
+                Severity: severity,
+                ObjectName: $"{rel.FromSchema}.{rel.FromTable}.{rel.FromColumn}",
+                Description: $"Potential missing foreign key to {rel.ToSchema}.{rel.ToTable}.{rel.ToColumn} (confidence: {rel.Confidence:P0}).",
+                Recommendation: sql));
         }
     }
 
