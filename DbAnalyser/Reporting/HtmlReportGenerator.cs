@@ -40,6 +40,7 @@ public class HtmlReportGenerator : IReportGenerator
         sb.AppendLine("<nav>");
         if (result.Relationships?.Dependencies.Count > 0) sb.AppendLine("<a href=\"#dependencies\">Dependencies</a>");
         if (result.Schema?.Tables.Count > 0) sb.AppendLine("<a href=\"#erd\">ERD</a>");
+        if (result.Relationships?.Dependencies.Count > 0) sb.AppendLine("<a href=\"#lineage\">Data Lineage</a>");
         if (result.Schema is not null) sb.AppendLine("<a href=\"#schema\">Schema</a>");
         if (result.Profiles is not null) sb.AppendLine("<a href=\"#profiling\">Profiling</a>");
         if (result.Relationships is not null) sb.AppendLine("<a href=\"#relationships\">Relationships</a>");
@@ -53,6 +54,9 @@ public class HtmlReportGenerator : IReportGenerator
 
         if (result.Schema?.Tables.Count > 0)
             BuildErdSection(sb, result);
+
+        if (result.Relationships?.Dependencies.Count > 0)
+            BuildLineageSection(sb, result);
 
         if (result.Schema is not null)
             BuildSchemaSection(sb, result);
@@ -80,6 +84,13 @@ public class HtmlReportGenerator : IReportGenerator
         {
             sb.AppendLine("<script>");
             sb.AppendLine(GetErdJs(result));
+            sb.AppendLine("</script>");
+        }
+
+        if (result.Relationships?.Dependencies.Count > 0)
+        {
+            sb.AppendLine("<script>");
+            sb.AppendLine(GetLineageJs(result));
             sb.AppendLine("</script>");
         }
 
@@ -126,6 +137,9 @@ public class HtmlReportGenerator : IReportGenerator
         if (externalCount > 0)
             sb.AppendLine($"<div class=\"card\"><h3>{externalCount}</h3><p>Cross-DB References</p></div>");
         sb.AppendLine("</div>");
+
+        // Cycle warning banner (populated by JS at runtime)
+        sb.AppendLine("<div id=\"cycle-warning\" style=\"display:none\"></div>");
 
         // Interactive graph
         sb.AppendLine("<h3>Relationship Graph</h3>");
@@ -177,6 +191,7 @@ public class HtmlReportGenerator : IReportGenerator
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#26a69a\"><input type=\"checkbox\" value=\"job\" checked onchange=\"toggleEdgeFilter(this)\"><span>Job &rarr; Table/Proc ({jobEdgeCount})</span></label>");
         if (extEdgeCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleEdgeFilter(this)\"><span>Cross-DB ({extEdgeCount})</span></label>");
+        sb.AppendLine("<label class=\"filter-toggle\" style=\"--clr:#e94560\"><input type=\"checkbox\" value=\"cycles\" onchange=\"toggleCycleFilter(this)\"><span>&#10227; Cycles</span></label>");
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div id=\"graph-container\"><svg id=\"dep-graph\"></svg></div>");
@@ -1063,6 +1078,149 @@ const graphEdges = {{edgesJson}};
         else hiddenEdgeTypes.add(cb.value);
         applyFilters();
     };
+
+    // --- Cycle Detection (Tarjan's SCC) ---
+    function detectCycles() {
+        const n = graphNodes.length;
+        let index = 0;
+        const stack = [];
+        const onStack = new Array(n).fill(false);
+        const indices = new Array(n).fill(-1);
+        const lowlinks = new Array(n).fill(0);
+        const sccs = [];
+
+        // Build adjacency list from graphEdges
+        const adj = Array.from({length: n}, () => []);
+        graphEdges.forEach(e => { adj[e.source].push(e.target); });
+
+        function strongconnect(v) {
+            indices[v] = lowlinks[v] = index++;
+            stack.push(v);
+            onStack[v] = true;
+            for (const w of adj[v]) {
+                if (indices[w] === -1) {
+                    strongconnect(w);
+                    lowlinks[v] = Math.min(lowlinks[v], lowlinks[w]);
+                } else if (onStack[w]) {
+                    lowlinks[v] = Math.min(lowlinks[v], indices[w]);
+                }
+            }
+            if (lowlinks[v] === indices[v]) {
+                const scc = [];
+                let w;
+                do { w = stack.pop(); onStack[w] = false; scc.push(w); } while (w !== v);
+                if (scc.length > 1) sccs.push(scc);
+            }
+        }
+
+        for (let i = 0; i < n; i++) { if (indices[i] === -1) strongconnect(i); }
+        return sccs;
+    }
+
+    const cycleSccs = detectCycles();
+
+    // Build cycle membership: nodeIndex -> sccIndex, and mark cycle edges
+    const nodeScc = {};
+    cycleSccs.forEach((scc, si) => { scc.forEach(ni => { nodeScc[ni] = si; }); });
+
+    const cycleEdgeSet = new Set();
+    graphEdges.forEach((e, i) => {
+        if (nodeScc[e.source] !== undefined && nodeScc[e.source] === nodeScc[e.target]) {
+            cycleEdgeSet.add(i);
+        }
+    });
+
+    // Apply cycle highlighting
+    for (const ni in nodeScc) {
+        nodeEls[ni].classList.add('cycle-node');
+        nodeEls[ni].setAttribute('data-cycle-scc', nodeScc[ni]);
+    }
+    cycleEdgeSet.forEach(ei => {
+        edgeEls[ei].setAttribute('data-cycle', 'true');
+        edgeEls[ei].setAttribute('stroke', '#e94560');
+        edgeEls[ei].setAttribute('stroke-opacity', '0.8');
+    });
+
+    // Expose cycle data globally for the warning banner
+    window._cycleSccs = cycleSccs;
+    window._cycleNodeScc = nodeScc;
+    window._cycleEdgeSet = cycleEdgeSet;
+
+    // --- Cycle filter toggle ---
+    let cycleFilterActive = false;
+    window.toggleCycleFilter = function(cb) {
+        cycleFilterActive = cb.checked;
+        graphNodes.forEach((n, i) => {
+            if (nodeEls[i].getAttribute('visibility') === 'hidden') return;
+            const inCycle = nodeScc[i] !== undefined;
+            if (cycleFilterActive && !inCycle) {
+                nodeEls[i].setAttribute('opacity', '0.1');
+                labelEls[i].setAttribute('opacity', '0.1');
+            } else {
+                nodeEls[i].setAttribute('opacity', '1');
+                labelEls[i].setAttribute('opacity', '1');
+            }
+        });
+        graphEdges.forEach((e, i) => {
+            if (edgeEls[i].getAttribute('visibility') === 'hidden') return;
+            const inCycle = cycleEdgeSet.has(i);
+            if (cycleFilterActive && !inCycle) {
+                edgeEls[i].setAttribute('stroke-opacity', '0.05');
+            } else {
+                edgeEls[i].setAttribute('stroke-opacity', inCycle ? '0.8' : '0.4');
+            }
+        });
+    };
+
+    // Highlight a specific SCC (called from warning banner)
+    window.highlightCycle = function(sccIdx) {
+        graphNodes.forEach((n, i) => {
+            if (nodeEls[i].getAttribute('visibility') === 'hidden') return;
+            const match = nodeScc[i] === sccIdx;
+            nodeEls[i].setAttribute('opacity', match ? '1' : '0.1');
+            labelEls[i].setAttribute('opacity', match ? '1' : '0.1');
+        });
+        graphEdges.forEach((e, i) => {
+            if (edgeEls[i].getAttribute('visibility') === 'hidden') return;
+            const match = cycleEdgeSet.has(i) && nodeScc[e.source] === sccIdx;
+            edgeEls[i].setAttribute('stroke-opacity', match ? '1' : '0.05');
+            if (match) edgeEls[i].setAttribute('stroke-width', '3');
+        });
+        // Auto-restore after 5 seconds
+        setTimeout(() => {
+            graphNodes.forEach((n, i) => {
+                if (nodeEls[i].getAttribute('visibility') === 'hidden') return;
+                nodeEls[i].setAttribute('opacity', '1');
+                labelEls[i].setAttribute('opacity', '1');
+            });
+            graphEdges.forEach((e, i) => {
+                if (edgeEls[i].getAttribute('visibility') === 'hidden') return;
+                edgeEls[i].setAttribute('stroke-opacity', cycleEdgeSet.has(i) ? '0.8' : '0.4');
+                edgeEls[i].setAttribute('stroke-width', '1.5');
+            });
+        }, 5000);
+    };
+
+    // Populate the cycle warning banner
+    const cycleWarning = document.getElementById('cycle-warning');
+    if (cycleWarning && cycleSccs.length > 0) {
+        const totalNodes = new Set();
+        cycleSccs.forEach(scc => scc.forEach(ni => totalNodes.add(ni)));
+        let html = '<div class="cycle-warning">';
+        html += '<strong>⚠ ' + cycleSccs.length + ' Circular Dependenc' + (cycleSccs.length === 1 ? 'y' : 'ies') + ' Detected</strong>';
+        html += ' (' + totalNodes.size + ' object' + (totalNodes.size === 1 ? '' : 's') + ' involved)';
+        html += '<details><summary>Show cycle details</summary><ol>';
+        cycleSccs.forEach((scc, si) => {
+            const chain = scc.map(ni => graphNodes[ni].id);
+            chain.push(graphNodes[scc[0]].id); // close the loop
+            html += '<li><a class="cycle-chain" href="#dependencies" onclick="highlightCycle(' + si + '); return false;">';
+            html += chain.join(' → ');
+            html += '</a></li>';
+        });
+        html += '</ol></details></div>';
+        cycleWarning.innerHTML = html;
+        cycleWarning.style.display = 'block';
+    }
 })();
 """;
     }
@@ -1093,6 +1251,29 @@ const graphEdges = {{edgesJson}};
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div id=\"erd-container\"><svg id=\"erd-svg\"></svg></div>");
+        sb.AppendLine("</section>");
+    }
+
+    private void BuildLineageSection(StringBuilder sb, AnalysisResult result)
+    {
+        var deps = result.Relationships!.Dependencies;
+
+        sb.AppendLine("<section id=\"lineage\">");
+        sb.AppendLine("<h2>Data Lineage</h2>");
+        sb.AppendLine("<p class=\"meta\">Select an object to trace its complete upstream (data sources) and downstream (consumers) flow. Hover nodes to highlight paths.</p>");
+
+        // Search + action controls
+        sb.AppendLine("<div class=\"lineage-controls\">");
+        sb.AppendLine("<input type=\"text\" id=\"lineage-search\" list=\"lineage-objects\" placeholder=\"Search for an object...\">");
+        sb.AppendLine("<datalist id=\"lineage-objects\"></datalist>");
+        sb.AppendLine("<button id=\"lineage-show\">Show Lineage</button>");
+        sb.AppendLine("<button id=\"lineage-clear\">Clear</button>");
+        sb.AppendLine("</div>");
+
+        sb.AppendLine("<div id=\"lineage-container\">");
+        sb.AppendLine("<div id=\"lineage-empty\" class=\"lineage-empty\">Select an object above and click &ldquo;Show Lineage&rdquo; to visualize its data flow.</div>");
+        sb.AppendLine("<svg id=\"lineage-svg\" style=\"display:none\"></svg>");
+        sb.AppendLine("</div>");
         sb.AppendLine("</section>");
     }
 
@@ -1678,6 +1859,757 @@ const erdDeps = {{depsJson}};
 """;
     }
 
+    private string GetLineageJs(AnalysisResult result)
+    {
+        var deps = result.Relationships!.Dependencies;
+        var fks = result.Relationships!.ExplicitRelationships;
+        var viewDeps = result.Relationships!.ViewDependencies;
+
+        // Build nodes: { id, type, dependsOn[], referencedBy[] }
+        var nodes = deps.Select(d => new
+        {
+            id = d.FullName,
+            type = d.ObjectType.ToLowerInvariant(),
+            dependsOn = d.DependsOn,
+            referencedBy = d.ReferencedBy
+        }).ToList<object>();
+
+        // Build edges: union of FK edges + object dependency edges
+        var edgeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var edges = new List<object>();
+
+        foreach (var fk in fks)
+        {
+            var from = $"{fk.FromSchema}.{fk.FromTable}";
+            var to = $"{fk.ToSchema}.{fk.ToTable}";
+            var key = $"{from}->{to}";
+            if (!edgeSet.Add(key)) continue;
+            edges.Add(new { from, to, edgeType = "fk", label = $"FK: {fk.Name}" });
+        }
+
+        foreach (var vd in viewDeps)
+        {
+            var from = $"{vd.FromSchema}.{vd.FromName}";
+            var to = vd.ToFullName;
+            var key = $"{from}->{to}";
+            if (!edgeSet.Add(key)) continue;
+            var label = vd.FromType.ToLowerInvariant() switch
+            {
+                "view" => "reads from",
+                "procedure" => "calls",
+                "function" => "calls",
+                "trigger" => "triggered by",
+                "synonym" => "alias for",
+                "job" => "executes",
+                _ => "depends on"
+            };
+            var edgeType = vd.IsCrossDatabase ? "external" : vd.FromType.ToLowerInvariant();
+            edges.Add(new { from, to, edgeType, label });
+        }
+
+        var nodesJson = JsonSerializer.Serialize(nodes);
+        var edgesJson = JsonSerializer.Serialize(edges);
+
+        return $$"""
+const lineageNodes = {{nodesJson}};
+const lineageEdges = {{edgesJson}};
+
+(function() {
+    const svg = document.getElementById('lineage-svg');
+    const container = document.getElementById('lineage-container');
+    const emptyMsg = document.getElementById('lineage-empty');
+    const searchInput = document.getElementById('lineage-search');
+    const datalist = document.getElementById('lineage-objects');
+    const W = container.clientWidth || 1400;
+    const H = 700;
+
+    // Constants
+    const LAYER_W = 250, NODE_W = 180, NODE_H = 40, GAP = 20;
+    const typeColors = { table:'#e94560', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c', job:'#26a69a', external:'#ff6b6b' };
+    const edgeColors = { fk:'#4fc3f7', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c', job:'#26a69a', external:'#ff6b6b' };
+
+    // Build lookup maps
+    const nodeMap = {};
+    lineageNodes.forEach(n => { nodeMap[n.id.toLowerCase()] = n; });
+
+    // Cycle membership from dependency graph (shared via globals)
+    const cycleNodeIds = new Set();
+    const cycleNodePairs = new Set();
+    if (window._cycleSccs) {
+        window._cycleSccs.forEach(scc => {
+            const ids = scc.map(ni => graphNodes[ni].id.toLowerCase());
+            ids.forEach(id => cycleNodeIds.add(id));
+            // Track pairs for edge coloring
+            for (let a = 0; a < ids.length; a++)
+                for (let b = 0; b < ids.length; b++)
+                    if (a !== b) cycleNodePairs.add(ids[a] + '|' + ids[b]);
+        });
+    }
+
+    // Populate datalist for autocomplete
+    lineageNodes.forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n.id;
+        datalist.appendChild(opt);
+    });
+
+    // Zoom/pan state
+    let vb = { x: 0, y: 0, w: W, h: H };
+    const updateVB = () => svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    function s2w(sx, sy) { const r = svg.getBoundingClientRect(); return { x: vb.x + (sx-r.left)/r.width*vb.w, y: vb.y + (sy-r.top)/r.height*vb.h }; }
+
+    // BFS to compute lineage layers
+    function computeLineage(selectedId) {
+        const sid = selectedId.toLowerCase();
+        const node = nodeMap[sid];
+        if (!node) return null;
+
+        const layers = {}; // layer number -> [nodeId, ...]
+        const nodeLayer = {}; // nodeId -> layer number
+        layers[0] = [node.id];
+        nodeLayer[sid] = 0;
+
+        // Upstream BFS (follow dependsOn = sources)
+        let queue = [...(node.dependsOn || [])];
+        let nextLayer = -1;
+        let visited = new Set([sid]);
+        while (queue.length > 0) {
+            const nextQueue = [];
+            const layerNodes = [];
+            for (const depId of queue) {
+                const did = depId.toLowerCase();
+                if (visited.has(did)) continue;
+                visited.add(did);
+                layerNodes.push(depId);
+                nodeLayer[did] = nextLayer;
+                const dn = nodeMap[did];
+                if (dn && dn.dependsOn) {
+                    for (const up of dn.dependsOn) {
+                        if (!visited.has(up.toLowerCase())) nextQueue.push(up);
+                    }
+                }
+            }
+            if (layerNodes.length > 0) layers[nextLayer] = layerNodes;
+            queue = nextQueue;
+            nextLayer--;
+        }
+
+        // Downstream BFS (follow referencedBy = consumers)
+        queue = [...(node.referencedBy || [])];
+        nextLayer = 1;
+        while (queue.length > 0) {
+            const nextQueue = [];
+            const layerNodes = [];
+            for (const refId of queue) {
+                const rid = refId.toLowerCase();
+                if (visited.has(rid)) continue;
+                visited.add(rid);
+                layerNodes.push(refId);
+                nodeLayer[rid] = nextLayer;
+                const rn = nodeMap[rid];
+                if (rn && rn.referencedBy) {
+                    for (const down of rn.referencedBy) {
+                        if (!visited.has(down.toLowerCase())) nextQueue.push(down);
+                    }
+                }
+            }
+            if (layerNodes.length > 0) layers[nextLayer] = layerNodes;
+            queue = nextQueue;
+            nextLayer++;
+        }
+
+        return { layers, nodeLayer, selectedId: node.id };
+    }
+
+    // Layout: assign x/y positions
+    function layoutLineage(lineageData) {
+        const { layers, selectedId } = lineageData;
+        const layerKeys = Object.keys(layers).map(Number).sort((a, b) => a - b);
+        const positions = {}; // nodeId -> { x, y, layer }
+
+        const totalLayers = layerKeys.length;
+        const totalW = totalLayers * LAYER_W;
+        const offsetX = Math.max(40, (W - totalW) / 2);
+
+        layerKeys.forEach((layerNum, li) => {
+            const nodesInLayer = layers[layerNum];
+            const totalH = nodesInLayer.length * (NODE_H + GAP) - GAP;
+            const offsetY = Math.max(60, (H - totalH) / 2);
+
+            nodesInLayer.forEach((nid, ni) => {
+                positions[nid.toLowerCase()] = {
+                    x: offsetX + li * LAYER_W,
+                    y: offsetY + ni * (NODE_H + GAP),
+                    layer: layerNum
+                };
+            });
+        });
+
+        return { positions, layerKeys };
+    }
+
+    // Collect edges relevant to the lineage
+    function getLineageEdges(nodeLayer) {
+        const visible = new Set(Object.keys(nodeLayer));
+        return lineageEdges.filter(e => {
+            return visible.has(e.from.toLowerCase()) && visible.has(e.to.toLowerCase());
+        });
+    }
+
+    // SVG rendering
+    let currentLineage = null;
+    let allNodeEls = [], allEdgeEls = [], allLabelEls = [], allEdgeLabelEls = [];
+    let lineagePositions = {};
+
+    function renderLineage(lineageData) {
+        // Clear
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        allNodeEls = []; allEdgeEls = []; allLabelEls = []; allEdgeLabelEls = [];
+
+        const { positions, layerKeys } = layoutLineage(lineageData);
+        lineagePositions = positions;
+        const visibleEdges = getLineageEdges(lineageData.nodeLayer);
+
+        // Compute bounds for viewBox
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const pid in positions) {
+            const p = positions[pid];
+            minX = Math.min(minX, p.x - 10);
+            minY = Math.min(minY, p.y - 30);
+            maxX = Math.max(maxX, p.x + NODE_W + 10);
+            maxY = Math.max(maxY, p.y + NODE_H + 10);
+        }
+        const pad = 50;
+        vb = { x: minX - pad, y: minY - pad, w: (maxX - minX) + pad * 2, h: (maxY - minY) + pad * 2 };
+        svg.setAttribute('width', W);
+        svg.setAttribute('height', H);
+        updateVB();
+
+        // Defs — arrow marker
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'lineage-arrow'); marker.setAttribute('viewBox', '0 0 10 10');
+        marker.setAttribute('refX', '10'); marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '6'); marker.setAttribute('markerHeight', '6');
+        marker.setAttribute('orient', 'auto');
+        const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        mp.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z'); mp.setAttribute('fill', '#4fc3f7');
+        marker.appendChild(mp); defs.appendChild(marker); svg.appendChild(defs);
+
+        const edgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const nodeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        svg.appendChild(edgeGroup); svg.appendChild(nodeGroup); svg.appendChild(labelGroup);
+
+        // Tooltip
+        let tip = container.querySelector('.graph-tooltip');
+        if (!tip) {
+            tip = document.createElement('div'); tip.className = 'graph-tooltip'; container.appendChild(tip);
+        }
+
+        // Controls
+        let ctrl = container.querySelector('.graph-controls');
+        if (!ctrl) {
+            ctrl = document.createElement('div'); ctrl.className = 'graph-controls';
+            ctrl.innerHTML = '<button id="lineage-zi" title="Zoom in">+</button><button id="lineage-zo" title="Zoom out">&minus;</button><button id="lineage-zr" title="Fit all">&#8634;</button><button id="lineage-reorder" title="Auto-align">&#9638;</button><button id="lineage-fs" title="Fullscreen">&#x26F6;</button>';
+            container.appendChild(ctrl);
+        }
+
+        // Draw layer headers
+        layerKeys.forEach(layerNum => {
+            const nodesInLayer = lineageData.layers[layerNum];
+            if (!nodesInLayer || nodesInLayer.length === 0) return;
+            const firstPos = positions[nodesInLayer[0].toLowerCase()];
+            if (!firstPos) return;
+            const headerText = layerNum === 0 ? 'Selected' :
+                layerNum < 0 ? `Sources (${layerNum})` :
+                `Consumers (+${layerNum})`;
+            const hdr = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            hdr.textContent = headerText;
+            hdr.setAttribute('x', firstPos.x + NODE_W / 2);
+            hdr.setAttribute('y', minY - 5);
+            hdr.setAttribute('text-anchor', 'middle');
+            hdr.setAttribute('fill', layerNum === 0 ? '#e94560' : '#555');
+            hdr.setAttribute('font-size', '12');
+            hdr.setAttribute('font-weight', layerNum === 0 ? 'bold' : 'normal');
+            labelGroup.appendChild(hdr);
+        });
+
+        // Draw edges
+        visibleEdges.forEach(e => {
+            const fromPos = positions[e.from.toLowerCase()];
+            const toPos = positions[e.to.toLowerCase()];
+            if (!fromPos || !toPos) return;
+
+            // Determine direction: from should be left of to
+            let fx, fy, tx, ty;
+            if (fromPos.x < toPos.x) {
+                fx = fromPos.x + NODE_W; fy = fromPos.y + NODE_H / 2;
+                tx = toPos.x; ty = toPos.y + NODE_H / 2;
+            } else if (fromPos.x > toPos.x) {
+                fx = fromPos.x; fy = fromPos.y + NODE_H / 2;
+                tx = toPos.x + NODE_W; ty = toPos.y + NODE_H / 2;
+            } else {
+                fx = fromPos.x + NODE_W / 2; fy = fromPos.y + NODE_H;
+                tx = toPos.x + NODE_W / 2; ty = toPos.y;
+            }
+
+            const cx1 = fx + (tx - fx) * 0.4, cx2 = fx + (tx - fx) * 0.6;
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', `M ${fx} ${fy} C ${cx1} ${fy}, ${cx2} ${ty}, ${tx} ${ty}`);
+            path.setAttribute('fill', 'none');
+            const isCycleEdge = cycleNodePairs.has(e.from.toLowerCase() + '|' + e.to.toLowerCase());
+            const color = isCycleEdge ? '#e94560' : (edgeColors[e.edgeType] || '#4fc3f7');
+            path.setAttribute('stroke', color);
+            path.setAttribute('stroke-width', '1.8');
+            path.setAttribute('stroke-opacity', '0.6');
+            if (e.edgeType !== 'fk') path.setAttribute('stroke-dasharray', '6,3');
+            path.setAttribute('marker-end', 'url(#lineage-arrow)');
+            path.style.cursor = 'pointer';
+            edgeGroup.appendChild(path);
+
+            // Edge label at midpoint
+            const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+            const elbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            elbl.textContent = e.label;
+            elbl.setAttribute('x', mx); elbl.setAttribute('y', my - 6);
+            elbl.setAttribute('text-anchor', 'middle');
+            elbl.setAttribute('fill', '#555'); elbl.setAttribute('font-size', '9');
+            elbl.setAttribute('pointer-events', 'none');
+            edgeGroup.appendChild(elbl);
+
+            // Edge hover tooltip
+            path.addEventListener('mouseenter', (ev) => {
+                tip.innerHTML = `<strong>${e.label}</strong><br>${e.from} &rarr; ${e.to}`;
+                tip.style.display = 'block'; const cr = container.getBoundingClientRect();
+                tip.style.left = (ev.clientX-cr.left+15)+'px'; tip.style.top = (ev.clientY-cr.top-10)+'px';
+                path.setAttribute('stroke-opacity','1'); path.setAttribute('stroke-width','3');
+            });
+            path.addEventListener('mousemove', (ev) => { const cr = container.getBoundingClientRect(); tip.style.left=(ev.clientX-cr.left+15)+'px'; tip.style.top=(ev.clientY-cr.top-10)+'px'; });
+            path.addEventListener('mouseleave', () => { tip.style.display='none'; path.setAttribute('stroke-opacity','0.6'); path.setAttribute('stroke-width','1.8'); });
+
+            allEdgeEls.push({ el: path, labelEl: elbl, from: e.from.toLowerCase(), to: e.to.toLowerCase() });
+        });
+
+        // Draw nodes
+        for (const layerNum of layerKeys) {
+            const nodesInLayer = lineageData.layers[layerNum];
+            if (!nodesInLayer) continue;
+            nodesInLayer.forEach(nid => {
+                const pos = positions[nid.toLowerCase()];
+                if (!pos) return;
+                const nData = nodeMap[nid.toLowerCase()];
+                const nType = nData ? nData.type : 'table';
+                const isSelected = nid.toLowerCase() === lineageData.selectedId.toLowerCase();
+                const isExternal = nType === 'external';
+                const color = typeColors[nType] || '#e94560';
+
+                const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                g.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+                g.style.cursor = 'pointer';
+
+                // Background rect
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
+                rect.setAttribute('rx', '6');
+                rect.setAttribute('fill', '#16213e');
+                rect.setAttribute('stroke', isSelected ? '#ffffff' : color);
+                rect.setAttribute('stroke-width', isSelected ? '2.5' : '1.5');
+                if (isExternal) rect.setAttribute('stroke-dasharray', '4,2');
+                g.appendChild(rect);
+
+                // Glow for selected
+                if (isSelected) {
+                    rect.setAttribute('filter', 'url(#lineage-glow)');
+                    // Add glow filter if not present
+                    if (!svg.querySelector('#lineage-glow')) {
+                        const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+                        filter.setAttribute('id', 'lineage-glow');
+                        const blur = document.createElementNS('http://www.w3.org/2000/svg', 'feGaussianBlur');
+                        blur.setAttribute('stdDeviation', '3'); blur.setAttribute('result', 'blur');
+                        const merge = document.createElementNS('http://www.w3.org/2000/svg', 'feMerge');
+                        const m1 = document.createElementNS('http://www.w3.org/2000/svg', 'feMergeNode'); m1.setAttribute('in', 'blur');
+                        const m2 = document.createElementNS('http://www.w3.org/2000/svg', 'feMergeNode'); m2.setAttribute('in', 'SourceGraphic');
+                        merge.appendChild(m1); merge.appendChild(m2);
+                        filter.appendChild(blur); filter.appendChild(merge);
+                        defs.appendChild(filter);
+                    }
+                }
+
+                // Type indicator (small colored bar at left)
+                const bar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                bar.setAttribute('width', '4'); bar.setAttribute('height', NODE_H);
+                bar.setAttribute('rx', '2'); bar.setAttribute('fill', color);
+                g.appendChild(bar);
+
+                // Name label
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                const displayName = nid.length > 22 ? nid.substring(0, 20) + '...' : nid;
+                label.textContent = displayName;
+                label.setAttribute('x', 12); label.setAttribute('y', NODE_H / 2 - 2);
+                label.setAttribute('fill', '#e0e0e0'); label.setAttribute('font-size', '11');
+                label.setAttribute('dominant-baseline', 'middle');
+                label.setAttribute('pointer-events', 'none');
+                g.appendChild(label);
+
+                // Type badge
+                const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                badge.textContent = nType.toUpperCase();
+                badge.setAttribute('x', NODE_W - 6); badge.setAttribute('y', NODE_H / 2 - 2);
+                badge.setAttribute('text-anchor', 'end');
+                badge.setAttribute('fill', color); badge.setAttribute('font-size', '8');
+                badge.setAttribute('dominant-baseline', 'middle');
+                badge.setAttribute('opacity', '0.7');
+                badge.setAttribute('pointer-events', 'none');
+                g.appendChild(badge);
+
+                // Cycle warning badge
+                if (cycleNodeIds.has(nid.toLowerCase())) {
+                    const cyBadge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    cyBadge.textContent = '\u27F3 Cycle';
+                    cyBadge.setAttribute('x', NODE_W - 6); cyBadge.setAttribute('y', NODE_H - 4);
+                    cyBadge.setAttribute('text-anchor', 'end');
+                    cyBadge.setAttribute('fill', '#e94560'); cyBadge.setAttribute('font-size', '7');
+                    cyBadge.setAttribute('pointer-events', 'none');
+                    g.appendChild(cyBadge);
+                    rect.setAttribute('stroke', '#e94560');
+                    rect.setAttribute('stroke-dasharray', '3,2');
+                }
+
+                nodeGroup.appendChild(g);
+
+                // Hover: highlight full path through this node
+                const nodeId = nid.toLowerCase();
+                g.addEventListener('mouseenter', (ev) => {
+                    const cycleNote = cycleNodeIds.has(nodeId) ? '<br><span style="color:#e94560">\u27F3 Part of circular dependency</span>' : '';
+                    tip.innerHTML = `<strong>${nid}</strong><br>Type: ${nType}<br>Layer: ${pos.layer === 0 ? 'Selected' : pos.layer < 0 ? 'Source (' + pos.layer + ')' : 'Consumer (+' + pos.layer + ')'}` + cycleNote;
+                    tip.style.display = 'block'; const cr = container.getBoundingClientRect();
+                    tip.style.left = (ev.clientX-cr.left+15)+'px'; tip.style.top = (ev.clientY-cr.top-10)+'px';
+
+                    // BFS both directions from hovered node within visible lineage
+                    const pathNodes = new Set([nodeId]);
+                    const pathEdges = new Set();
+
+                    // Upstream from hovered
+                    let q = [nodeId];
+                    while (q.length > 0) {
+                        const nq = [];
+                        for (const cid of q) {
+                            allEdgeEls.forEach((ee, ei) => {
+                                if (ee.to === cid && !pathNodes.has(ee.from)) {
+                                    pathNodes.add(ee.from);
+                                    pathEdges.add(ei);
+                                    nq.push(ee.from);
+                                }
+                            });
+                        }
+                        q = nq;
+                    }
+
+                    // Downstream from hovered
+                    q = [nodeId];
+                    while (q.length > 0) {
+                        const nq = [];
+                        for (const cid of q) {
+                            allEdgeEls.forEach((ee, ei) => {
+                                if (ee.from === cid && !pathNodes.has(ee.to)) {
+                                    pathNodes.add(ee.to);
+                                    pathEdges.add(ei);
+                                    nq.push(ee.to);
+                                }
+                            });
+                        }
+                        q = nq;
+                    }
+
+                    // Dim non-path
+                    allNodeEls.forEach(ne => {
+                        const inPath = pathNodes.has(ne.id);
+                        ne.el.setAttribute('opacity', inPath ? '1' : '0.15');
+                    });
+                    allEdgeEls.forEach((ee, ei) => {
+                        const inPath = pathEdges.has(ei);
+                        ee.el.setAttribute('stroke-opacity', inPath ? '0.9' : '0.05');
+                        ee.labelEl.setAttribute('opacity', inPath ? '1' : '0.05');
+                    });
+                });
+
+                g.addEventListener('mousemove', (ev) => { const cr = container.getBoundingClientRect(); tip.style.left=(ev.clientX-cr.left+15)+'px'; tip.style.top=(ev.clientY-cr.top-10)+'px'; });
+
+                g.addEventListener('mouseleave', () => {
+                    tip.style.display = 'none';
+                    allNodeEls.forEach(ne => ne.el.setAttribute('opacity', '1'));
+                    allEdgeEls.forEach(ee => { ee.el.setAttribute('stroke-opacity', '0.6'); ee.labelEl.setAttribute('opacity', '1'); });
+                });
+
+                // Click to re-center lineage on this node
+                g.addEventListener('click', () => {
+                    searchInput.value = nid;
+                    showLineage();
+                });
+
+                allNodeEls.push({ el: g, id: nodeId });
+            });
+        }
+
+        // No connections case
+        const allLayerNodes = Object.values(lineageData.layers).flat();
+        if (allLayerNodes.length === 1) {
+            const noConn = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            const p0 = positions[allLayerNodes[0].toLowerCase()];
+            noConn.textContent = 'No lineage connections found for this object';
+            noConn.setAttribute('x', p0.x + NODE_W / 2); noConn.setAttribute('y', p0.y + NODE_H + 30);
+            noConn.setAttribute('text-anchor', 'middle');
+            noConn.setAttribute('fill', '#555'); noConn.setAttribute('font-size', '12');
+            labelGroup.appendChild(noConn);
+        }
+
+        currentLineage = lineageData;
+    }
+
+    // Show lineage action
+    function showLineage() {
+        const val = searchInput.value.trim();
+        if (!val) return;
+        const lineageData = computeLineage(val);
+        if (!lineageData) { alert('Object not found: ' + val); return; }
+        emptyMsg.style.display = 'none';
+        svg.style.display = 'block';
+        renderLineage(lineageData);
+    }
+
+    document.getElementById('lineage-show').addEventListener('click', showLineage);
+    searchInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') showLineage(); });
+
+    // Clear
+    document.getElementById('lineage-clear').addEventListener('click', () => {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        svg.style.display = 'none';
+        emptyMsg.style.display = 'block';
+        searchInput.value = '';
+        currentLineage = null;
+        allNodeEls = []; allEdgeEls = []; allLabelEls = []; allEdgeLabelEls = [];
+    });
+
+    // Zoom/pan
+    function zoomBy(f,cx,cy) { const nw=vb.w/f,nh=vb.h/f; vb.x=cx-(cx-vb.x)/f; vb.y=cy-(cy-vb.y)/f; vb.w=nw;vb.h=nh; updateVB(); }
+    svg.addEventListener('wheel', (ev) => { ev.preventDefault(); const p=s2w(ev.clientX,ev.clientY); zoomBy(ev.deltaY<0?1.15:1/1.15,p.x,p.y); }, {passive:false});
+
+    function fitAll() {
+        if (!currentLineage) return;
+        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+        for (const pid in lineagePositions) {
+            const p = lineagePositions[pid];
+            minX=Math.min(minX,p.x); minY=Math.min(minY,p.y-30);
+            maxX=Math.max(maxX,p.x+NODE_W); maxY=Math.max(maxY,p.y+NODE_H);
+        }
+        if (minX===Infinity) return;
+        const pad=50;
+        vb={x:minX-pad, y:minY-pad, w:maxX-minX+pad*2, h:maxY-minY+pad*2};
+        updateVB();
+    }
+
+    // Update edge paths based on current node positions
+    function updateEdges() {
+        allEdgeEls.forEach(ee => {
+            const fromPos = lineagePositions[ee.from];
+            const toPos = lineagePositions[ee.to];
+            if (!fromPos || !toPos) return;
+            let fx, fy, tx, ty;
+            if (fromPos.x < toPos.x) {
+                fx = fromPos.x + NODE_W; fy = fromPos.y + NODE_H / 2;
+                tx = toPos.x; ty = toPos.y + NODE_H / 2;
+            } else if (fromPos.x > toPos.x) {
+                fx = fromPos.x; fy = fromPos.y + NODE_H / 2;
+                tx = toPos.x + NODE_W; ty = toPos.y + NODE_H / 2;
+            } else {
+                fx = fromPos.x + NODE_W / 2; fy = fromPos.y + NODE_H;
+                tx = toPos.x + NODE_W / 2; ty = toPos.y;
+            }
+            const cx1 = fx + (tx - fx) * 0.4, cx2 = fx + (tx - fx) * 0.6;
+            ee.el.setAttribute('d', `M ${fx} ${fy} C ${cx1} ${fy}, ${cx2} ${ty}, ${tx} ${ty}`);
+            const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+            ee.labelEl.setAttribute('x', mx); ee.labelEl.setAttribute('y', my - 6);
+        });
+    }
+
+    // Auto-align: barycenter crossing minimization within layers
+    function autoAlign() {
+        if (!currentLineage) return;
+        const { layers, nodeLayer } = currentLineage;
+        const layerKeys = Object.keys(layers).map(Number).sort((a, b) => a - b);
+
+        // Build adjacency from visible edges
+        const adj = {}; // nodeId -> Set of connected nodeIds
+        allEdgeEls.forEach(ee => {
+            if (!adj[ee.from]) adj[ee.from] = new Set();
+            if (!adj[ee.to]) adj[ee.to] = new Set();
+            adj[ee.from].add(ee.to);
+            adj[ee.to].add(ee.from);
+        });
+
+        // Several passes of barycenter ordering
+        for (let pass = 0; pass < 8; pass++) {
+            // Forward sweep (left to right)
+            for (let li = 1; li < layerKeys.length; li++) {
+                const layerNum = layerKeys[li];
+                const nodesInLayer = layers[layerNum];
+                if (!nodesInLayer || nodesInLayer.length <= 1) continue;
+                // Compute barycenter for each node based on neighbors in previous layer
+                const prevLayer = layerKeys[li - 1];
+                const prevNodes = layers[prevLayer] || [];
+                const prevPositions = {};
+                prevNodes.forEach((nid, idx) => { prevPositions[nid.toLowerCase()] = idx; });
+
+                const barycenters = nodesInLayer.map(nid => {
+                    const nid_l = nid.toLowerCase();
+                    const neighbors = adj[nid_l] || new Set();
+                    let sum = 0, count = 0;
+                    for (const nb of neighbors) {
+                        if (prevPositions[nb] !== undefined) { sum += prevPositions[nb]; count++; }
+                    }
+                    return { nid, bc: count > 0 ? sum / count : Infinity };
+                });
+                barycenters.sort((a, b) => a.bc - b.bc);
+                layers[layerNum] = barycenters.map(b => b.nid);
+            }
+            // Backward sweep (right to left)
+            for (let li = layerKeys.length - 2; li >= 0; li--) {
+                const layerNum = layerKeys[li];
+                const nodesInLayer = layers[layerNum];
+                if (!nodesInLayer || nodesInLayer.length <= 1) continue;
+                const nextLayer = layerKeys[li + 1];
+                const nextNodes = layers[nextLayer] || [];
+                const nextPositions = {};
+                nextNodes.forEach((nid, idx) => { nextPositions[nid.toLowerCase()] = idx; });
+
+                const barycenters = nodesInLayer.map(nid => {
+                    const nid_l = nid.toLowerCase();
+                    const neighbors = adj[nid_l] || new Set();
+                    let sum = 0, count = 0;
+                    for (const nb of neighbors) {
+                        if (nextPositions[nb] !== undefined) { sum += nextPositions[nb]; count++; }
+                    }
+                    return { nid, bc: count > 0 ? sum / count : Infinity };
+                });
+                barycenters.sort((a, b) => a.bc - b.bc);
+                layers[layerNum] = barycenters.map(b => b.nid);
+            }
+        }
+
+        // Reassign y positions based on new ordering
+        const totalLayers = layerKeys.length;
+        const totalW = totalLayers * LAYER_W;
+        const offsetX = Math.max(40, (W - totalW) / 2);
+
+        layerKeys.forEach((layerNum, li) => {
+            const nodesInLayer = layers[layerNum];
+            const totalH = nodesInLayer.length * (NODE_H + GAP) - GAP;
+            const offsetY = Math.max(60, (H - totalH) / 2);
+            nodesInLayer.forEach((nid, ni) => {
+                const pos = lineagePositions[nid.toLowerCase()];
+                if (!pos) return;
+                pos.x = offsetX + li * LAYER_W;
+                pos.y = offsetY + ni * (NODE_H + GAP);
+            });
+        });
+
+        // Update SVG node positions & edges
+        allNodeEls.forEach(ne => {
+            const pos = lineagePositions[ne.id];
+            if (pos) ne.el.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+        });
+        updateEdges();
+        fitAll();
+    }
+
+    // Attach control events (deferred until controls exist)
+    function attachControls() {
+        const zi = document.getElementById('lineage-zi');
+        const zo = document.getElementById('lineage-zo');
+        const zr = document.getElementById('lineage-zr');
+        const reorder = document.getElementById('lineage-reorder');
+        const fs = document.getElementById('lineage-fs');
+        if (!zi) return;
+        zi.addEventListener('click', () => { zoomBy(1.3,vb.x+vb.w/2,vb.y+vb.h/2); });
+        zo.addEventListener('click', () => { zoomBy(1/1.3,vb.x+vb.w/2,vb.y+vb.h/2); });
+        zr.addEventListener('click', () => { fitAll(); });
+        reorder.addEventListener('click', () => { autoAlign(); });
+        fs.addEventListener('click', () => {
+            if (document.fullscreenElement) document.exitFullscreen();
+            else container.requestFullscreen().catch(() => {});
+        });
+        document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement === container) {
+                container.style.height = '100vh'; container.style.borderRadius = '0';
+                svg.setAttribute('width', screen.width); svg.setAttribute('height', screen.height);
+                if (fs) { fs.textContent = '\u2716'; fs.title = 'Exit fullscreen'; }
+            } else if (!document.fullscreenElement || document.fullscreenElement.id !== 'lineage-container') {
+                container.style.height = ''; container.style.borderRadius = '';
+                svg.setAttribute('width', W); svg.setAttribute('height', H);
+                if (fs) { fs.textContent = '\u26F6'; fs.title = 'Fullscreen'; }
+            }
+            fitAll();
+        });
+    }
+
+    // Drag nodes + Pan on SVG
+    let dragNodeEl = null, dragOff = {x:0,y:0};
+    let isPanning = false, panStart = {x:0,y:0}, vbStart = {x:0,y:0};
+
+    svg.addEventListener('mousedown', (ev) => {
+        const p = s2w(ev.clientX, ev.clientY);
+        // Check if clicking a node
+        for (const ne of allNodeEls) {
+            const pos = lineagePositions[ne.id];
+            if (!pos) continue;
+            if (p.x >= pos.x && p.x <= pos.x + NODE_W && p.y >= pos.y && p.y <= pos.y + NODE_H) {
+                dragNodeEl = ne;
+                dragOff = { x: p.x - pos.x, y: p.y - pos.y };
+                svg.style.cursor = 'grabbing';
+                return;
+            }
+        }
+        // Otherwise pan
+        isPanning = true; panStart = {x:ev.clientX,y:ev.clientY}; vbStart = {x:vb.x,y:vb.y};
+        svg.style.cursor = 'move';
+    });
+    svg.addEventListener('mousemove', (ev) => {
+        if (dragNodeEl) {
+            const p = s2w(ev.clientX, ev.clientY);
+            const pos = lineagePositions[dragNodeEl.id];
+            if (pos) {
+                pos.x = p.x - dragOff.x;
+                pos.y = p.y - dragOff.y;
+                dragNodeEl.el.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+                updateEdges();
+            }
+        } else if (isPanning) {
+            const r = svg.getBoundingClientRect();
+            vb.x = vbStart.x - (ev.clientX-panStart.x)/r.width*vb.w;
+            vb.y = vbStart.y - (ev.clientY-panStart.y)/r.height*vb.h;
+            updateVB();
+        }
+    });
+    svg.addEventListener('mouseup', () => { dragNodeEl=null; isPanning=false; svg.style.cursor='default'; });
+    svg.addEventListener('mouseleave', () => { dragNodeEl=null; isPanning=false; svg.style.cursor='default'; });
+
+    // Render controls once on first show (they are created inside renderLineage)
+    const origShow = showLineage;
+    let controlsAttached = false;
+    // We attach controls after first render
+    const observer = new MutationObserver(() => {
+        if (!controlsAttached && document.getElementById('lineage-zi')) {
+            attachControls();
+            controlsAttached = true;
+            observer.disconnect();
+        }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+})();
+""";
+    }
+
     private static string GetCss() => """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; line-height: 1.6; }
@@ -1706,10 +2638,16 @@ const erdDeps = {{depsJson}};
         details { margin: 0.5rem 0; }
         summary { cursor: pointer; color: #4fc3f7; padding: 0.3rem 0; }
         footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #0f3460; margin-top: 2rem; }
-        #graph-container, #erd-container { position: relative; background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px; margin: 1rem 0; overflow: hidden; }
-        #graph-container:fullscreen, #erd-container:fullscreen { background: #0d0d1a; padding: 0; }
-        #graph-container:fullscreen #dep-graph, #erd-container:fullscreen #erd-svg { width: 100vw; height: 100vh; }
-        #dep-graph, #erd-svg { display: block; }
+        #graph-container, #erd-container, #lineage-container { position: relative; background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+        #graph-container:fullscreen, #erd-container:fullscreen, #lineage-container:fullscreen { background: #0d0d1a; padding: 0; }
+        #graph-container:fullscreen #dep-graph, #erd-container:fullscreen #erd-svg, #lineage-container:fullscreen #lineage-svg { width: 100vw; height: 100vh; }
+        #dep-graph, #erd-svg, #lineage-svg { display: block; }
+        .lineage-controls { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.5rem 0; padding: 0.5rem 0.8rem; background: #16213e; border-radius: 6px; border: 1px solid #0f3460; }
+        .lineage-controls input[type="text"] { background: #0d0d1a; border: 1px solid #0f3460; color: #e0e0e0; padding: 0.4rem 0.6rem; border-radius: 4px; font-size: 0.9em; width: 260px; }
+        .lineage-controls input[type="text"]::placeholder { color: #555; }
+        .lineage-controls button { background: #0f3460; border: 1px solid #4fc3f7; color: #e0e0e0; padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85em; }
+        .lineage-controls button:hover { background: #1a5c8e; }
+        .lineage-empty { text-align: center; padding: 3rem; color: #555; font-size: 1.1em; }
         .graph-tooltip { display: none; position: absolute; background: #16213e; border: 1px solid #0f3460; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85em; pointer-events: none; z-index: 10; color: #e0e0e0; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         .graph-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 10; }
         .graph-controls button { width: 32px; height: 32px; border: 1px solid #0f3460; background: #16213e; color: #e0e0e0; font-size: 18px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -1719,6 +2657,15 @@ const erdDeps = {{depsJson}};
         .filter-toggle:has(input:checked) { background: color-mix(in srgb, var(--clr) 20%, transparent); }
         .filter-toggle:has(input:not(:checked)) { opacity: 0.4; border-style: dashed; }
         .filter-toggle input { display: none; }
+        @keyframes cycle-pulse { 0%,100% { stroke: #e94560; stroke-opacity: 0.6; } 50% { stroke: #ff2255; stroke-opacity: 1; } }
+        .cycle-node { animation: cycle-pulse 2s ease-in-out infinite; }
+        .cycle-warning { background: rgba(233,69,96,0.12); border: 1px solid #e94560; border-radius: 6px; padding: 0.8rem 1.2rem; margin: 0.8rem 0; color: #e94560; }
+        .cycle-warning details { margin-top: 0.4rem; }
+        .cycle-warning summary { color: #e94560; cursor: pointer; }
+        .cycle-warning ol { color: #e0e0e0; margin: 0.4rem 0 0; padding-left: 1.5rem; }
+        .cycle-warning li { margin: 0.2rem 0; }
+        .cycle-chain { color: #e94560; text-decoration: none; cursor: pointer; font-family: monospace; font-size: 0.9em; }
+        .cycle-chain:hover { text-decoration: underline; color: #ff6b8a; }
         .impact-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; padding: 0.8rem; background: #0d0d1a; border-radius: 6px; margin: 0.5rem 0; }
         .impact-detail ul { list-style: none; padding-left: 0.5rem; }
         .impact-detail li { padding: 0.15rem 0; }
