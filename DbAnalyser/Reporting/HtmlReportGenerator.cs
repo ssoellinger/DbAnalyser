@@ -457,12 +457,12 @@ public class HtmlReportGenerator : IReportGenerator
         if (map.ViewDependencies.Count > 0)
         {
             sb.AppendLine("<h3>Object Dependencies (Views, Procedures, Functions)</h3>");
-            sb.AppendLine("<table><thead><tr><th>Object</th><th>Type</th><th>Depends On</th><th>Target Type</th><th>Database</th></tr></thead><tbody>");
+            sb.AppendLine("<table><thead><tr><th>Object</th><th>Type</th><th>Depends On</th><th>Target Type</th><th>Database</th><th>Detected Via</th></tr></thead><tbody>");
             foreach (var vd in map.ViewDependencies)
             {
                 var dbLabel = vd.IsCrossDatabase ? $"<span class=\"error\">{E(vd.ToDatabase!)}</span>" : "<span class=\"meta\">local</span>";
                 sb.AppendLine($"<tr><td>{E(vd.FromSchema)}.{E(vd.FromName)}</td><td>{vd.FromType}</td>");
-                sb.AppendLine($"<td>{E(vd.ToFullName)}</td><td>{vd.ToType}</td><td>{dbLabel}</td></tr>");
+                sb.AppendLine($"<td>{E(vd.ToFullName)}</td><td>{vd.ToType}</td><td>{dbLabel}</td><td class=\"meta\">{E(vd.DetectedVia ?? "")}</td></tr>");
             }
             sb.AppendLine("</tbody></table>");
         }
@@ -1440,7 +1440,7 @@ const graphEdges = {{edgesJson}};
             {
                 var from = $"{rel.FromSchema}.{rel.FromTable}";
                 var to = $"{rel.ToSchema}.{rel.ToTable}";
-                var key = $"{from}->{to}";
+                var key = $"{from}.{rel.FromColumn}->{to}.{rel.ToColumn}";
                 if (!seen.Add(key)) continue;
                 implicitEdges.Add(new
                 {

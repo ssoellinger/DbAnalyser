@@ -208,6 +208,17 @@ public partial class RelationshipAnalyzer : IAnalyzer
                 return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.85,
                     $"Column name '{columnName}' matches pattern '{{TableName}}ID'");
             }
+
+            // Also try singular form
+            if (tableName.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+            {
+                var singular = tableName[..^1];
+                if (string.Equals(columnName, $"{singular}ID", StringComparison.Ordinal))
+                {
+                    return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.85,
+                        $"Column name '{columnName}' matches singular form of table '{tableName}' (ID variant)");
+                }
+            }
         }
 
         // Pattern 5 (75%): Column ends with Id/_Id and prefix matches a table after stripping common prefixes
@@ -250,20 +261,39 @@ public partial class RelationshipAnalyzer : IAnalyzer
                 return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.7,
                     $"Column name '{columnName}' matches pattern '{{TableName}}Key'");
             }
+
+            // Also try singular form
+            if (tableName.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+            {
+                var singular = tableName[..^1];
+                if (string.Equals(columnName, $"{singular}Key", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(columnName, $"{singular}_Key", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.7,
+                        $"Column name '{columnName}' matches singular form of table '{tableName}' (Key variant)");
+                }
+            }
         }
 
         // Pattern 7 (65%): Column named "TableNameNo", "TableNameNumber", or "TableNameCode"
         foreach (var (tableName, info) in tablePkLookup)
         {
-            if (string.Equals(columnName, $"{tableName}No", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(columnName, $"{tableName}Number", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(columnName, $"{tableName}Code", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(columnName, $"{tableName}_No", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(columnName, $"{tableName}_Number", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(columnName, $"{tableName}_Code", StringComparison.OrdinalIgnoreCase))
+            var namesToTry = new[] { tableName };
+            if (tableName.EndsWith("s", StringComparison.OrdinalIgnoreCase))
+                namesToTry = [tableName, tableName[..^1]];
+
+            foreach (var name in namesToTry)
             {
-                return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.65,
-                    $"Column name '{columnName}' matches pattern '{{TableName}}No/Number/Code'");
+                if (string.Equals(columnName, $"{name}No", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(columnName, $"{name}Number", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(columnName, $"{name}Code", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(columnName, $"{name}_No", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(columnName, $"{name}_Number", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(columnName, $"{name}_Code", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (info.Schema, info.Table, info.PkColumn, info.PkColumnInfo, 0.65,
+                        $"Column name '{columnName}' matches pattern '{{TableName}}No/Number/Code' for table '{tableName}'");
+                }
             }
         }
 
@@ -315,7 +345,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
             ToSchema: r["ToSchema"].ToString()!,
             ToName: r["ToName"].ToString()!,
             ToType: r["ToType"].ToString()!,
-            ToDatabase: r["ToDatabase"] is DBNull ? null : r["ToDatabase"].ToString()
+            ToDatabase: r["ToDatabase"] is DBNull ? null : r["ToDatabase"].ToString(),
+            DetectedVia: "sys.sql_expression_dependencies"
         )).ToList();
     }
 
@@ -540,7 +571,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
             if (string.IsNullOrWhiteSpace(view.Definition)) continue;
 
             var refs = ExtractTableReferences(view.Definition, knownObjects, currentDb);
-            foreach (var (refSchema, refName, refType, refDb) in refs)
+            var execRefs = ExtractExecReferences(view.Definition, knownObjects);
+            foreach (var (refSchema, refName, refType, refDb, via) in refs.Concat(execRefs))
             {
                 if (refDb is null
                     && string.Equals(refName, view.ViewName, StringComparison.OrdinalIgnoreCase)
@@ -554,7 +586,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
                     ToSchema: refSchema,
                     ToName: refName,
                     ToType: refType,
-                    ToDatabase: refDb));
+                    ToDatabase: refDb,
+                    DetectedVia: via));
             }
         }
 
@@ -564,7 +597,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
             if (string.IsNullOrWhiteSpace(sp.Definition)) continue;
 
             var refs = ExtractTableReferences(sp.Definition, knownObjects, currentDb);
-            foreach (var (refSchema, refName, refType, refDb) in refs)
+            var execRefs = ExtractExecReferences(sp.Definition, knownObjects);
+            foreach (var (refSchema, refName, refType, refDb, via) in refs.Concat(execRefs))
             {
                 if (refDb is null
                     && string.Equals(refName, sp.ProcedureName, StringComparison.OrdinalIgnoreCase)
@@ -578,7 +612,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
                     ToSchema: refSchema,
                     ToName: refName,
                     ToType: refType,
-                    ToDatabase: refDb));
+                    ToDatabase: refDb,
+                    DetectedVia: via));
             }
         }
 
@@ -588,7 +623,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
             if (string.IsNullOrWhiteSpace(fn.Definition)) continue;
 
             var refs = ExtractTableReferences(fn.Definition, knownObjects, currentDb);
-            foreach (var (refSchema, refName, refType, refDb) in refs)
+            var execRefs = ExtractExecReferences(fn.Definition, knownObjects);
+            foreach (var (refSchema, refName, refType, refDb, via) in refs.Concat(execRefs))
             {
                 if (refDb is null
                     && string.Equals(refName, fn.FunctionName, StringComparison.OrdinalIgnoreCase)
@@ -602,7 +638,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
                     ToSchema: refSchema,
                     ToName: refName,
                     ToType: refType,
-                    ToDatabase: refDb));
+                    ToDatabase: refDb,
+                    DetectedVia: via));
             }
         }
 
@@ -616,14 +653,15 @@ public partial class RelationshipAnalyzer : IAnalyzer
                 FromType: "Trigger",
                 ToSchema: tr.SchemaName,
                 ToName: tr.ParentTable,
-                ToType: "Table"));
+                ToType: "Table",
+                DetectedVia: "Trigger parent"));
 
             // Also parse body for additional references
             if (!string.IsNullOrWhiteSpace(tr.Definition))
             {
                 var refs = ExtractTableReferences(tr.Definition, knownObjects, currentDb);
                 var execRefs = ExtractExecReferences(tr.Definition, knownObjects);
-                foreach (var (refSchema, refName, refType, refDb) in refs.Concat(execRefs))
+                foreach (var (refSchema, refName, refType, refDb, via) in refs.Concat(execRefs))
                 {
                     // Skip self-reference and parent table reference
                     if (refDb is null
@@ -638,7 +676,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
                         ToSchema: refSchema,
                         ToName: refName,
                         ToType: refType,
-                        ToDatabase: refDb));
+                        ToDatabase: refDb,
+                        DetectedVia: via));
                 }
             }
         }
@@ -650,10 +689,9 @@ public partial class RelationshipAnalyzer : IAnalyzer
             {
                 if (string.IsNullOrWhiteSpace(step.Command)) continue;
 
-                // Also match EXEC/EXECUTE calls for procedure references
                 var refs = ExtractTableReferences(step.Command, knownObjects, currentDb);
                 var execRefs = ExtractExecReferences(step.Command, knownObjects);
-                foreach (var (refSchema, refName, refType, refDb) in refs.Concat(execRefs))
+                foreach (var (refSchema, refName, refType, refDb, via) in refs.Concat(execRefs))
                 {
                     result.Add(new ObjectDependency(
                         FromSchema: "job",
@@ -662,7 +700,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
                         ToSchema: refSchema,
                         ToName: refName,
                         ToType: refType,
-                        ToDatabase: refDb));
+                        ToDatabase: refDb,
+                        DetectedVia: via));
                 }
             }
         }
@@ -670,90 +709,105 @@ public partial class RelationshipAnalyzer : IAnalyzer
         return result;
     }
 
-    private HashSet<(string Schema, string Name, string Type, string? Database)> ExtractExecReferences(
+    private HashSet<(string Schema, string Name, string Type, string? Database, string Via)> ExtractExecReferences(
         string command,
         Dictionary<string, (string Schema, string Name, string Type)> knownObjects)
     {
-        var found = new HashSet<(string Schema, string Name, string Type, string? Database)>();
+        var found = new HashSet<(string Schema, string Name, string Type, string? Database, string Via)>();
 
-        var matches = ExecRegex().Matches(command);
-        foreach (Match match in matches)
+        // Scan direct SQL and inside string literals (dynamic SQL)
+        var stringLiterals = ExtractStringLiterals(command);
+        var sources = new List<(string Text, string Via)> { (command, "SQL: EXEC") };
+        sources.AddRange(stringLiterals.Select(s => (s, "SQL: EXEC (dynamic)")));
+
+        foreach (var (text, via) in sources)
         {
-            var reference = match.Groups[1].Value.Trim();
-            var clean = reference.Replace("[", "").Replace("]", "").Trim();
+            foreach (Match match in ExecRegex().Matches(text))
+            {
+                var reference = match.Groups[1].Value.Trim();
+                var clean = reference.Replace("[", "").Replace("]", "").Trim();
 
-            if (knownObjects.TryGetValue(clean, out var obj))
-            {
-                found.Add((obj.Schema, obj.Name, obj.Type, null));
-                continue;
-            }
-            if (knownObjects.TryGetValue(reference, out obj))
-            {
-                found.Add((obj.Schema, obj.Name, obj.Type, null));
+                if (knownObjects.TryGetValue(clean, out var obj))
+                {
+                    found.Add((obj.Schema, obj.Name, obj.Type, null, via));
+                    continue;
+                }
+                if (knownObjects.TryGetValue(reference, out obj))
+                {
+                    found.Add((obj.Schema, obj.Name, obj.Type, null, via));
+                }
             }
         }
 
         return found;
     }
 
-    private HashSet<(string Schema, string Name, string Type, string? Database)> ExtractTableReferences(
+    private static List<string> ExtractStringLiterals(string sql)
+    {
+        var literals = new List<string>();
+        var matches = StringLiteralRegex().Matches(sql);
+        foreach (Match match in matches)
+        {
+            var content = match.Groups[1].Value.Replace("''", "'");
+            if (content.Length > 10) // skip trivial strings
+                literals.Add(content);
+        }
+        return literals;
+    }
+
+    private HashSet<(string Schema, string Name, string Type, string? Database, string Via)> ExtractTableReferences(
         string definition,
         Dictionary<string, (string Schema, string Name, string Type)> knownObjects,
         string currentDatabase)
     {
-        var found = new HashSet<(string Schema, string Name, string Type, string? Database)>();
+        var found = new HashSet<(string Schema, string Name, string Type, string? Database, string Via)>();
 
-        var matches = FromJoinRegex().Matches(definition);
-        foreach (Match match in matches)
+        // Scan direct SQL and inside string literals (dynamic SQL)
+        var stringLiterals = ExtractStringLiterals(definition);
+        var sources = new List<(string Text, string Via)> { (definition, "SQL: FROM/JOIN") };
+        sources.AddRange(stringLiterals.Select(s => (s, "SQL: FROM/JOIN (dynamic)")));
+
+        foreach (var (text, via) in sources)
         {
-            var reference = match.Groups[1].Value.Trim();
-            var clean = reference.Replace("[", "").Replace("]", "").Trim();
-            var parts = clean.Split('.');
-
-            // 4-part name: server.database.schema.table (linked server)
-            if (parts.Length >= 4)
+            foreach (Match match in FromJoinRegex().Matches(text))
             {
-                var db = parts[^3];
-                var schema = parts[^2];
-                var name = parts[^1];
+                var reference = match.Groups[1].Value.Trim();
+                var clean = reference.Replace("[", "").Replace("]", "").Trim();
+                var parts = clean.Split('.');
 
-                found.Add((schema, name, "External", db));
-                continue;
-            }
-
-            // 3-part name: database.schema.table
-            if (parts.Length == 3)
-            {
-                var db = parts[0];
-                var schema = parts[1];
-                var name = parts[2];
-
-                // Check if it's a reference to the current database (treat as local)
-                if (string.Equals(db, currentDatabase, StringComparison.OrdinalIgnoreCase))
+                // 4-part name: server.database.schema.table (linked server)
+                if (parts.Length >= 4)
                 {
-                    var localKey = $"{schema}.{name}";
-                    if (knownObjects.TryGetValue(localKey, out var localObj))
-                    {
-                        found.Add((localObj.Schema, localObj.Name, localObj.Type, null));
-                        continue;
-                    }
+                    found.Add((parts[^2], parts[^1], "External", parts[^3], via));
+                    continue;
                 }
 
-                // Cross-database reference
-                found.Add((schema, name, "External", db));
-                continue;
-            }
+                // 3-part name: database.schema.table
+                if (parts.Length == 3)
+                {
+                    if (string.Equals(parts[0], currentDatabase, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var localKey = $"{parts[1]}.{parts[2]}";
+                        if (knownObjects.TryGetValue(localKey, out var localObj))
+                        {
+                            found.Add((localObj.Schema, localObj.Name, localObj.Type, null, via));
+                            continue;
+                        }
+                    }
+                    found.Add((parts[1], parts[2], "External", parts[0], via));
+                    continue;
+                }
 
-            // 1 or 2-part name: try local lookup
-            if (knownObjects.TryGetValue(reference, out var obj))
-            {
-                found.Add((obj.Schema, obj.Name, obj.Type, null));
-                continue;
-            }
-
-            if (knownObjects.TryGetValue(clean, out obj))
-            {
-                found.Add((obj.Schema, obj.Name, obj.Type, null));
+                // 1 or 2-part name: try local lookup
+                if (knownObjects.TryGetValue(reference, out var obj))
+                {
+                    found.Add((obj.Schema, obj.Name, obj.Type, null, via));
+                    continue;
+                }
+                if (knownObjects.TryGetValue(clean, out obj))
+                {
+                    found.Add((obj.Schema, obj.Name, obj.Type, null, via));
+                }
             }
         }
 
@@ -780,7 +834,8 @@ public partial class RelationshipAnalyzer : IAnalyzer
                 ToSchema: targetSchema,
                 ToName: targetName,
                 ToType: db is not null ? "External" : "Table",
-                ToDatabase: db));
+                ToDatabase: db,
+                DetectedVia: "Synonym base object"));
         }
 
         return result;
@@ -798,4 +853,11 @@ public partial class RelationshipAnalyzer : IAnalyzer
         @"(?:EXEC|EXECUTE)\s+((?:\[?\w+\]?\.)?(?:\[?\w+\]?\.)?(?:\[?\w+\]?))",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex ExecRegex();
+
+    // Match SQL string literals: '...' (handles escaped quotes '')
+    // Also matches N'...' (Unicode string prefix)
+    [GeneratedRegex(
+        @"N?'((?:[^']|'')*)'",
+        RegexOptions.Compiled)]
+    private static partial Regex StringLiteralRegex();
 }

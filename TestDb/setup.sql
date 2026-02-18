@@ -602,6 +602,184 @@ CREATE TYPE dbo.OrderItemTableType AS TABLE (
 GO
 
 -- ============================================================
+-- TABLES for implicit FK pattern testing (Patterns 4-7)
+-- ============================================================
+
+-- Table with Pattern 4 test: {TableName}ID (all-caps ID variant)
+CREATE TABLE dbo.Invoices (
+    Id INT IDENTITY PRIMARY KEY,
+    OrderID INT NOT NULL,           -- Pattern 4: "OrderID" (all-caps) -> Orders
+    Amount DECIMAL(18,2) NOT NULL,
+    InvoiceDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+);
+GO
+
+-- Table with Pattern 5 test: prefix stripping (Source/Ref/Parent etc.)
+CREATE TABLE dbo.Transfers (
+    Id INT IDENTITY PRIMARY KEY,
+    SourceCustomerId INT NOT NULL,  -- Pattern 5: strip "Source" -> Customer -> Customers
+    TargetCustomerId INT NOT NULL,  -- Pattern 5: strip "Target" -> Customer -> Customers
+    RefProductId INT NOT NULL,      -- Pattern 5: strip "Ref" -> Product -> Products
+    Amount DECIMAL(18,2) NOT NULL,
+    TransferDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+);
+GO
+
+-- Table with Pattern 6 test: {TableName}Key / {TableName}_Key
+CREATE TABLE dbo.AuditEntries (
+    Id INT IDENTITY PRIMARY KEY,
+    CustomerKey INT NOT NULL,       -- Pattern 6: "CustomerKey" -> Customers (singular match)
+    Product_Key INT NOT NULL,       -- Pattern 6: "Product_Key" -> Products (singular match)
+    Action NVARCHAR(50) NOT NULL,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+);
+GO
+
+-- Table with Pattern 7 test: {TableName}No / {TableName}Number / {TableName}Code
+CREATE TABLE dbo.Shipments (
+    Id INT IDENTITY PRIMARY KEY,
+    OrderNo INT NOT NULL,           -- Pattern 7: "OrderNo" -> Orders (singular match)
+    CustomerNumber INT NOT NULL,    -- Pattern 7: "CustomerNumber" -> Customers (singular match)
+    CountryCode INT NOT NULL,       -- Pattern 7: "CountryCode" -> Countries (singular match, note: type mismatch - Countries.Code is CHAR(2)!)
+    ShippedAt DATETIME2 NULL
+);
+GO
+CREATE INDEX IX_Shipments_OrderNo ON dbo.Shipments(OrderNo); -- gives +0.05 confidence for indexed
+GO
+
+-- Table with type mismatch test (should NOT generate implicit FK)
+CREATE TABLE dbo.MismatchTest (
+    Id INT IDENTITY PRIMARY KEY,
+    CustomerId NVARCHAR(50) NOT NULL,   -- Type mismatch: nvarchar vs int -> should be skipped
+    OrderId BIGINT NOT NULL             -- Type compatible: bigint vs int -> should match with reduced confidence
+);
+GO
+
+-- ============================================================
+-- PROCEDURES: proc-to-proc calls and dynamic SQL
+-- ============================================================
+
+-- Helper procedure (called by others)
+CREATE PROCEDURE dbo.usp_RecalculateOrderTotal
+    @OrderId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.Orders
+    SET TotalAmount = (
+        SELECT ISNULL(SUM(Quantity * UnitPrice * (1 - Discount / 100)), 0)
+        FROM dbo.OrderItems WHERE OrderId = @OrderId
+    )
+    WHERE Id = @OrderId;
+END;
+GO
+
+-- Procedure that calls another procedure (EXEC detection)
+CREATE PROCEDURE dbo.usp_CompleteOrder
+    @OrderId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Direct EXEC of another procedure
+    EXEC dbo.usp_RecalculateOrderTotal @OrderId = @OrderId;
+
+    UPDATE dbo.Orders SET Status = 'Completed' WHERE Id = @OrderId;
+
+    -- Also calls a function
+    DECLARE @total DECIMAL(18,2);
+    SELECT @total = dbo.fn_GetCustomerTotalSpend(CustomerId) FROM dbo.Orders WHERE Id = @OrderId;
+END;
+GO
+
+-- Procedure with dynamic SQL using EXEC('')
+CREATE PROCEDURE dbo.usp_DynamicSearch
+    @TableName NVARCHAR(100),
+    @SearchTerm NVARCHAR(200)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Dynamic SQL: references to tables inside string literals
+    EXEC('SELECT * FROM dbo.Products WHERE Name LIKE ''%' + @SearchTerm + '%''');
+    EXEC('SELECT * FROM dbo.Categories WHERE Name LIKE ''%' + @SearchTerm + '%''');
+END;
+GO
+
+-- Procedure with sp_executesql (dynamic SQL)
+CREATE PROCEDURE dbo.usp_DynamicReport
+    @CustomerId INT,
+    @IncludeInactive BIT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @sql NVARCHAR(MAX);
+
+    -- Dynamic SQL with FROM/JOIN inside string literal
+    SET @sql = N'SELECT c.FirstName, c.LastName, o.Id AS OrderId, o.TotalAmount
+                 FROM dbo.Customers c
+                 JOIN dbo.Orders o ON o.CustomerId = c.Id
+                 WHERE c.Id = @CustId';
+
+    IF @IncludeInactive = 0
+        SET @sql = @sql + N' AND o.Status != ''Cancelled''';
+
+    EXEC sp_executesql @sql, N'@CustId INT', @CustId = @CustomerId;
+
+    -- Dynamic SQL with EXEC inside string literal
+    EXEC sp_executesql N'EXEC dbo.usp_RecalculateOrderTotal @OrderId = 1';
+END;
+GO
+
+-- ============================================================
+-- FUNCTIONS: function-to-function and function-to-proc calls
+-- ============================================================
+
+-- Function that calls another function
+CREATE FUNCTION dbo.fn_GetCustomerSummary(@CustomerId INT)
+RETURNS NVARCHAR(500)
+AS
+BEGIN
+    DECLARE @total DECIMAL(18,2);
+    SET @total = dbo.fn_GetCustomerTotalSpend(@CustomerId);
+
+    DECLARE @name NVARCHAR(200);
+    SELECT @name = FirstName + ' ' + LastName FROM dbo.Customers WHERE Id = @CustomerId;
+
+    RETURN @name + ': ' + CAST(@total AS NVARCHAR(20));
+END;
+GO
+
+-- Function that references a view and another function
+CREATE FUNCTION dbo.fn_GetTopCustomer()
+RETURNS INT
+AS
+BEGIN
+    DECLARE @topId INT;
+    SELECT TOP 1 @topId = CustomerId
+    FROM dbo.vw_CustomerOrders
+    GROUP BY CustomerId
+    ORDER BY SUM(TotalAmount) DESC;
+    RETURN @topId;
+END;
+GO
+
+-- ============================================================
+-- VIEW: with EXEC (unusual but testable)
+-- ============================================================
+
+-- View that references multiple objects for richer dependency testing
+CREATE VIEW dbo.vw_CustomerSpending AS
+SELECT
+    c.Id AS CustomerId,
+    c.FirstName + ' ' + c.LastName AS CustomerName,
+    dbo.fn_GetCustomerTotalSpend(c.Id) AS TotalSpend,
+    COUNT(o.Id) AS OrderCount
+FROM dbo.Customers c
+LEFT JOIN dbo.Orders o ON o.CustomerId = c.Id
+GROUP BY c.Id, c.FirstName, c.LastName;
+GO
+
+-- ============================================================
 -- SEED DATA
 -- ============================================================
 
@@ -675,11 +853,51 @@ INSERT INTO inventory.Stock (WarehouseId, ProductId, Quantity) VALUES
 
 INSERT INTO DbAnalyserExternal.dbo.ExternalConfig (ConfigKey, ConfigValue) VALUES
 ('MaxRetries', '3'), ('Timeout', '30');
+
+-- Seed data for new implicit FK pattern tables
+INSERT INTO dbo.Invoices (OrderID, Amount) VALUES
+(1, 1329.98), (2, 49.99);
+
+INSERT INTO dbo.Transfers (SourceCustomerId, TargetCustomerId, RefProductId, Amount) VALUES
+(1, 2, 1, 100.00), (2, 3, 3, 50.00);
+
+INSERT INTO dbo.AuditEntries (CustomerKey, Product_Key, Action) VALUES
+(1, 1, 'Purchase'), (2, 3, 'Review');
+
+INSERT INTO dbo.Shipments (OrderNo, CustomerNumber, CountryCode) VALUES
+(1, 1, 1), (2, 2, 3);
+
+INSERT INTO dbo.MismatchTest (CustomerId, OrderId) VALUES
+('abc123', 1), ('def456', 2);
 GO
 
 PRINT '=== DbAnalyserTestDb setup complete! ===';
-PRINT 'Tables: 15 (2 schemas), Views: 4, Procedures: 6, Functions: 5';
+PRINT 'Tables: 20 (2 schemas), Views: 5, Procedures: 10, Functions: 7';
 PRINT 'Triggers: 3, Synonyms: 4 (2 local, 2 cross-DB), Sequences: 3, UDTs: 3';
 PRINT 'Cross-DB refs: 3 (to DbAnalyserExternal)';
-PRINT 'Implicit FKs: ShippingAddresses.CustomerId, ShippingAddresses.CountryId';
+PRINT '';
+PRINT '=== Implicit FK test cases ===';
+PRINT 'Pattern 1 (TableNameId): ShippingAddresses.CustomerId -> Customers';
+PRINT 'Pattern 1 (TableNameId): ShippingAddresses.CountryId -> Countries';
+PRINT 'Pattern 4 (TableNameID): Invoices.OrderID -> Orders';
+PRINT 'Pattern 5 (prefix strip): Transfers.SourceCustomerId -> Customers';
+PRINT 'Pattern 5 (prefix strip): Transfers.TargetCustomerId -> Customers';
+PRINT 'Pattern 5 (prefix strip): Transfers.RefProductId -> Products';
+PRINT 'Pattern 6 (TableKey):    AuditEntries.CustomerKey -> Customers';
+PRINT 'Pattern 6 (Table_Key):   AuditEntries.Product_Key -> Products';
+PRINT 'Pattern 7 (TableNo):     Shipments.OrderNo -> Orders';
+PRINT 'Pattern 7 (TableNumber): Shipments.CustomerNumber -> Customers';
+PRINT 'Pattern 7 (TableCode):   Shipments.CountryCode -> Countries (type mismatch - should be skipped!)';
+PRINT 'Type mismatch:           MismatchTest.CustomerId (nvarchar vs int) -> should NOT match';
+PRINT 'Type compatible:         MismatchTest.OrderId (bigint vs int) -> should match with lower confidence';
+PRINT '';
+PRINT '=== Dependency detection test cases ===';
+PRINT 'Proc->Proc EXEC:         usp_CompleteOrder -> usp_RecalculateOrderTotal';
+PRINT 'Proc->Func call:         usp_CompleteOrder -> fn_GetCustomerTotalSpend';
+PRINT 'Dynamic SQL EXEC():      usp_DynamicSearch -> Products, Categories';
+PRINT 'Dynamic sp_executesql:   usp_DynamicReport -> Customers, Orders';
+PRINT 'Dynamic EXEC in string:  usp_DynamicReport -> usp_RecalculateOrderTotal';
+PRINT 'Func->Func call:         fn_GetCustomerSummary -> fn_GetCustomerTotalSpend';
+PRINT 'Func->View ref:          fn_GetTopCustomer -> vw_CustomerOrders';
+PRINT 'View->Func call:         vw_CustomerSpending -> fn_GetCustomerTotalSpend';
 GO

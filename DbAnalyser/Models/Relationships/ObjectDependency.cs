@@ -7,7 +7,8 @@ public record ObjectDependency(
     string ToSchema,
     string ToName,
     string ToType,
-    string? ToDatabase = null)
+    string? ToDatabase = null,
+    string? DetectedVia = null)
 {
     public bool IsCrossDatabase => ToDatabase is not null;
     public string ToFullName => IsCrossDatabase ? $"{ToDatabase}.{ToSchema}.{ToName}" : $"{ToSchema}.{ToName}";
