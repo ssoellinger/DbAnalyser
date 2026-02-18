@@ -4,6 +4,7 @@ using System.Web;
 using DbAnalyser.Analyzers;
 using DbAnalyser.Models.Quality;
 using DbAnalyser.Models.Relationships;
+using DbAnalyser.Models.Schema;
 
 namespace DbAnalyser.Reporting;
 
@@ -38,6 +39,7 @@ public class HtmlReportGenerator : IReportGenerator
 
         sb.AppendLine("<nav>");
         if (result.Relationships?.Dependencies.Count > 0) sb.AppendLine("<a href=\"#dependencies\">Dependencies</a>");
+        if (result.Schema?.Tables.Count > 0) sb.AppendLine("<a href=\"#erd\">ERD</a>");
         if (result.Schema is not null) sb.AppendLine("<a href=\"#schema\">Schema</a>");
         if (result.Profiles is not null) sb.AppendLine("<a href=\"#profiling\">Profiling</a>");
         if (result.Relationships is not null) sb.AppendLine("<a href=\"#relationships\">Relationships</a>");
@@ -48,6 +50,9 @@ public class HtmlReportGenerator : IReportGenerator
 
         if (result.Relationships?.Dependencies.Count > 0)
             BuildDependencySection(sb, result);
+
+        if (result.Schema?.Tables.Count > 0)
+            BuildErdSection(sb, result);
 
         if (result.Schema is not null)
             BuildSchemaSection(sb, result);
@@ -68,6 +73,13 @@ public class HtmlReportGenerator : IReportGenerator
         {
             sb.AppendLine("<script>");
             sb.AppendLine(GetGraphJs(result));
+            sb.AppendLine("</script>");
+        }
+
+        if (result.Schema?.Tables.Count > 0)
+        {
+            sb.AppendLine("<script>");
+            sb.AppendLine(GetErdJs(result));
             sb.AppendLine("</script>");
         }
 
@@ -150,19 +162,19 @@ public class HtmlReportGenerator : IReportGenerator
 
         sb.AppendLine("<div class=\"graph-filters\">");
         sb.AppendLine("<span class=\"meta\">Relations:</span>");
-        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4fc3f7\"><input type=\"checkbox\" value=\"fk\" checked onchange=\"toggleEdgeFilter(this)\"><span>Table &harr; Table / FK ({fkEdgeCount})</span></label>");
+        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4fc3f7\"><input type=\"checkbox\" value=\"fk\" checked onchange=\"toggleEdgeFilter(this)\"><span>FK: Table &harr; Table ({fkEdgeCount})</span></label>");
         if (viewEdgeCount > 0)
-            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4ecca3\"><input type=\"checkbox\" value=\"view\" checked onchange=\"toggleEdgeFilter(this)\"><span>View &rarr; Object ({viewEdgeCount})</span></label>");
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4ecca3\"><input type=\"checkbox\" value=\"view\" checked onchange=\"toggleEdgeFilter(this)\"><span>View &rarr; Table/View ({viewEdgeCount})</span></label>");
         if (sprocEdgeCount > 0)
-            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleEdgeFilter(this)\"><span>Procedure &rarr; Object ({sprocEdgeCount})</span></label>");
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleEdgeFilter(this)\"><span>Procedure &rarr; Table/View/Func ({sprocEdgeCount})</span></label>");
         if (funcEdgeCount > 0)
-            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleEdgeFilter(this)\"><span>Function &rarr; Object ({funcEdgeCount})</span></label>");
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleEdgeFilter(this)\"><span>Function &rarr; Table/View ({funcEdgeCount})</span></label>");
         if (triggerEdgeCount > 0)
-            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff7043\"><input type=\"checkbox\" value=\"trigger\" checked onchange=\"toggleEdgeFilter(this)\"><span>Trigger &rarr; Object ({triggerEdgeCount})</span></label>");
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff7043\"><input type=\"checkbox\" value=\"trigger\" checked onchange=\"toggleEdgeFilter(this)\"><span>Trigger &rarr; Table/Proc ({triggerEdgeCount})</span></label>");
         if (synonymEdgeCount > 0)
-            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#78909c\"><input type=\"checkbox\" value=\"synonym\" checked onchange=\"toggleEdgeFilter(this)\"><span>Synonym &rarr; Object ({synonymEdgeCount})</span></label>");
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#78909c\"><input type=\"checkbox\" value=\"synonym\" checked onchange=\"toggleEdgeFilter(this)\"><span>Synonym &rarr; Table/View ({synonymEdgeCount})</span></label>");
         if (jobEdgeCount > 0)
-            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#26a69a\"><input type=\"checkbox\" value=\"job\" checked onchange=\"toggleEdgeFilter(this)\"><span>Job &rarr; Object ({jobEdgeCount})</span></label>");
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#26a69a\"><input type=\"checkbox\" value=\"job\" checked onchange=\"toggleEdgeFilter(this)\"><span>Job &rarr; Table/Proc ({jobEdgeCount})</span></label>");
         if (extEdgeCount > 0)
             sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff6b6b\"><input type=\"checkbox\" value=\"external\" checked onchange=\"toggleEdgeFilter(this)\"><span>Cross-DB ({extEdgeCount})</span></label>");
         sb.AppendLine("</div>");
@@ -515,7 +527,7 @@ public class HtmlReportGenerator : IReportGenerator
             var key = $"{from}->{to}";
             if (!edgeSet.Add(key)) continue;
             if (!nodeIndex.ContainsKey(from) || !nodeIndex.ContainsKey(to)) continue;
-            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = "fk" });
+            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = "fk", fromType = "Table", toType = "Table", label = $"{from} → {to}" });
         }
 
         // Add object dependency edges (views, procedures, functions, cross-DB)
@@ -527,7 +539,7 @@ public class HtmlReportGenerator : IReportGenerator
             if (!edgeSet.Add(key)) continue;
             if (!nodeIndex.ContainsKey(from) || !nodeIndex.ContainsKey(to)) continue;
             var edgeType = vd.IsCrossDatabase ? "external" : vd.FromType.ToLowerInvariant();
-            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = edgeType });
+            edges.Add(new { source = nodeIndex[from], target = nodeIndex[to], type = edgeType, fromType = vd.FromType, toType = vd.ToType, label = $"{from} → {to}" });
         }
 
         var nodesJson = JsonSerializer.Serialize(nodes);
@@ -609,7 +621,7 @@ const graphEdges = {{edgesJson}};
 
     // Create edge elements
     const edgeColors = { fk: '#4fc3f7', view: '#4ecca3', procedure: '#f0a500', function: '#bb86fc', trigger: '#ff7043', synonym: '#78909c', job: '#26a69a', external: '#ff6b6b' };
-    const edgeEls = graphEdges.map(e => {
+    const edgeEls = graphEdges.map((e, i) => {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         const color = edgeColors[e.type] || '#4fc3f7';
         line.setAttribute('stroke', color);
@@ -617,8 +629,33 @@ const graphEdges = {{edgesJson}};
         line.setAttribute('stroke-width', '1.5');
         if (e.type !== 'fk') line.setAttribute('stroke-dasharray', '6,3');
         line.setAttribute('marker-end', 'url(#arrow)');
+        line.style.cursor = 'pointer';
         edgeGroup.appendChild(line);
         return line;
+    });
+
+    // Edge hover tooltips
+    edgeEls.forEach((el, i) => {
+        const e = graphEdges[i];
+        el.addEventListener('mouseenter', (ev) => {
+            tooltip.innerHTML = `<strong>${e.fromType} &rarr; ${e.toType}</strong><br>${e.label}`;
+            tooltip.style.display = 'block';
+            const cr = container.getBoundingClientRect();
+            tooltip.style.left = (ev.clientX - cr.left + 15) + 'px';
+            tooltip.style.top = (ev.clientY - cr.top - 10) + 'px';
+            el.setAttribute('stroke-opacity', '1');
+            el.setAttribute('stroke-width', '3');
+        });
+        el.addEventListener('mousemove', (ev) => {
+            const cr = container.getBoundingClientRect();
+            tooltip.style.left = (ev.clientX - cr.left + 15) + 'px';
+            tooltip.style.top = (ev.clientY - cr.top - 10) + 'px';
+        });
+        el.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+            el.setAttribute('stroke-opacity', '0.4');
+            el.setAttribute('stroke-width', '1.5');
+        });
     });
 
     // Create node elements
@@ -704,7 +741,7 @@ const graphEdges = {{edgesJson}};
     nodeEls.forEach((el, i) => {
         const n = graphNodes[i];
         el.addEventListener('mouseenter', (ev) => {
-            tooltip.innerHTML = `<strong>${n.id}</strong><br>Type: ${n.type}<br>Referenced by: ${n.refBy}<br>Depends on: ${n.depOn}<br>Impact: ${n.impact}<br>Score: ${n.score}`;
+            tooltip.innerHTML = `<strong>${n.id}</strong><br>Type: ${n.type.charAt(0).toUpperCase() + n.type.slice(1)}<br>Referenced by: ${n.refBy}<br>Depends on: ${n.depOn}<br>Impact: ${n.impact}<br>Score: ${n.score}`;
             tooltip.style.display = 'block';
             const cr = container.getBoundingClientRect();
             tooltip.style.left = (ev.clientX - cr.left + 15) + 'px';
@@ -977,6 +1014,458 @@ const graphEdges = {{edgesJson}};
 """;
     }
 
+    private void BuildErdSection(StringBuilder sb, AnalysisResult result)
+    {
+        var schema = result.Schema!;
+        var fkCount = schema.Tables.Sum(t => t.ForeignKeys.Count);
+        var depCount = result.Relationships?.ViewDependencies.Count ?? 0;
+
+        sb.AppendLine("<section id=\"erd\">");
+        sb.AppendLine("<h2>Entity Relationship Diagram</h2>");
+        sb.AppendLine($"<p class=\"meta\">{schema.Tables.Count} tables, {schema.Views.Count} views, {schema.StoredProcedures.Count} procedures, {schema.Functions.Count} functions, {fkCount} FK constraints, {depCount} dependencies. Scroll to zoom. Drag to pan/rearrange.</p>");
+
+        // Filters
+        sb.AppendLine("<div class=\"graph-filters\">");
+        sb.AppendLine("<span class=\"meta\">Show:</span>");
+        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#e94560\"><input type=\"checkbox\" value=\"table\" checked onchange=\"toggleErdFilter(this)\"><span>Tables ({schema.Tables.Count})</span></label>");
+        sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#4ecca3\"><input type=\"checkbox\" value=\"view\" checked onchange=\"toggleErdFilter(this)\"><span>Views ({schema.Views.Count})</span></label>");
+        if (schema.StoredProcedures.Count > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#f0a500\"><input type=\"checkbox\" value=\"procedure\" checked onchange=\"toggleErdFilter(this)\"><span>Procedures ({schema.StoredProcedures.Count})</span></label>");
+        if (schema.Functions.Count > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#bb86fc\"><input type=\"checkbox\" value=\"function\" checked onchange=\"toggleErdFilter(this)\"><span>Functions ({schema.Functions.Count})</span></label>");
+        if (schema.Triggers.Count > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#ff7043\"><input type=\"checkbox\" value=\"trigger\" checked onchange=\"toggleErdFilter(this)\"><span>Triggers ({schema.Triggers.Count})</span></label>");
+        if (schema.Synonyms.Count > 0)
+            sb.AppendLine($"<label class=\"filter-toggle\" style=\"--clr:#78909c\"><input type=\"checkbox\" value=\"synonym\" checked onchange=\"toggleErdFilter(this)\"><span>Synonyms ({schema.Synonyms.Count})</span></label>");
+        sb.AppendLine("</div>");
+
+        sb.AppendLine("<div id=\"erd-container\"><svg id=\"erd-svg\"></svg></div>");
+        sb.AppendLine("</section>");
+    }
+
+    private string GetErdJs(AnalysisResult result)
+    {
+        var schema = result.Schema!;
+
+        string ColType(ColumnInfo c)
+        {
+            if (c.MaxLength.HasValue)
+                return $"{c.DataType}({(c.MaxLength == -1 ? "MAX" : c.MaxLength.ToString())})";
+            if (c.Precision.HasValue)
+                return $"{c.DataType}({c.Precision},{c.Scale})";
+            return c.DataType;
+        }
+
+        // Build ERD boxes for all object types
+        var boxes = new List<object>();
+
+        // Tables
+        foreach (var t in schema.Tables)
+        {
+            var cols = t.Columns.Select(c =>
+            {
+                var fk = t.ForeignKeys.FirstOrDefault(f =>
+                    string.Equals(f.FromColumn, c.Name, StringComparison.OrdinalIgnoreCase));
+                return new { name = c.Name, type = ColType(c), pk = c.IsPrimaryKey, fk = fk is not null, nullable = c.IsNullable };
+            }).ToList<object>();
+            boxes.Add(new { fullName = t.FullName, objType = "table", label = t.FullName, columns = cols, subtitle = "" });
+        }
+
+        // Views (with columns)
+        foreach (var v in schema.Views)
+        {
+            var cols = v.Columns.Select(c =>
+                new { name = c.Name, type = ColType(c), pk = false, fk = false, nullable = c.IsNullable }
+            ).ToList<object>();
+            boxes.Add(new { fullName = v.FullName, objType = "view", label = v.FullName, columns = cols, subtitle = "VIEW" });
+        }
+
+        // Stored Procedures (no columns, just name)
+        foreach (var sp in schema.StoredProcedures)
+        {
+            var modified = sp.LastModified?.ToString("yyyy-MM-dd") ?? "";
+            boxes.Add(new { fullName = sp.FullName, objType = "procedure", label = sp.FullName, columns = new List<object>(), subtitle = modified });
+        }
+
+        // Functions
+        foreach (var fn in schema.Functions)
+        {
+            var modified = fn.LastModified?.ToString("yyyy-MM-dd") ?? "";
+            boxes.Add(new { fullName = fn.FullName, objType = "function", label = fn.FullName, columns = new List<object>(), subtitle = fn.FunctionType });
+        }
+
+        // Triggers
+        foreach (var tr in schema.Triggers)
+        {
+            boxes.Add(new { fullName = tr.FullName, objType = "trigger", label = tr.FullName, columns = new List<object>(), subtitle = $"{tr.TriggerType} {tr.TriggerEvents}" });
+        }
+
+        // Synonyms
+        foreach (var syn in schema.Synonyms)
+        {
+            boxes.Add(new { fullName = syn.FullName, objType = "synonym", label = syn.FullName, columns = new List<object>(), subtitle = syn.BaseObjectName });
+        }
+
+        // Build FK edges
+        var fks = new List<object>();
+        foreach (var t in schema.Tables)
+        {
+            foreach (var fk in t.ForeignKeys)
+            {
+                fks.Add(new
+                {
+                    name = fk.Name,
+                    fromTable = $"{fk.FromSchema}.{fk.FromTable}",
+                    fromCol = fk.FromColumn,
+                    toTable = $"{fk.ToSchema}.{fk.ToTable}",
+                    toCol = fk.ToColumn,
+                    deleteRule = fk.DeleteRule,
+                    updateRule = fk.UpdateRule,
+                    edgeType = "fk"
+                });
+            }
+        }
+
+        // Build object dependency edges
+        var deps = new List<object>();
+        if (result.Relationships?.ViewDependencies is not null)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var vd in result.Relationships.ViewDependencies)
+            {
+                if (vd.IsCrossDatabase) continue;
+                var key = $"{vd.FromSchema}.{vd.FromName}->{vd.ToSchema}.{vd.ToName}";
+                if (!seen.Add(key)) continue;
+                deps.Add(new
+                {
+                    fromObj = $"{vd.FromSchema}.{vd.FromName}",
+                    fromType = vd.FromType,
+                    toObj = $"{vd.ToSchema}.{vd.ToName}",
+                    toType = vd.ToType,
+                    edgeType = vd.FromType.ToLowerInvariant()
+                });
+            }
+        }
+
+        var boxesJson = JsonSerializer.Serialize(boxes);
+        var fksJson = JsonSerializer.Serialize(fks);
+        var depsJson = JsonSerializer.Serialize(deps);
+
+        return $$"""
+const erdBoxes = {{boxesJson}};
+const erdFks = {{fksJson}};
+const erdDeps = {{depsJson}};
+
+(function() {
+    const svg = document.getElementById('erd-svg');
+    const container = document.getElementById('erd-container');
+    const W = container.clientWidth || 1400;
+    const COL_W = 230, HDR_H = 32, ROW_H = 22, PAD = 8, GAP = 40, SUB_H = 18;
+    const typeColors = { table:'#0f3460', view:'#1a5c45', procedure:'#5c3d00', function:'#3d1f6d', trigger:'#5c2310', synonym:'#37474f' };
+    const titleColors = { table:'#e94560', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c' };
+    const edgeColors = { fk:'#4fc3f7', view:'#4ecca3', procedure:'#f0a500', function:'#bb86fc', trigger:'#ff7043', synonym:'#78909c' };
+
+    // Compute box sizes
+    erdBoxes.forEach(b => {
+        b.w = COL_W;
+        const rows = b.columns.length;
+        const sub = b.subtitle ? SUB_H : 0;
+        b.h = rows > 0 ? HDR_H + rows * ROW_H + PAD : HDR_H + sub + PAD + 4;
+    });
+
+    // Grid layout — group by type
+    const typeOrder = ['table','view','procedure','function','trigger','synonym'];
+    const sorted = [...erdBoxes.keys()].sort((a,b) => {
+        const ta = typeOrder.indexOf(erdBoxes[a].objType), tb = typeOrder.indexOf(erdBoxes[b].objType);
+        return ta - tb || a - b;
+    });
+    const gridCols = Math.max(1, Math.floor((W - GAP) / (COL_W + GAP)));
+    let maxRowH = 0, cx = GAP, cy = GAP;
+    sorted.forEach((idx, si) => {
+        const b = erdBoxes[idx];
+        if (cx + b.w > W - GAP) { cx = GAP; cy += maxRowH + GAP; maxRowH = 0; }
+        b.x = cx; b.y = cy;
+        maxRowH = Math.max(maxRowH, b.h);
+        cx += b.w + GAP;
+    });
+
+    const totalH = Math.max(800, cy + maxRowH + GAP * 2);
+    svg.setAttribute('width', W);
+    svg.setAttribute('height', totalH);
+
+    let vb = { x: 0, y: 0, w: W, h: totalH };
+    const updateVB = () => svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    updateVB();
+    function s2w(sx, sy) { const r = svg.getBoundingClientRect(); return { x: vb.x + (sx-r.left)/r.width*vb.w, y: vb.y + (sy-r.top)/r.height*vb.h }; }
+
+    // Defs
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    // Crow's foot "one"
+    const mOne = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    mOne.setAttribute('id','erd-one'); mOne.setAttribute('viewBox','0 0 10 10');
+    mOne.setAttribute('refX','10'); mOne.setAttribute('refY','5');
+    mOne.setAttribute('markerWidth','8'); mOne.setAttribute('markerHeight','8'); mOne.setAttribute('orient','auto');
+    const op = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    op.setAttribute('d','M 10 0 L 10 10 M 6 0 L 6 10');
+    op.setAttribute('stroke','#4fc3f7'); op.setAttribute('fill','none'); op.setAttribute('stroke-width','1.5');
+    mOne.appendChild(op); defs.appendChild(mOne);
+    // Crow's foot "many"
+    const mMany = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    mMany.setAttribute('id','erd-many'); mMany.setAttribute('viewBox','0 0 12 12');
+    mMany.setAttribute('refX','0'); mMany.setAttribute('refY','6');
+    mMany.setAttribute('markerWidth','10'); mMany.setAttribute('markerHeight','10'); mMany.setAttribute('orient','auto');
+    const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    mp.setAttribute('d','M 0 6 L 12 0 M 0 6 L 12 6 M 0 6 L 12 12');
+    mp.setAttribute('stroke','#4fc3f7'); mp.setAttribute('fill','none'); mp.setAttribute('stroke-width','1.5');
+    mMany.appendChild(mp); defs.appendChild(mMany);
+    // Dep arrow
+    const mArr = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    mArr.setAttribute('id','erd-arrow'); mArr.setAttribute('viewBox','0 0 10 10');
+    mArr.setAttribute('refX','10'); mArr.setAttribute('refY','5');
+    mArr.setAttribute('markerWidth','6'); mArr.setAttribute('markerHeight','6'); mArr.setAttribute('orient','auto');
+    const ap = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    ap.setAttribute('d','M 0 0 L 10 5 L 0 10 z'); ap.setAttribute('fill','#888');
+    mArr.appendChild(ap); defs.appendChild(mArr);
+    svg.appendChild(defs);
+
+    const lineGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const boxGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    svg.appendChild(lineGroup); svg.appendChild(boxGroup);
+
+    const tip = document.createElement('div'); tip.className = 'graph-tooltip'; container.appendChild(tip);
+    const ctrl = document.createElement('div'); ctrl.className = 'graph-controls';
+    ctrl.innerHTML = '<button id="erd-zi" title="Zoom in">+</button><button id="erd-zo" title="Zoom out">&minus;</button><button id="erd-zr" title="Fit all">&#8634;</button>';
+    container.appendChild(ctrl);
+
+    const boxIdx = {};
+    erdBoxes.forEach((b, i) => boxIdx[b.fullName] = i);
+
+    // Draw boxes
+    const boxGroups = erdBoxes.map((b, bi) => {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.style.cursor = 'grab';
+        b._g = g;
+
+        const hdrColor = typeColors[b.objType] || '#0f3460';
+        const tColor = titleColors[b.objType] || '#e94560';
+
+        // Background
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('width', b.w); bg.setAttribute('height', b.h);
+        bg.setAttribute('fill', '#16213e'); bg.setAttribute('stroke', hdrColor);
+        bg.setAttribute('stroke-width', '2'); bg.setAttribute('rx', '6');
+        g.appendChild(bg);
+
+        // Header bar
+        const hdr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        hdr.setAttribute('width', b.w); hdr.setAttribute('height', HDR_H);
+        hdr.setAttribute('fill', hdrColor); hdr.setAttribute('rx', '6');
+        g.appendChild(hdr);
+        const hdr2 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        hdr2.setAttribute('y', HDR_H - 6); hdr2.setAttribute('width', b.w); hdr2.setAttribute('height', 6);
+        hdr2.setAttribute('fill', hdrColor);
+        g.appendChild(hdr2);
+
+        // Type badge (small text in top-right)
+        if (b.objType !== 'table') {
+            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            badge.textContent = b.objType.toUpperCase();
+            badge.setAttribute('x', b.w - 6); badge.setAttribute('y', 12);
+            badge.setAttribute('text-anchor', 'end');
+            badge.setAttribute('fill', tColor); badge.setAttribute('font-size', '8');
+            badge.setAttribute('opacity', '0.7');
+            g.appendChild(badge);
+        }
+
+        // Title
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        title.textContent = b.label;
+        title.setAttribute('x', b.w / 2); title.setAttribute('y', b.objType !== 'table' ? HDR_H / 2 + 8 : HDR_H / 2 + 5);
+        title.setAttribute('text-anchor', 'middle');
+        title.setAttribute('fill', tColor); title.setAttribute('font-weight', 'bold');
+        title.setAttribute('font-size', '11');
+        g.appendChild(title);
+
+        if (b.columns.length > 0) {
+            // Columns (tables & views)
+            b.columns.forEach((c, ci) => {
+                const ry = HDR_H + ci * ROW_H + ROW_H / 2 + 5;
+                let icon = '';
+                if (c.pk && c.fk) icon = 'PF';
+                else if (c.pk) icon = 'PK';
+                else if (c.fk) icon = 'FK';
+                if (icon) {
+                    const ic = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    ic.textContent = icon;
+                    ic.setAttribute('x', 8); ic.setAttribute('y', ry);
+                    ic.setAttribute('fill', c.pk ? '#4ecca3' : '#f0a500');
+                    ic.setAttribute('font-size', '9'); ic.setAttribute('font-weight', 'bold');
+                    g.appendChild(ic);
+                }
+                const nm = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                nm.textContent = c.name;
+                nm.setAttribute('x', 32); nm.setAttribute('y', ry);
+                nm.setAttribute('fill', c.pk ? '#4ecca3' : c.fk ? '#f0a500' : '#e0e0e0');
+                nm.setAttribute('font-size', '11');
+                if (c.pk) nm.setAttribute('font-weight', 'bold');
+                g.appendChild(nm);
+                const tp = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tp.textContent = c.type + (c.nullable ? '' : ' *');
+                tp.setAttribute('x', b.w - 8); tp.setAttribute('y', ry);
+                tp.setAttribute('text-anchor', 'end');
+                tp.setAttribute('fill', '#888'); tp.setAttribute('font-size', '10');
+                g.appendChild(tp);
+            });
+        } else if (b.subtitle) {
+            // Subtitle for procs/functions/triggers/synonyms
+            const sub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            sub.textContent = b.subtitle.length > 35 ? b.subtitle.substring(0, 35) + '...' : b.subtitle;
+            sub.setAttribute('x', b.w / 2); sub.setAttribute('y', HDR_H + SUB_H / 2 + 5);
+            sub.setAttribute('text-anchor', 'middle');
+            sub.setAttribute('fill', '#888'); sub.setAttribute('font-size', '10');
+            g.appendChild(sub);
+        }
+
+        g.setAttribute('transform', `translate(${b.x},${b.y})`);
+        boxGroup.appendChild(g);
+        return g;
+    });
+
+    function colY(box, colName) {
+        const ci = box.columns.findIndex(c => c.name.toLowerCase() === colName.toLowerCase());
+        if (ci < 0) return box.y + box.h / 2;
+        return box.y + HDR_H + ci * ROW_H + ROW_H / 2;
+    }
+    function midY(box) { return box.y + box.h / 2; }
+
+    function bezier(fromB, fy, toB, ty) {
+        const fcx = fromB.x + fromB.w / 2, tcx = toB.x + toB.w / 2;
+        let fx, tx, cx1, cx2;
+        if (fcx < tcx) { fx = fromB.x + fromB.w; tx = toB.x; }
+        else if (fcx > tcx) { fx = fromB.x; tx = toB.x + toB.w; }
+        else { fx = fromB.x + fromB.w; tx = toB.x + toB.w; }
+        const gap = Math.abs(tx - fx);
+        cx1 = fx + (fx < tx ? 1 : -1) * Math.max(30, gap * 0.4);
+        cx2 = tx + (tx < fx ? 1 : -1) * Math.max(30, gap * 0.4);
+        return `M ${fx} ${fy} C ${cx1} ${fy}, ${cx2} ${ty}, ${tx} ${ty}`;
+    }
+
+    // Draw FK lines
+    const allLines = [];
+    erdFks.forEach(fk => {
+        const fi = boxIdx[fk.fromTable], ti = boxIdx[fk.toTable];
+        if (fi === undefined || ti === undefined) return;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#4fc3f7');
+        path.setAttribute('stroke-width', '1.5'); path.setAttribute('stroke-opacity', '0.6');
+        path.setAttribute('marker-start', 'url(#erd-many)'); path.setAttribute('marker-end', 'url(#erd-one)');
+        path.style.cursor = 'pointer';
+        lineGroup.appendChild(path);
+        path.addEventListener('mouseenter', (ev) => {
+            tip.innerHTML = `<strong>FK: ${fk.name}</strong><br>${fk.fromTable}.${fk.fromCol} &rarr; ${fk.toTable}.${fk.toCol}<br>Delete: ${fk.deleteRule} | Update: ${fk.updateRule}`;
+            tip.style.display = 'block'; const cr = container.getBoundingClientRect();
+            tip.style.left = (ev.clientX-cr.left+15)+'px'; tip.style.top = (ev.clientY-cr.top-10)+'px';
+            path.setAttribute('stroke-opacity','1'); path.setAttribute('stroke-width','3');
+        });
+        path.addEventListener('mousemove', (ev) => { const cr = container.getBoundingClientRect(); tip.style.left=(ev.clientX-cr.left+15)+'px'; tip.style.top=(ev.clientY-cr.top-10)+'px'; });
+        path.addEventListener('mouseleave', () => { tip.style.display='none'; path.setAttribute('stroke-opacity','0.6'); path.setAttribute('stroke-width','1.5'); });
+        allLines.push({ el: path, kind: 'fk', fromIdx: fi, toIdx: ti, fromCol: fk.fromCol, toCol: fk.toCol });
+    });
+
+    // Draw dependency lines
+    erdDeps.forEach(dep => {
+        const fi = boxIdx[dep.fromObj], ti = boxIdx[dep.toObj];
+        if (fi === undefined || ti === undefined) return;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const color = edgeColors[dep.edgeType] || '#888';
+        path.setAttribute('fill', 'none'); path.setAttribute('stroke', color);
+        path.setAttribute('stroke-width', '1.2'); path.setAttribute('stroke-opacity', '0.5');
+        path.setAttribute('stroke-dasharray', '6,3');
+        path.setAttribute('marker-end', 'url(#erd-arrow)');
+        path.style.cursor = 'pointer';
+        lineGroup.appendChild(path);
+        path.addEventListener('mouseenter', (ev) => {
+            tip.innerHTML = `<strong>${dep.fromType} &rarr; ${dep.toType}</strong><br>${dep.fromObj} &rarr; ${dep.toObj}`;
+            tip.style.display = 'block'; const cr = container.getBoundingClientRect();
+            tip.style.left = (ev.clientX-cr.left+15)+'px'; tip.style.top = (ev.clientY-cr.top-10)+'px';
+            path.setAttribute('stroke-opacity','1'); path.setAttribute('stroke-width','2.5');
+        });
+        path.addEventListener('mousemove', (ev) => { const cr = container.getBoundingClientRect(); tip.style.left=(ev.clientX-cr.left+15)+'px'; tip.style.top=(ev.clientY-cr.top-10)+'px'; });
+        path.addEventListener('mouseleave', () => { tip.style.display='none'; path.setAttribute('stroke-opacity','0.5'); path.setAttribute('stroke-width','1.2'); });
+        allLines.push({ el: path, kind: 'dep', edgeType: dep.edgeType, fromIdx: fi, toIdx: ti });
+    });
+
+    function updateLines() {
+        allLines.forEach(ln => {
+            const fromB = erdBoxes[ln.fromIdx], toB = erdBoxes[ln.toIdx];
+            const fy = ln.fromCol ? colY(fromB, ln.fromCol) : midY(fromB);
+            const ty = ln.toCol ? colY(toB, ln.toCol) : midY(toB);
+            ln.el.setAttribute('d', bezier(fromB, fy, toB, ty));
+        });
+    }
+    updateLines();
+
+    // --- Drag & Pan ---
+    let dragBox = null, dragOff = {x:0,y:0};
+    let isPanning = false, panStart = {x:0,y:0}, vbStart = {x:0,y:0};
+
+    svg.addEventListener('mousedown', (ev) => {
+        const p = s2w(ev.clientX, ev.clientY);
+        for (let i = 0; i < erdBoxes.length; i++) {
+            const b = erdBoxes[i];
+            if (b._g.getAttribute('visibility') === 'hidden') continue;
+            if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
+                dragBox = i; dragOff = {x: p.x - b.x, y: p.y - b.y};
+                svg.style.cursor = 'grabbing'; return;
+            }
+        }
+        isPanning = true; panStart = {x:ev.clientX,y:ev.clientY}; vbStart = {x:vb.x,y:vb.y};
+        svg.style.cursor = 'move';
+    });
+    svg.addEventListener('mousemove', (ev) => {
+        if (dragBox !== null) {
+            const p = s2w(ev.clientX, ev.clientY);
+            erdBoxes[dragBox].x = p.x - dragOff.x; erdBoxes[dragBox].y = p.y - dragOff.y;
+            boxGroups[dragBox].setAttribute('transform', `translate(${erdBoxes[dragBox].x},${erdBoxes[dragBox].y})`);
+            updateLines();
+        } else if (isPanning) {
+            const r = svg.getBoundingClientRect();
+            vb.x = vbStart.x - (ev.clientX-panStart.x)/r.width*vb.w;
+            vb.y = vbStart.y - (ev.clientY-panStart.y)/r.height*vb.h;
+            updateVB();
+        }
+    });
+    svg.addEventListener('mouseup', () => { dragBox=null; isPanning=false; svg.style.cursor='default'; });
+    svg.addEventListener('mouseleave', () => { dragBox=null; isPanning=false; svg.style.cursor='default'; });
+
+    // --- Zoom ---
+    function zoomBy(f,cx,cy) { const nw=vb.w/f,nh=vb.h/f; vb.x=cx-(cx-vb.x)/f; vb.y=cy-(cy-vb.y)/f; vb.w=nw;vb.h=nh; updateVB(); }
+    svg.addEventListener('wheel', (ev) => { ev.preventDefault(); const p=s2w(ev.clientX,ev.clientY); zoomBy(ev.deltaY<0?1.15:1/1.15,p.x,p.y); }, {passive:false});
+    document.getElementById('erd-zi').addEventListener('click', () => { zoomBy(1.3,vb.x+vb.w/2,vb.y+vb.h/2); });
+    document.getElementById('erd-zo').addEventListener('click', () => { zoomBy(1/1.3,vb.x+vb.w/2,vb.y+vb.h/2); });
+    document.getElementById('erd-zr').addEventListener('click', () => { vb={x:0,y:0,w:W,h:totalH}; updateVB(); });
+
+    // --- Filtering ---
+    const hiddenTypes = new Set();
+    function applyErdFilters() {
+        erdBoxes.forEach((b, i) => {
+            const vis = !hiddenTypes.has(b.objType);
+            boxGroups[i].setAttribute('visibility', vis ? 'visible' : 'hidden');
+        });
+        allLines.forEach(ln => {
+            const sVis = !hiddenTypes.has(erdBoxes[ln.fromIdx].objType);
+            const tVis = !hiddenTypes.has(erdBoxes[ln.toIdx].objType);
+            ln.el.setAttribute('visibility', (sVis && tVis) ? 'visible' : 'hidden');
+        });
+    }
+    window.toggleErdFilter = function(cb) {
+        if (cb.checked) hiddenTypes.delete(cb.value); else hiddenTypes.add(cb.value);
+        applyErdFilters();
+    };
+})();
+""";
+    }
+
     private static string GetCss() => """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; line-height: 1.6; }
@@ -1005,8 +1494,8 @@ const graphEdges = {{edgesJson}};
         details { margin: 0.5rem 0; }
         summary { cursor: pointer; color: #4fc3f7; padding: 0.3rem 0; }
         footer { text-align: center; padding: 2rem; color: #555; border-top: 1px solid #0f3460; margin-top: 2rem; }
-        #graph-container { position: relative; background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px; margin: 1rem 0; overflow: hidden; }
-        #dep-graph { display: block; }
+        #graph-container, #erd-container { position: relative; background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+        #dep-graph, #erd-svg { display: block; }
         .graph-tooltip { display: none; position: absolute; background: #16213e; border: 1px solid #0f3460; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85em; pointer-events: none; z-index: 10; color: #e0e0e0; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         .graph-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 10; }
         .graph-controls button { width: 32px; height: 32px; border: 1px solid #0f3460; background: #16213e; color: #e0e0e0; font-size: 18px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
