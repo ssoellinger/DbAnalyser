@@ -1,6 +1,10 @@
 import { useStore } from '../../hooks/useStore';
 
-export function ConnectionHistory() {
+interface ConnectionHistoryProps {
+  onSelect: (connectionString: string) => void;
+}
+
+export function ConnectionHistory({ onSelect }: ConnectionHistoryProps) {
   const history = useStore((s) => s.connectionHistory);
 
   if (history.length === 0) return null;
@@ -12,18 +16,7 @@ export function ConnectionHistory() {
         {history.map((entry, i) => (
           <button
             key={i}
-            onClick={() => {
-              const textarea = document.querySelector('textarea');
-              if (textarea) {
-                textarea.value = entry.connectionString;
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                  window.HTMLTextAreaElement.prototype, 'value'
-                )?.set;
-                nativeInputValueSetter?.call(textarea, entry.connectionString);
-                textarea.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-            }}
+            onClick={() => onSelect(entry.connectionString)}
             className="w-full text-left px-3 py-2 rounded text-xs hover:bg-bg-hover transition-colors group"
           >
             <span className="text-text-primary group-hover:text-accent transition-colors">

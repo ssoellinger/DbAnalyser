@@ -1,9 +1,12 @@
-import { useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../api/client';
 
-export function ConnectionForm() {
-  const [connectionString, setConnectionString] = useState('');
+interface ConnectionFormProps {
+  connectionString: string;
+  setConnectionString: (value: string) => void;
+}
+
+export function ConnectionForm({ connectionString, setConnectionString }: ConnectionFormProps) {
   const store = useStore();
 
   const handleConnect = async () => {

@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { ConnectionForm } from './ConnectionForm';
 import { ConnectionHistory } from './ConnectionHistory';
 
 export function ConnectionPage() {
   const loadHistory = useStore((s) => s.loadHistory);
+  const [connectionString, setConnectionString] = useState('');
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -16,9 +17,9 @@ export function ConnectionPage() {
           <p className="text-text-secondary text-sm">Database structure and quality analyzer</p>
         </div>
 
-        <ConnectionForm />
+        <ConnectionForm connectionString={connectionString} setConnectionString={setConnectionString} />
 
-        <ConnectionHistory />
+        <ConnectionHistory onSelect={setConnectionString} />
       </div>
     </div>
   );
