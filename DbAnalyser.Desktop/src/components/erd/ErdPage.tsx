@@ -138,7 +138,7 @@ function ErdGraphInner() {
     return items;
   }, [schema]);
 
-  const [activeTypes, setActiveTypes] = useState(() => new Set(objectTypes.map((t) => t.key)));
+  const [activeTypes, setActiveTypes] = useState(() => new Set(['table', 'view']));
 
   const { initialNodes, initialEdges } = useMemo(() => {
     const nodes: Node[] = [];
