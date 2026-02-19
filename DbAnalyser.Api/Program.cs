@@ -39,6 +39,7 @@ builder.Services.AddSingleton<IAnalyzer, SchemaAnalyzer>();
 builder.Services.AddSingleton<IAnalyzer, DataProfileAnalyzer>();
 builder.Services.AddSingleton<IAnalyzer, RelationshipAnalyzer>();
 builder.Services.AddSingleton<IAnalyzer, QualityAnalyzer>();
+builder.Services.AddSingleton<IAnalyzer, UsageAnalyzer>();
 
 // Session service
 builder.Services.AddSingleton<AnalysisSessionService>();
