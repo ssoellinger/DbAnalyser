@@ -12,6 +12,7 @@ public class UsageAnalyzer : IAnalyzer
     [
         new DmvTableReadsSignal(),
         new DmvProcExecutionSignal(),
+        new QueryStoreSignal(),
         new RowCountSignal(),
         new DependencyOrphanSignal(),
         new NamingPatternSignal(),
