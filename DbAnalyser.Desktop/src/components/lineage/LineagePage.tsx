@@ -10,7 +10,9 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { GraphControls } from '../shared/GraphControls';
+import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { computeLineage } from '../../hooks/useLineage';
 import { getLayoutedElements } from '../../hooks/useDagreLayout';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
@@ -232,14 +234,18 @@ function LineageGraphInner() {
 }
 
 export function LineagePage() {
+  const { status, error, refresh } = useAnalyzer('relationships');
   const rels = useStore((s) => s.result?.relationships);
-  if (!rels || rels.dependencies.length === 0) {
-    return <p className="text-text-muted">No dependency data available for lineage.</p>;
-  }
 
   return (
-    <ReactFlowProvider>
-      <LineageGraphInner />
-    </ReactFlowProvider>
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships">
+      {rels && rels.dependencies.length > 0 ? (
+        <ReactFlowProvider>
+          <LineageGraphInner />
+        </ReactFlowProvider>
+      ) : (
+        <p className="text-text-muted">No dependency data available for lineage.</p>
+      )}
+    </AnalyzerLoader>
   );
 }

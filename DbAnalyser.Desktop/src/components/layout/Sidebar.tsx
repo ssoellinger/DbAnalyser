@@ -1,21 +1,38 @@
 import { NavLink } from 'react-router-dom';
 import { useStore } from '../../hooks/useStore';
+import type { AnalyzerName, AnalyzerStatus } from '../../api/types';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: AnalyzerName }[] = [
   { path: '/dashboard', label: 'Dashboard', icon: '⊞' },
-  { path: '/dependencies', label: 'Dependencies', icon: '⊶' },
-  { path: '/erd', label: 'ERD', icon: '⊡' },
-  { path: '/lineage', label: 'Lineage', icon: '⇢' },
-  { path: '/schema', label: 'Schema', icon: '⊟' },
-  { path: '/profiling', label: 'Profiling', icon: '⊠' },
-  { path: '/relationships', label: 'Relationships', icon: '⋈' },
-  { path: '/quality', label: 'Quality', icon: '⚑' },
+  { path: '/dependencies', label: 'Dependencies', icon: '⊶', analyzer: 'relationships' },
+  { path: '/erd', label: 'ERD', icon: '⊡', analyzer: 'schema' },
+  { path: '/lineage', label: 'Lineage', icon: '⇢', analyzer: 'relationships' },
+  { path: '/schema', label: 'Schema', icon: '⊟', analyzer: 'schema' },
+  { path: '/profiling', label: 'Profiling', icon: '⊠', analyzer: 'profiling' },
+  { path: '/relationships', label: 'Relationships', icon: '⋈', analyzer: 'relationships' },
+  { path: '/quality', label: 'Quality', icon: '⚑', analyzer: 'quality' },
+  { path: '/usage', label: 'Usage', icon: '◎', analyzer: 'usage' },
 ];
+
+function StatusDot({ status }: { status: AnalyzerStatus }) {
+  if (status === 'loaded') {
+    return <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />;
+  }
+  if (status === 'loading') {
+    return <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />;
+  }
+  if (status === 'error') {
+    return <span className="w-1.5 h-1.5 rounded-full bg-severity-error flex-shrink-0" />;
+  }
+  // idle
+  return <span className="w-1.5 h-1.5 rounded-full bg-text-muted/30 flex-shrink-0" />;
+}
 
 export function Sidebar() {
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
   const databaseName = useStore((s) => s.databaseName);
+  const analyzerStatus = useStore((s) => s.analyzerStatus);
 
   return (
     <aside
@@ -39,7 +56,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 py-2 overflow-y-auto">
-        {NAV_ITEMS.map(({ path, label, icon }) => (
+        {NAV_ITEMS.map(({ path, label, icon, analyzer }) => (
           <NavLink
             key={path}
             to={path}
@@ -53,6 +70,11 @@ export function Sidebar() {
           >
             <span className="text-base w-5 text-center flex-shrink-0">{icon}</span>
             {!collapsed && <span className="truncate">{label}</span>}
+            {analyzer && (
+              <span className={collapsed ? 'ml-auto' : 'ml-auto'}>
+                <StatusDot status={analyzerStatus[analyzer]} />
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

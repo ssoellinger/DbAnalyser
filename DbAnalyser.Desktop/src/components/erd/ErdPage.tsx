@@ -15,8 +15,10 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { FilterBar } from '../shared/FilterBar';
 import { GraphControls } from '../shared/GraphControls';
+import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { getLayoutedElements } from '../../hooks/useDagreLayout';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { TableInfo, ColumnInfo } from '../../api/types';
@@ -370,14 +372,18 @@ function ErdGraphInner() {
 }
 
 export function ErdPage() {
+  const { status, error, refresh } = useAnalyzer('schema');
   const schema = useStore((s) => s.result?.schema);
-  if (!schema || schema.tables.length === 0) {
-    return <p className="text-text-muted">No schema data available for ERD.</p>;
-  }
 
   return (
-    <ReactFlowProvider>
-      <ErdGraphInner />
-    </ReactFlowProvider>
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema">
+      {schema && schema.tables.length > 0 ? (
+        <ReactFlowProvider>
+          <ErdGraphInner />
+        </ReactFlowProvider>
+      ) : (
+        <p className="text-text-muted">No schema data available for ERD.</p>
+      )}
+    </AnalyzerLoader>
   );
 }

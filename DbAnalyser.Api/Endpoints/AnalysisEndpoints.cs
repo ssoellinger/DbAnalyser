@@ -38,6 +38,28 @@ public static class AnalysisEndpoints
             }
         });
 
+        group.MapPost("/analysis/run/{sessionId}/{analyzer}", async (string sessionId, string analyzer, RunAnalyzerRequest? request, AnalysisSessionService sessionService, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await sessionService.RunSingleAnalyzerAsync(
+                    sessionId,
+                    analyzer,
+                    request?.Force ?? false,
+                    request?.SignalRConnectionId,
+                    ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         group.MapGet("/analysis/{sessionId}", (string sessionId, AnalysisSessionService sessionService) =>
         {
             var result = sessionService.GetResult(sessionId);
@@ -57,3 +79,4 @@ public static class AnalysisEndpoints
 public record ConnectRequest(string ConnectionString);
 public record StartAnalysisRequest(string SessionId, List<string>? Analyzers = null, string? SignalRConnectionId = null);
 public record DisconnectRequest(string SessionId);
+public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false);

@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
+import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
 import { TableDetail } from './TableDetail';
 import {
   useReactTable,
@@ -98,6 +100,7 @@ function ViewDetail({ view }: { view: ViewInfo }) {
 /* ── Main SchemaPage ───────────────────────────────────────────────────── */
 
 export function SchemaPage() {
+  const { status, error, refresh } = useAnalyzer('schema');
   const schema = useStore((s) => s.result?.schema);
   const profiles = useStore((s) => s.result?.profiles);
   const relationships = useStore((s) => s.result?.relationships);
@@ -106,8 +109,56 @@ export function SchemaPage() {
   const [selectedView, setSelectedView] = useState<string | null>(null);
   const [expandedDef, setExpandedDef] = useState<string | null>(null);
 
-  if (!schema) return <p className="text-text-muted">No schema data available.</p>;
+  return (
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema">
+      <SchemaContent
+        schema={schema!}
+        profiles={profiles ?? null}
+        relationships={relationships ?? null}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        selectedTable={selectedTable}
+        setSelectedTable={setSelectedTable}
+        selectedView={selectedView}
+        setSelectedView={setSelectedView}
+        expandedDef={expandedDef}
+        setExpandedDef={setExpandedDef}
+        refresh={refresh}
+        loading={status === 'loading'}
+      />
+    </AnalyzerLoader>
+  );
+}
 
+function SchemaContent({
+  schema,
+  profiles,
+  relationships,
+  activeTab,
+  setActiveTab,
+  selectedTable,
+  setSelectedTable,
+  selectedView,
+  setSelectedView,
+  expandedDef,
+  setExpandedDef,
+  refresh,
+  loading,
+}: {
+  schema: DatabaseSchema;
+  profiles: import('../../api/types').TableProfile[] | null;
+  relationships: import('../../api/types').RelationshipMap | null;
+  activeTab: TabKey;
+  setActiveTab: (tab: TabKey) => void;
+  selectedTable: string | null;
+  setSelectedTable: (name: string | null) => void;
+  selectedView: string | null;
+  setSelectedView: (name: string | null) => void;
+  expandedDef: string | null;
+  setExpandedDef: (name: string | null) => void;
+  refresh: () => void;
+  loading: boolean;
+}) {
   const tabs = ([
     { key: 'tables' as TabKey, label: 'Tables', count: schema.tables.length },
     { key: 'views' as TabKey, label: 'Views', count: schema.views.length },
@@ -130,7 +181,10 @@ export function SchemaPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-text-primary">Schema</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold text-text-primary">Schema</h2>
+        <RefreshButton onClick={refresh} loading={loading} />
+      </div>
 
       <div className="flex flex-wrap gap-1 border-b border-border pb-2">
         {tabs.map((tab) => (

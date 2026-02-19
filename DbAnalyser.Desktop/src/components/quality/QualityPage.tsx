@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
+import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { QualityIssue, IssueSeverity } from '../../api/types';
 
@@ -11,17 +13,17 @@ const SEVERITY_CONFIG: Record<IssueSeverity, { color: string; icon: string; labe
 };
 
 export function QualityPage() {
+  const { status, error, refresh } = useAnalyzer('quality');
   const issues = useStore((s) => s.result?.qualityIssues);
 
-  if (!issues || issues.length === 0) {
-    return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-text-primary">Quality</h2>
-        <p className="text-text-muted">No quality issues detected.</p>
-      </div>
-    );
-  }
+  return (
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="quality">
+      <QualityContent issues={issues ?? []} refresh={refresh} loading={status === 'loading'} />
+    </AnalyzerLoader>
+  );
+}
 
+function QualityContent({ issues, refresh, loading }: { issues: QualityIssue[]; refresh: () => void; loading: boolean }) {
   const grouped = useMemo(() => {
     const groups: Record<IssueSeverity, QualityIssue[]> = {
       error: [],
@@ -31,6 +33,18 @@ export function QualityPage() {
     issues.forEach((i) => groups[i.severity].push(i));
     return groups;
   }, [issues]);
+
+  if (issues.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-text-primary">Quality</h2>
+          <RefreshButton onClick={refresh} loading={loading} />
+        </div>
+        <p className="text-text-muted">No quality issues detected.</p>
+      </div>
+    );
+  }
 
   const columns: ColumnDef<QualityIssue, any>[] = [
     {
@@ -58,7 +72,10 @@ export function QualityPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-text-primary">Quality</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold text-text-primary">Quality</h2>
+        <RefreshButton onClick={refresh} loading={loading} />
+      </div>
 
       <div className="flex gap-3">
         {(Object.entries(SEVERITY_CONFIG) as [IssueSeverity, typeof SEVERITY_CONFIG.error][]).map(

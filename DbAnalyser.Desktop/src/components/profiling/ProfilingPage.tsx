@@ -1,29 +1,33 @@
 import { useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
+import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { TableProfile, ColumnProfile } from '../../api/types';
 
 export function ProfilingPage() {
+  const { status, error, refresh } = useAnalyzer('profiling');
   const profiles = useStore((s) => s.result?.profiles);
 
-  if (!profiles || profiles.length === 0) {
-    return <p className="text-text-muted">No profiling data available.</p>;
-  }
-
   const sorted = useMemo(
-    () => [...profiles].sort((a, b) => b.rowCount - a.rowCount),
+    () => profiles ? [...profiles].sort((a, b) => b.rowCount - a.rowCount) : [],
     [profiles]
   );
 
   return (
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="profiling">
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-text-primary">Data Profiling</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold text-text-primary">Data Profiling</h2>
+        <RefreshButton onClick={refresh} loading={status === 'loading'} />
+      </div>
 
       {sorted.map((profile) => (
         <TableProfileCard key={profile.fullName} profile={profile} />
       ))}
     </div>
+    </AnalyzerLoader>
   );
 }
 

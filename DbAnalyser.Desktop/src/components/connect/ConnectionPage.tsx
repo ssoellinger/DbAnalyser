@@ -2,10 +2,8 @@ import { useEffect } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { ConnectionForm } from './ConnectionForm';
 import { ConnectionHistory } from './ConnectionHistory';
-import { AnalysisProgress } from './AnalysisProgress';
 
 export function ConnectionPage() {
-  const isAnalyzing = useStore((s) => s.isAnalyzing);
   const loadHistory = useStore((s) => s.loadHistory);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
@@ -18,7 +16,7 @@ export function ConnectionPage() {
           <p className="text-text-secondary text-sm">Database structure and quality analyzer</p>
         </div>
 
-        {isAnalyzing ? <AnalysisProgress /> : <ConnectionForm />}
+        <ConnectionForm />
 
         <ConnectionHistory />
       </div>

@@ -33,6 +33,12 @@ export const api = {
   getResult: (sessionId: string) =>
     request<AnalysisResult>(`/api/analysis/${sessionId}`),
 
+  runAnalyzer: (sessionId: string, analyzer: string, force?: boolean, signalRConnectionId?: string) =>
+    request<AnalysisResult>(`/api/analysis/run/${sessionId}/${analyzer}`, {
+      method: 'POST',
+      body: JSON.stringify({ signalRConnectionId, force: force ?? false }),
+    }),
+
   disconnect: (sessionId: string) =>
     request<{ message: string }>('/api/disconnect', {
       method: 'POST',

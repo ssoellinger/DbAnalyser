@@ -10,11 +10,12 @@ import { SchemaPage } from './components/schema/SchemaPage';
 import { ProfilingPage } from './components/profiling/ProfilingPage';
 import { RelationshipsPage } from './components/relationships/RelationshipsPage';
 import { QualityPage } from './components/quality/QualityPage';
+import { UsagePage } from './components/usage/UsagePage';
 
 export default function App() {
-  const result = useStore((s) => s.result);
+  const sessionId = useStore((s) => s.sessionId);
 
-  if (!result) {
+  if (!sessionId) {
     return <ConnectionPage />;
   }
 
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/profiling" element={<ProfilingPage />} />
         <Route path="/relationships" element={<RelationshipsPage />} />
         <Route path="/quality" element={<QualityPage />} />
+        <Route path="/usage" element={<UsagePage />} />
       </Routes>
     </AppShell>
   );

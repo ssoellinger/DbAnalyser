@@ -12,8 +12,10 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { FilterBar } from '../shared/FilterBar';
 import { GraphControls } from '../shared/GraphControls';
+import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
 import { CycleWarning } from './CycleWarning';
 import { getLayoutedElements } from '../../hooks/useDagreLayout';
 import { detectCycles } from '../../hooks/useCycleDetection';
@@ -232,14 +234,18 @@ function DependencyGraphInner() {
 }
 
 export function DependenciesPage() {
+  const { status, error, refresh } = useAnalyzer('relationships');
   const rels = useStore((s) => s.result?.relationships);
-  if (!rels || rels.dependencies.length === 0) {
-    return <p className="text-text-muted">No dependency data available.</p>;
-  }
 
   return (
-    <ReactFlowProvider>
-      <DependencyGraphInner />
-    </ReactFlowProvider>
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships">
+      {rels && rels.dependencies.length > 0 ? (
+        <ReactFlowProvider>
+          <DependencyGraphInner />
+        </ReactFlowProvider>
+      ) : (
+        <p className="text-text-muted">No dependency data available.</p>
+      )}
+    </AnalyzerLoader>
   );
 }

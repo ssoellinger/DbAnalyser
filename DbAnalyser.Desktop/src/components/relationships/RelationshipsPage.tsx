@@ -1,17 +1,32 @@
 import { useState } from 'react';
 import { useStore } from '../../hooks/useStore';
+import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
+import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ForeignKeyInfo, ObjectDependency, ImplicitRelationship } from '../../api/types';
 
 type TabKey = 'fks' | 'dependencies' | 'implicit';
 
 export function RelationshipsPage() {
+  const { status, error, refresh } = useAnalyzer('relationships');
   const rels = useStore((s) => s.result?.relationships);
   const [activeTab, setActiveTab] = useState<TabKey>('fks');
 
-  if (!rels) return <p className="text-text-muted">No relationship data available.</p>;
+  return (
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships">
+      <RelationshipsContent rels={rels!} activeTab={activeTab} setActiveTab={setActiveTab} refresh={refresh} loading={status === 'loading'} />
+    </AnalyzerLoader>
+  );
+}
 
+function RelationshipsContent({ rels, activeTab, setActiveTab, refresh, loading }: {
+  rels: import('../../api/types').RelationshipMap;
+  activeTab: TabKey;
+  setActiveTab: (tab: TabKey) => void;
+  refresh: () => void;
+  loading: boolean;
+}) {
   const tabs = ([
     { key: 'fks' as TabKey, label: 'Foreign Keys', count: rels.explicitRelationships.length },
     { key: 'dependencies' as TabKey, label: 'Object Dependencies', count: rels.viewDependencies.length },
@@ -20,7 +35,10 @@ export function RelationshipsPage() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-text-primary">Relationships</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold text-text-primary">Relationships</h2>
+        <RefreshButton onClick={refresh} loading={loading} />
+      </div>
 
       <div className="flex flex-wrap gap-1 border-b border-border pb-2">
         {tabs.map((tab) => (

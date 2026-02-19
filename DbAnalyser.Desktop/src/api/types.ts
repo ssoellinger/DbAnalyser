@@ -7,6 +7,7 @@ export interface AnalysisResult {
   profiles: TableProfile[] | null;
   relationships: RelationshipMap | null;
   qualityIssues: QualityIssue[] | null;
+  usageAnalysis: UsageAnalysis | null;
 }
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -229,6 +230,30 @@ export interface QualityIssue {
   description: string;
   recommendation: string | null;
 }
+
+// ── Usage ────────────────────────────────────────────────────────────────────
+
+export type UsageLevel = 'active' | 'low' | 'unused' | 'unknown';
+
+export interface ObjectUsage {
+  objectName: string;
+  objectType: string;
+  usageLevel: UsageLevel;
+  score: number;
+  evidence: string[];
+}
+
+export interface UsageAnalysis {
+  serverStartTime: string | null;
+  serverUptimeDays: number | null;
+  objects: ObjectUsage[];
+}
+
+// ── Analyzer Names ──────────────────────────────────────────────────────────
+
+export type AnalyzerName = 'schema' | 'profiling' | 'relationships' | 'quality' | 'usage';
+
+export type AnalyzerStatus = 'idle' | 'loading' | 'loaded' | 'error';
 
 // ── API DTOs ────────────────────────────────────────────────────────────────
 
