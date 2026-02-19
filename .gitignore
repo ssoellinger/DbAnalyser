@@ -29,3 +29,18 @@ artifacts/
 *.html
 *.json
 !appsettings.json
+!DbAnalyser.Desktop/index.html
+!DbAnalyser.Desktop/package.json
+!DbAnalyser.Desktop/package-lock.json
+!DbAnalyser.Desktop/tsconfig.json
+!DbAnalyser.Desktop/forge.config.ts
+!DbAnalyser.Desktop/vite.main.config.ts
+!DbAnalyser.Desktop/vite.preload.config.ts
+!DbAnalyser.Desktop/vite.renderer.config.ts
+
+## Node / Electron
+DbAnalyser.Desktop/node_modules/
+DbAnalyser.Desktop/.vite/
+DbAnalyser.Desktop/out/
+DbAnalyser.Desktop/dist/
+DbAnalyser.Desktop/resources/api/

@@ -45,7 +45,6 @@ rootCommand.SetHandler(async (string? connStr, OutputFormat format, string? outp
     var options = new AnalysisOptions
     {
         ConnectionString = connStr ?? config["ConnectionString"] ?? string.Empty,
-        Format = format,
         OutputPath = output ?? (string.IsNullOrEmpty(config["OutputPath"]) ? null : config["OutputPath"]),
         Analyzers = analyzers.Length > 0 ? analyzers.ToList() : ["schema", "profiling", "relationships", "quality"]
     };
@@ -88,8 +87,8 @@ rootCommand.SetHandler(async (string? connStr, OutputFormat format, string? outp
                 var result = await orchestrator.RunAsync(provider, options);
 
                 ctx.Status("Generating report...");
-                var reporter = reporters.FirstOrDefault(r => r.Format == options.Format)
-                    ?? throw new InvalidOperationException($"No report generator found for format '{options.Format}'");
+                var reporter = reporters.FirstOrDefault(r => r.Format == format)
+                    ?? throw new InvalidOperationException($"No report generator found for format '{format}'");
 
                 await reporter.GenerateAsync(result, options.OutputPath);
             });
