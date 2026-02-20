@@ -146,8 +146,8 @@ function LineageGraphInner() {
 
     const laid = getLayoutedElements(nodes, edges, {
       direction: 'LR',
-      rankSep: 150,
-      nodeSep: 40,
+      rankSep: 40,
+      nodeSep: 10,
     });
     return { graphNodes: laid.nodes, graphEdges: laid.edges };
   }, [lineage, deps, typeMap]);
@@ -163,8 +163,8 @@ function LineageGraphInner() {
   const handleAutoLayout = useCallback(() => {
     const laid = getLayoutedElements(nodes, edges, {
       direction: 'LR',
-      rankSep: 150,
-      nodeSep: 40,
+      rankSep: 40,
+      nodeSep: 10,
     });
     setNodes(laid.nodes);
   }, [nodes, edges, setNodes]);

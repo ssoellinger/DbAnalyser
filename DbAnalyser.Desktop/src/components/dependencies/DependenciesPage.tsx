@@ -153,7 +153,7 @@ function DependencyGraphInner() {
         });
     }
 
-    const laid = getLayoutedElements(nodes, edges, { rankSep: 25, nodeSep: 2 });
+    const laid = getLayoutedElements(nodes, edges, { rankSep: 120, nodeSep: 30 });
     return { initialNodes: laid.nodes, initialEdges: laid.edges };
   }, [deps, rels, activeNodes, activeEdges, cycleNodes]);
 
@@ -169,7 +169,7 @@ function DependencyGraphInner() {
   const { fitView } = useReactFlow();
 
   const handleAutoLayout = useCallback(() => {
-    const laid = getLayoutedElements(nodes, edges, { rankSep: 25, nodeSep: 2 });
+    const laid = getLayoutedElements(nodes, edges, { rankSep: 120, nodeSep: 30 });
     setNodes(laid.nodes);
     setTimeout(() => fitView({ padding: 0.1 }), 50);
   }, [nodes, edges, setNodes, fitView]);

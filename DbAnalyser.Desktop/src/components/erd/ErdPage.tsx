@@ -302,8 +302,8 @@ function ErdGraphInner() {
     }
 
     const laid = getLayoutedElements(nodes, edges, {
-      rankSep: 150,
-      nodeSep: 80,
+      rankSep: 200,
+      nodeSep: 40,
       nodeWidth: 240,
       nodeHeight: 250,
     });
@@ -320,8 +320,8 @@ function ErdGraphInner() {
 
   const handleAutoLayout = useCallback(() => {
     const laid = getLayoutedElements(nodes, edges, {
-      rankSep: 150,
-      nodeSep: 80,
+      rankSep: 200,
+      nodeSep: 40,
       nodeWidth: 240,
       nodeHeight: 250,
     });
