@@ -9,6 +9,11 @@ public record TriggerInfo(
     bool IsEnabled,
     string Definition)
 {
-    public string FullName => $"{SchemaName}.{TriggerName}";
-    public string ParentFullName => $"{SchemaName}.{ParentTable}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{TriggerName}"
+        : $"{SchemaName}.{TriggerName}";
+    public string ParentFullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{ParentTable}"
+        : $"{SchemaName}.{ParentTable}";
 }

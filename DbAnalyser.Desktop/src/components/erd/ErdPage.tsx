@@ -22,6 +22,7 @@ import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { getLayoutedElements } from '../../hooks/useDagreLayout';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { TableInfo, ColumnInfo } from '../../api/types';
+import { getDatabaseColor } from '../dashboard/DashboardPage';
 
 // ── Custom Table Node ───────────────────────────────────────────────────────
 
@@ -120,6 +121,23 @@ function ErdGraphInner() {
   const result = useStore((s) => s.result)!;
   const schema = result.schema!;
   const rels = result.relationships;
+  const isServerMode = useStore((s) => s.isServerMode);
+
+  // Database filters (server mode only)
+  const databaseFilters = useMemo(() => {
+    if (!isServerMode || !result.databases?.length) return [];
+    return result.databases.map((db) => ({
+      key: db,
+      label: db,
+      count: schema.tables.filter((t) => t.databaseName === db).length +
+             schema.views.filter((v) => v.databaseName === db).length,
+      color: getDatabaseColor(db),
+    }));
+  }, [isServerMode, result.databases, schema]);
+
+  const [activeDatabases, setActiveDatabases] = useState<Set<string>>(
+    () => new Set(result.databases ?? [])
+  );
 
   const objectTypes = useMemo(() => {
     const items = [
@@ -140,17 +158,29 @@ function ErdGraphInner() {
 
   const [activeTypes, setActiveTypes] = useState(() => new Set(['table', 'view']));
 
+  // Helper: get node color based on mode
+  const getColor = useCallback((objectType: string, dbName?: string) => {
+    if (isServerMode && dbName) return getDatabaseColor(dbName);
+    return OBJECT_TYPE_COLORS[objectType] ?? '#666';
+  }, [isServerMode]);
+
+  // Helper: filter by active databases in server mode
+  const dbFilter = useCallback((dbName?: string) => {
+    if (!isServerMode) return true;
+    return dbName ? activeDatabases.has(dbName) : true;
+  }, [isServerMode, activeDatabases]);
+
   const { initialNodes, initialEdges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
 
     if (activeTypes.has('table')) {
-      schema.tables.forEach((table) => {
+      schema.tables.filter((t) => dbFilter(t.databaseName)).forEach((table) => {
         nodes.push({
           id: table.fullName,
           type: 'tableNode',
           position: { x: 0, y: 0 },
-          data: { table, color: OBJECT_TYPE_COLORS.Table },
+          data: { table, color: getColor('Table', table.databaseName) },
           width: 240,
           height: 36 + Math.min(table.columns.length, 16) * 24,
         });
@@ -158,10 +188,11 @@ function ErdGraphInner() {
     }
 
     if (activeTypes.has('view')) {
-      schema.views.forEach((view) => {
+      schema.views.filter((v) => dbFilter(v.databaseName)).forEach((view) => {
         const tableEquiv: TableInfo = {
           schemaName: view.schemaName,
           tableName: view.viewName,
+          databaseName: view.databaseName,
           fullName: view.fullName,
           columns: view.columns,
           indexes: [],
@@ -171,7 +202,7 @@ function ErdGraphInner() {
           id: view.fullName,
           type: 'tableNode',
           position: { x: 0, y: 0 },
-          data: { table: tableEquiv, color: OBJECT_TYPE_COLORS.View },
+          data: { table: tableEquiv, color: getColor('View', view.databaseName) },
           width: 240,
           height: 36 + Math.min(view.columns.length, 16) * 24,
         });
@@ -179,13 +210,13 @@ function ErdGraphInner() {
     }
 
     if (activeTypes.has('procedure')) {
-      schema.storedProcedures.forEach((sp) => {
+      schema.storedProcedures.filter((sp) => dbFilter(sp.databaseName)).forEach((sp) => {
         const label = sp.fullName.split('.').pop() ?? sp.fullName;
         nodes.push({
           id: sp.fullName,
           type: 'compactNode',
           position: { x: 0, y: 0 },
-          data: { label, type: 'SP', color: OBJECT_TYPE_COLORS.Procedure },
+          data: { label, type: 'SP', color: getColor('Procedure', sp.databaseName) },
           width: 180,
           height: 32,
         });
@@ -193,13 +224,13 @@ function ErdGraphInner() {
     }
 
     if (activeTypes.has('function')) {
-      schema.functions.forEach((fn) => {
+      schema.functions.filter((fn) => dbFilter(fn.databaseName)).forEach((fn) => {
         const label = fn.fullName.split('.').pop() ?? fn.fullName;
         nodes.push({
           id: fn.fullName,
           type: 'compactNode',
           position: { x: 0, y: 0 },
-          data: { label, type: 'FN', detail: fn.functionType, color: OBJECT_TYPE_COLORS.Function },
+          data: { label, type: 'FN', detail: fn.functionType, color: getColor('Function', fn.databaseName) },
           width: 180,
           height: 46,
         });
@@ -207,13 +238,13 @@ function ErdGraphInner() {
     }
 
     if (activeTypes.has('trigger')) {
-      schema.triggers.forEach((trg) => {
+      schema.triggers.filter((t) => dbFilter(t.databaseName)).forEach((trg) => {
         const label = trg.fullName.split('.').pop() ?? trg.fullName;
         nodes.push({
           id: trg.fullName,
           type: 'compactNode',
           position: { x: 0, y: 0 },
-          data: { label, type: 'TR', detail: `on ${trg.parentFullName}`, color: OBJECT_TYPE_COLORS.Trigger },
+          data: { label, type: 'TR', detail: `on ${trg.parentFullName}`, color: getColor('Trigger', trg.databaseName) },
           width: 180,
           height: 46,
         });
@@ -221,13 +252,13 @@ function ErdGraphInner() {
     }
 
     if (activeTypes.has('synonym')) {
-      schema.synonyms.forEach((syn) => {
+      schema.synonyms.filter((s) => dbFilter(s.databaseName)).forEach((syn) => {
         const label = syn.fullName.split('.').pop() ?? syn.fullName;
         nodes.push({
           id: syn.fullName,
           type: 'compactNode',
           position: { x: 0, y: 0 },
-          data: { label, type: 'SYN', detail: `→ ${syn.baseObjectName}`, color: OBJECT_TYPE_COLORS.Synonym },
+          data: { label, type: 'SYN', detail: `→ ${syn.baseObjectName}`, color: getColor('Synonym', syn.databaseName) },
           width: 180,
           height: 46,
         });
@@ -239,8 +270,12 @@ function ErdGraphInner() {
     // FK edges (solid)
     if (rels) {
       rels.explicitRelationships.forEach((fk, i) => {
-        const from = `${fk.fromSchema}.${fk.fromTable}`;
-        const to = `${fk.toSchema}.${fk.toTable}`;
+        const from = fk.fromDatabase
+          ? `${fk.fromDatabase}.${fk.fromSchema}.${fk.fromTable}`
+          : `${fk.fromSchema}.${fk.fromTable}`;
+        const to = fk.toDatabase
+          ? `${fk.toDatabase}.${fk.toSchema}.${fk.toTable}`
+          : `${fk.toSchema}.${fk.toTable}`;
         if (nodeSet.has(from) && nodeSet.has(to)) {
           edges.push({
             id: `erd-fk-${i}`,
@@ -258,7 +293,7 @@ function ErdGraphInner() {
       rels.viewDependencies
         .filter((d) => !d.isCrossDatabase)
         .forEach((d, i) => {
-          const from = `${d.fromSchema}.${d.fromName}`;
+          const from = d.fromFullName ?? `${d.fromSchema}.${d.fromName}`;
           const to = d.toFullName;
           if (nodeSet.has(from) && nodeSet.has(to)) {
             edges.push({
@@ -274,8 +309,12 @@ function ErdGraphInner() {
       rels.implicitRelationships
         .filter((r) => r.confidence >= 0.7)
         .forEach((r, i) => {
-          const from = `${r.fromSchema}.${r.fromTable}`;
-          const to = `${r.toSchema}.${r.toTable}`;
+          const from = r.fromDatabase
+            ? `${r.fromDatabase}.${r.fromSchema}.${r.fromTable}`
+            : `${r.fromSchema}.${r.fromTable}`;
+          const to = r.toDatabase
+            ? `${r.toDatabase}.${r.toSchema}.${r.toTable}`
+            : `${r.toSchema}.${r.toTable}`;
           if (nodeSet.has(from) && nodeSet.has(to)) {
             edges.push({
               id: `erd-impl-${i}`,
@@ -308,7 +347,7 @@ function ErdGraphInner() {
       nodeHeight: 250,
     });
     return { initialNodes: laid.nodes, initialEdges: laid.edges };
-  }, [schema, rels, activeTypes]);
+  }, [schema, rels, activeTypes, getColor, dbFilter]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -335,7 +374,24 @@ function ErdGraphInner() {
         <span className="text-xs text-text-muted">{nodes.length} objects</span>
       </div>
 
-      <div className="shrink-0">
+      <div className="shrink-0 flex items-center gap-6 flex-wrap">
+        {isServerMode && databaseFilters.length > 0 && (
+          <>
+            <FilterBar
+              label="Databases"
+              items={databaseFilters}
+              active={activeDatabases}
+              onToggle={(key) => {
+                setActiveDatabases((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(key)) next.delete(key); else next.add(key);
+                  return next;
+                });
+              }}
+            />
+            <div className="w-px h-4 bg-border" />
+          </>
+        )}
         <FilterBar
           label="Objects"
           items={objectTypes}
@@ -372,11 +428,11 @@ function ErdGraphInner() {
 }
 
 export function ErdPage() {
-  const { status, error, refresh } = useAnalyzer('schema');
+  const { status, error, progress, refresh } = useAnalyzer('schema');
   const schema = useStore((s) => s.result?.schema);
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema" progress={progress}>
       {schema && schema.tables.length > 0 ? (
         <ReactFlowProvider>
           <ErdGraphInner />

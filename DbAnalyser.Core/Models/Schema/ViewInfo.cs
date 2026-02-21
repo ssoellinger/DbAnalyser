@@ -6,5 +6,8 @@ public record ViewInfo(
     string Definition,
     List<ColumnInfo> Columns)
 {
-    public string FullName => $"{SchemaName}.{ViewName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{ViewName}"
+        : $"{SchemaName}.{ViewName}";
 }

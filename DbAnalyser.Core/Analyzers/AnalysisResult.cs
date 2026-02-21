@@ -15,4 +15,11 @@ public class AnalysisResult
     public RelationshipMap? Relationships { get; set; }
     public List<QualityIssue>? QualityIssues { get; set; }
     public UsageAnalysis? UsageAnalysis { get; set; }
+
+    // Server-wide analysis
+    public bool IsServerMode { get; set; }
+    public List<string> Databases { get; set; } = [];
+    public List<DatabaseError> FailedDatabases { get; set; } = [];
 }
+
+public record DatabaseError(string DatabaseName, string Error);

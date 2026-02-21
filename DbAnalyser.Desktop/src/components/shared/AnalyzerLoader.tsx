@@ -1,21 +1,37 @@
 import type { ReactNode } from 'react';
-import type { AnalyzerStatus } from '../../api/types';
+import type { AnalyzerStatus, AnalysisProgress } from '../../api/types';
 
 interface AnalyzerLoaderProps {
   status: AnalyzerStatus;
   error: string | null;
   onRefresh: () => void;
   analyzerName: string;
+  progress?: AnalysisProgress | null;
   children: ReactNode;
 }
 
-export function AnalyzerLoader({ status, error, onRefresh, analyzerName, children }: AnalyzerLoaderProps) {
+export function AnalyzerLoader({ status, error, onRefresh, analyzerName, progress, children }: AnalyzerLoaderProps) {
   if (status === 'loading' || status === 'idle') {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="text-center space-y-3">
+        <div className="text-center space-y-4 max-w-xs w-full">
           <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-text-secondary">Loading {analyzerName}...</p>
+          {progress && progress.total > 0 ? (
+            <>
+              <p className="text-sm text-text-primary font-medium">{progress.step}</p>
+              <div className="w-full bg-bg-primary border border-border rounded-full h-2 overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(progress.percentage, 2)}%` }}
+                />
+              </div>
+              <p className="text-xs text-text-muted">
+                {progress.current} of {progress.total} &middot; {Math.round(progress.percentage)}%
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-text-secondary">Loading {analyzerName}...</p>
+          )}
         </div>
       </div>
     );

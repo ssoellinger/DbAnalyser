@@ -8,5 +8,8 @@ public record UserDefinedTypeInfo(
     bool IsNullable,
     int? MaxLength)
 {
-    public string FullName => $"{SchemaName}.{TypeName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{TypeName}"
+        : $"{SchemaName}.{TypeName}";
 }

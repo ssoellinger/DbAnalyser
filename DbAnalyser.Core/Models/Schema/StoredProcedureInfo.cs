@@ -6,5 +6,8 @@ public record StoredProcedureInfo(
     string Definition,
     DateTime? LastModified)
 {
-    public string FullName => $"{SchemaName}.{ProcedureName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{ProcedureName}"
+        : $"{SchemaName}.{ProcedureName}";
 }

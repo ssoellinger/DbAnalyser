@@ -4,10 +4,15 @@ public class TableDependency
 {
     public string SchemaName { get; set; } = string.Empty;
     public string TableName { get; set; } = string.Empty;
+    public string? DatabaseName { get; set; }
     public string ObjectType { get; set; } = "Table";
     public string? ExternalDatabase { get; set; }
     public bool IsExternal => ExternalDatabase is not null;
-    public string FullName => IsExternal ? $"{ExternalDatabase}.{SchemaName}.{TableName}" : $"{SchemaName}.{TableName}";
+    public string FullName => IsExternal
+        ? $"{ExternalDatabase}.{SchemaName}.{TableName}"
+        : DatabaseName is not null
+            ? $"{DatabaseName}.{SchemaName}.{TableName}"
+            : $"{SchemaName}.{TableName}";
 
     /// <summary>Tables this table depends on (this table has FK pointing to them).</summary>
     public List<string> DependsOn { get; set; } = [];

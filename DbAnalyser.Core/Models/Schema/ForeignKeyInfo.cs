@@ -9,4 +9,8 @@ public record ForeignKeyInfo(
     string ToTable,
     string ToColumn,
     string DeleteRule,
-    string UpdateRule);
+    string UpdateRule)
+{
+    public string? FromDatabase { get; init; }
+    public string? ToDatabase { get; init; }
+}

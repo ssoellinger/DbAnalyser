@@ -8,4 +8,8 @@ public record ImplicitRelationship(
     string ToTable,
     string ToColumn,
     double Confidence,
-    string Reason);
+    string Reason)
+{
+    public string? FromDatabase { get; init; }
+    public string? ToDatabase { get; init; }
+}

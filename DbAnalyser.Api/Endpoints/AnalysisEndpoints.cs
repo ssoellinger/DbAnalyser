@@ -47,6 +47,7 @@ public static class AnalysisEndpoints
                     analyzer,
                     request?.Force ?? false,
                     request?.SignalRConnectionId,
+                    request?.Database,
                     ct);
                 return Results.Ok(result);
             }
@@ -79,4 +80,4 @@ public static class AnalysisEndpoints
 public record ConnectRequest(string ConnectionString);
 public record StartAnalysisRequest(string SessionId, List<string>? Analyzers = null, string? SignalRConnectionId = null);
 public record DisconnectRequest(string SessionId);
-public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false);
+public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false, string? Database = null);

@@ -5,7 +5,10 @@ public record SynonymInfo(
     string SynonymName,
     string BaseObjectName)
 {
-    public string FullName => $"{SchemaName}.{SynonymName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{SynonymName}"
+        : $"{SchemaName}.{SynonymName}";
 
     /// <summary>Parse the base object to extract database, schema, name parts.</summary>
     public (string? Database, string Schema, string Name) ParseBaseObject()

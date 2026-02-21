@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import type { HubConnection } from '@microsoft/signalr';
 import type { AnalysisResult, AnalysisProgress, AnalyzerName, AnalyzerStatus } from '../api/types';
-import { api } from '../api/client';
+import { api, createSignalRConnection, onProgress } from '../api/client';
 
 interface ConnectionHistoryEntry {
   connectionString: string;
@@ -26,6 +27,8 @@ interface AppState {
   // Connection
   sessionId: string | null;
   databaseName: string | null;
+  isServerMode: boolean;
+  serverName: string | null;
   isConnecting: boolean;
   connectionError: string | null;
 
@@ -38,6 +41,10 @@ interface AppState {
   analyzerStatus: Record<AnalyzerName, AnalyzerStatus>;
   analyzerErrors: Record<string, string | null>;
 
+  // SignalR
+  signalRConnection: HubConnection | null;
+  signalRConnectionId: string | null;
+
   // UI
   sidebarCollapsed: boolean;
   searchOpen: boolean;
@@ -46,14 +53,15 @@ interface AppState {
   connectionHistory: ConnectionHistoryEntry[];
 
   // Actions
+  initSignalR: () => Promise<void>;
   setConnecting: (isConnecting: boolean) => void;
-  setConnected: (sessionId: string, databaseName: string) => void;
+  setConnected: (sessionId: string, databaseName: string | null, isServerMode?: boolean, serverName?: string | null) => void;
   setConnectionError: (error: string | null) => void;
   setAnalyzing: (isAnalyzing: boolean) => void;
   setProgress: (progress: AnalysisProgress | null) => void;
   setResult: (result: AnalysisResult) => void;
   mergeResult: (incoming: AnalysisResult) => void;
-  runAnalyzer: (name: AnalyzerName, force?: boolean) => Promise<void>;
+  runAnalyzer: (name: AnalyzerName, force?: boolean, database?: string) => Promise<void>;
   disconnect: () => void;
   toggleSidebar: () => void;
   toggleSearch: () => void;
@@ -64,6 +72,8 @@ interface AppState {
 export const useStore = create<AppState>((set, get) => ({
   sessionId: null,
   databaseName: null,
+  isServerMode: false,
+  serverName: null,
   isConnecting: false,
   connectionError: null,
   result: null,
@@ -71,13 +81,40 @@ export const useStore = create<AppState>((set, get) => ({
   progress: null,
   analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' },
   analyzerErrors: {},
+  signalRConnection: null,
+  signalRConnectionId: null,
   sidebarCollapsed: false,
   searchOpen: false,
   connectionHistory: [],
 
+  initSignalR: async () => {
+    // Stop any existing connection
+    const existing = get().signalRConnection;
+    if (existing) {
+      try { await existing.stop(); } catch { /* ignore */ }
+    }
+
+    const connection = createSignalRConnection();
+
+    // Listen for progress events
+    onProgress(connection, (progress) => {
+      console.log('[SignalR] progress:', progress);
+      get().setProgress(progress);
+    });
+
+    try {
+      await connection.start();
+      console.log('[SignalR] connected, connectionId:', connection.connectionId);
+      set({ signalRConnection: connection, signalRConnectionId: connection.connectionId });
+    } catch (err) {
+      console.warn('SignalR connection failed, progress updates will be unavailable:', err);
+      set({ signalRConnection: null, signalRConnectionId: null });
+    }
+  },
+
   setConnecting: (isConnecting) => set({ isConnecting, connectionError: null }),
-  setConnected: (sessionId, databaseName) =>
-    set({ sessionId, databaseName, isConnecting: false, connectionError: null }),
+  setConnected: (sessionId, databaseName, isServerMode = false, serverName = null) =>
+    set({ sessionId, databaseName, isServerMode, serverName, isConnecting: false, connectionError: null }),
   setConnectionError: (error) => set({ connectionError: error, isConnecting: false }),
   setAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
   setProgress: (progress) => set({ progress }),
@@ -108,6 +145,9 @@ export const useStore = create<AppState>((set, get) => ({
       relationships: incoming.relationships ?? existing.relationships,
       qualityIssues: incoming.qualityIssues ?? existing.qualityIssues,
       usageAnalysis: incoming.usageAnalysis ?? existing.usageAnalysis,
+      isServerMode: incoming.isServerMode || existing.isServerMode,
+      databases: incoming.databases?.length ? incoming.databases : existing.databases,
+      failedDatabases: incoming.failedDatabases?.length ? incoming.failedDatabases : existing.failedDatabases,
     };
     set({
       result: merged,
@@ -115,17 +155,20 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  runAnalyzer: async (name, force) => {
-    const { sessionId } = get();
+  runAnalyzer: async (name, force, database) => {
+    const { sessionId, signalRConnectionId } = get();
     if (!sessionId) return;
+
+    console.log('[runAnalyzer]', name, 'signalRConnectionId:', signalRConnectionId, 'database:', database);
 
     set((s) => ({
       analyzerStatus: { ...s.analyzerStatus, [name]: 'loading' as AnalyzerStatus },
       analyzerErrors: { ...s.analyzerErrors, [name]: null },
+      progress: null,
     }));
 
     try {
-      const result = await api.runAnalyzer(sessionId, name, force);
+      const result = await api.runAnalyzer(sessionId, name, force, signalRConnectionId ?? undefined, database);
       get().mergeResult(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Analysis failed';
@@ -136,15 +179,24 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  disconnect: () =>
+  disconnect: () => {
+    const connection = get().signalRConnection;
+    if (connection) {
+      connection.stop().catch(() => { /* ignore */ });
+    }
     set({
       sessionId: null,
       databaseName: null,
+      isServerMode: false,
+      serverName: null,
       result: null,
       progress: null,
+      signalRConnection: null,
+      signalRConnectionId: null,
       analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' },
       analyzerErrors: {},
-    }),
+    });
+  },
 
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),

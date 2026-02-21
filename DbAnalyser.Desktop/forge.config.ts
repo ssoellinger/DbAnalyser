@@ -6,7 +6,7 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    extraResource: ['./resources/api'],
+    extraResource: ['./resources/api', './resources/icon.ico'],
     name: 'DbAnalyser',
     executableName: 'DbAnalyser',
     icon: './resources/icon',

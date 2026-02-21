@@ -7,5 +7,8 @@ public record TableInfo(
     List<IndexInfo> Indexes,
     List<ForeignKeyInfo> ForeignKeys)
 {
-    public string FullName => $"{SchemaName}.{TableName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{TableName}"
+        : $"{SchemaName}.{TableName}";
 }

@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using DbAnalyser.Analyzers;
 using DbAnalyser.Api.Hubs;
 using DbAnalyser.Configuration;
+using DbAnalyser.Models.Schema;
+using DbAnalyser.Models.Usage;
 using DbAnalyser.Providers;
 using DbAnalyser.Providers.SqlServer;
 using Microsoft.AspNetCore.SignalR;
@@ -28,15 +30,25 @@ public class AnalysisSessionService : IAsyncDisposable
         {
             MultipleActiveResultSets = true
         };
+
+        // Detect server mode: no database specified → connect to master
+        var isServerMode = string.IsNullOrWhiteSpace(builder.InitialCatalog);
+        if (isServerMode)
+            builder.InitialCatalog = "master";
+
         connectionString = builder.ConnectionString;
 
         var provider = new SqlServerProvider();
         await provider.ConnectAsync(connectionString, ct);
 
         var sessionId = Guid.NewGuid().ToString("N")[..12];
-        _sessions[sessionId] = new SessionState(provider);
+        _sessions[sessionId] = new SessionState(provider) { IsServerMode = isServerMode, ConnectionString = connectionString };
 
-        return new ConnectResult(sessionId, provider.DatabaseName);
+        return new ConnectResult(
+            sessionId,
+            isServerMode ? null : provider.DatabaseName,
+            isServerMode,
+            provider.ServerName);
     }
 
     public async Task<AnalysisResult> RunAnalysisAsync(
@@ -48,38 +60,52 @@ public class AnalysisSessionService : IAsyncDisposable
         if (!_sessions.TryGetValue(sessionId, out var session))
             throw new InvalidOperationException($"Session '{sessionId}' not found. Connect first.");
 
-        var options = new AnalysisOptions
+        var analyzerNames = analyzers ?? ["schema", "profiling", "relationships", "quality", "usage"];
+
+        // Server mode: delegate to ServerAnalysisOrchestrator
+        if (session.IsServerMode)
         {
-            Analyzers = analyzers ?? ["schema", "profiling", "relationships", "quality", "usage"]
-        };
+            var orchestrator = new ServerAnalysisOrchestrator(
+                _serviceProvider.GetServices<IAnalyzer>());
 
+            var result = await orchestrator.RunAsync(
+                session.ConnectionString,
+                analyzerNames,
+                async (step, current, total, status) =>
+                    await SendProgress(signalRConnectionId, step, current, total, status),
+                ct);
+
+            session.LastResult = result;
+            return result;
+        }
+
+        var enabledNames = analyzerNames.Select(a => a.ToLowerInvariant()).ToHashSet();
         var analyzerInstances = _serviceProvider.GetServices<IAnalyzer>().ToList();
-        var enabledNames = options.Analyzers.Select(a => a.ToLowerInvariant()).ToHashSet();
 
-        var result = new AnalysisResult
+        var singleResult = new AnalysisResult
         {
             DatabaseName = session.Provider.DatabaseName,
             AnalyzedAt = DateTime.UtcNow
         };
 
-        var total = analyzerInstances.Count(a => enabledNames.Contains(a.Name.ToLowerInvariant()));
-        var current = 0;
+        var total2 = analyzerInstances.Count(a => enabledNames.Contains(a.Name.ToLowerInvariant()));
+        var current2 = 0;
 
         foreach (var analyzer in analyzerInstances)
         {
             if (!enabledNames.Contains(analyzer.Name.ToLowerInvariant()))
                 continue;
 
-            current++;
-            await SendProgress(signalRConnectionId, analyzer.Name, current, total, "running");
+            current2++;
+            await SendProgress(signalRConnectionId, analyzer.Name, current2, total2, "running");
 
-            await analyzer.AnalyzeAsync(session.Provider, result, ct);
+            await analyzer.AnalyzeAsync(session.Provider, singleResult, ct);
 
-            await SendProgress(signalRConnectionId, analyzer.Name, current, total, "completed");
+            await SendProgress(signalRConnectionId, analyzer.Name, current2, total2, "completed");
         }
 
-        session.LastResult = result;
-        return result;
+        session.LastResult = singleResult;
+        return singleResult;
     }
 
     // Dependency graph: analyzer → what it requires to have run first
@@ -130,6 +156,7 @@ public class AnalysisSessionService : IAsyncDisposable
         string analyzerName,
         bool force = false,
         string? signalRConnectionId = null,
+        string? database = null,
         CancellationToken ct = default)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
@@ -142,6 +169,93 @@ public class AnalysisSessionService : IAsyncDisposable
         await session.Lock.WaitAsync(ct);
         try
         {
+            // Server mode
+            if (session.IsServerMode)
+            {
+                // Single-database targeting: connect to just that DB and run the analyzer
+                if (!string.IsNullOrWhiteSpace(database))
+                {
+                    var dbBuilder = new SqlConnectionStringBuilder(session.ConnectionString)
+                    {
+                        InitialCatalog = database,
+                        MultipleActiveResultSets = true
+                    };
+
+                    await using var dbProvider = new SqlServerProvider();
+                    await dbProvider.ConnectAsync(dbBuilder.ConnectionString, ct);
+
+                    // Build a fresh result for this single DB
+                    var dbResult = new AnalysisResult
+                    {
+                        DatabaseName = database,
+                        AnalyzedAt = DateTime.UtcNow
+                    };
+
+                    // Resolve dependencies and run
+                    var toRunDb = new List<string>();
+                    ResolveAllDependencies(analyzerName, toRunDb);
+
+                    var dbAnalyzers = _serviceProvider.GetServices<IAnalyzer>().ToList();
+                    for (var i = 0; i < toRunDb.Count; i++)
+                    {
+                        var name = toRunDb[i];
+                        var instance = dbAnalyzers.FirstOrDefault(a =>
+                            a.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                        if (instance is null) continue;
+
+                        await SendProgress(signalRConnectionId, $"{name} ({database})", i + 1, toRunDb.Count, "running");
+                        await instance.AnalyzeAsync(dbProvider, dbResult, ct);
+                        await SendProgress(signalRConnectionId, $"{name} ({database})", i + 1, toRunDb.Count, "completed");
+                    }
+
+                    // Stamp DatabaseName on usage objects
+                    if (dbResult.UsageAnalysis is not null)
+                    {
+                        foreach (var obj in dbResult.UsageAnalysis.Objects)
+                            obj.DatabaseName = database;
+                    }
+
+                    // Stamp DatabaseName on profiles
+                    if (dbResult.Profiles is not null)
+                    {
+                        foreach (var p in dbResult.Profiles)
+                            p.DatabaseName = database;
+                    }
+
+                    // Merge into session result (preserve existing data from other analyzers/databases)
+                    session.LastResult ??= new AnalysisResult
+                    {
+                        DatabaseName = session.ConnectionString,
+                        AnalyzedAt = DateTime.UtcNow,
+                        IsServerMode = true,
+                        Databases = [],
+                        Schema = new DatabaseSchema { DatabaseName = dbProvider.ServerName },
+                    };
+
+                    MergeSingleDbResult(session.LastResult, dbResult, analyzerName, database);
+                    return session.LastResult;
+                }
+
+                // Full server-mode: delegate to ServerAnalysisOrchestrator (all databases)
+                if (force || session.LastResult is null || !HasAnalyzerRun(analyzerName, session.LastResult))
+                {
+                    var orchestrator = new ServerAnalysisOrchestrator(
+                        _serviceProvider.GetServices<IAnalyzer>());
+
+                    // Resolve which analyzers to run (requested + dependencies)
+                    var toRun = new List<string>();
+                    ResolveAllDependencies(analyzerName, toRun);
+
+                    session.LastResult = await orchestrator.RunAsync(
+                        session.ConnectionString,
+                        toRun,
+                        async (step, current, total, status) =>
+                            await SendProgress(signalRConnectionId, step, current, total, status),
+                        ct);
+                }
+                return session.LastResult;
+            }
+
             var result = session.LastResult ??= new AnalysisResult
             {
                 DatabaseName = session.Provider.DatabaseName,
@@ -157,26 +271,26 @@ public class AnalysisSessionService : IAsyncDisposable
             }
 
             // Resolve full list: dependencies first, then the requested analyzer
-            var toRun = new List<string>();
-            ResolveDependencies(analyzerName, result, toRun);
+            var toRunSingle = new List<string>();
+            ResolveDependencies(analyzerName, result, toRunSingle);
 
-            if (toRun.Count == 0)
+            if (toRunSingle.Count == 0)
                 return result; // Already loaded, nothing to do
 
             var analyzerInstances = _serviceProvider.GetServices<IAnalyzer>().ToList();
-            var total = toRun.Count;
+            var total2 = toRunSingle.Count;
 
-            for (var i = 0; i < toRun.Count; i++)
+            for (var i = 0; i < toRunSingle.Count; i++)
             {
-                var name = toRun[i];
+                var name = toRunSingle[i];
                 var instance = analyzerInstances.FirstOrDefault(a =>
                     a.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
                 if (instance is null) continue;
 
-                await SendProgress(signalRConnectionId, name, i + 1, total, "running");
+                await SendProgress(signalRConnectionId, name, i + 1, total2, "running");
                 await instance.AnalyzeAsync(session.Provider, result, ct);
-                await SendProgress(signalRConnectionId, name, i + 1, total, "completed");
+                await SendProgress(signalRConnectionId, name, i + 1, total2, "completed");
             }
 
             return result;
@@ -185,6 +299,18 @@ public class AnalysisSessionService : IAsyncDisposable
         {
             session.Lock.Release();
         }
+    }
+
+    /// <summary>Resolve analyzer + all its dependencies (no result check — for server mode full re-run).</summary>
+    private static void ResolveAllDependencies(string analyzer, List<string> toRun)
+    {
+        foreach (var dep in AnalyzerDependencies[analyzer])
+        {
+            if (!toRun.Contains(dep))
+                ResolveAllDependencies(dep, toRun);
+        }
+        if (!toRun.Contains(analyzer))
+            toRun.Add(analyzer);
     }
 
     private static void ResolveDependencies(string analyzer, AnalysisResult result, List<string> toRun)
@@ -228,6 +354,34 @@ public class AnalysisSessionService : IAsyncDisposable
         });
     }
 
+    /// <summary>Merge results from a single-DB analysis into the session's aggregate result.</summary>
+    private static void MergeSingleDbResult(AnalysisResult merged, AnalysisResult dbResult, string analyzerName, string database)
+    {
+        // For the targeted analyzer, replace data for this database (remove old, add new)
+        switch (analyzerName)
+        {
+            case "usage":
+                merged.UsageAnalysis ??= new UsageAnalysis();
+                merged.UsageAnalysis.Objects.RemoveAll(o =>
+                    string.Equals(o.DatabaseName, database, StringComparison.OrdinalIgnoreCase));
+                if (dbResult.UsageAnalysis is not null)
+                {
+                    merged.UsageAnalysis.Objects.AddRange(dbResult.UsageAnalysis.Objects);
+                    merged.UsageAnalysis.ServerStartTime ??= dbResult.UsageAnalysis.ServerStartTime;
+                    merged.UsageAnalysis.ServerUptimeDays ??= dbResult.UsageAnalysis.ServerUptimeDays;
+                }
+                break;
+
+            case "profiling":
+                merged.Profiles ??= [];
+                merged.Profiles.RemoveAll(p =>
+                    string.Equals(p.DatabaseName, database, StringComparison.OrdinalIgnoreCase));
+                if (dbResult.Profiles is not null)
+                    merged.Profiles.AddRange(dbResult.Profiles);
+                break;
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var session in _sessions.Values)
@@ -242,7 +396,13 @@ public class AnalysisSessionService : IAsyncDisposable
         public IDbProvider Provider { get; } = provider;
         public AnalysisResult? LastResult { get; set; }
         public SemaphoreSlim Lock { get; } = new(1, 1);
+        public bool IsServerMode { get; init; }
+        public string ConnectionString { get; init; } = string.Empty;
     }
 }
 
-public record ConnectResult(string SessionId, string DatabaseName);
+public record ConnectResult(
+    string SessionId,
+    string? DatabaseName,
+    bool IsServerMode = false,
+    string? ServerName = null);

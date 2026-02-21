@@ -8,8 +8,17 @@ public record ObjectDependency(
     string ToName,
     string ToType,
     string? ToDatabase = null,
-    string? DetectedVia = null)
+    string? DetectedVia = null,
+    string? FromDatabase = null)
 {
-    public bool IsCrossDatabase => ToDatabase is not null;
-    public string ToFullName => IsCrossDatabase ? $"{ToDatabase}.{ToSchema}.{ToName}" : $"{ToSchema}.{ToName}";
+    public bool IsCrossDatabase => ToDatabase is not null
+        && !string.Equals(ToDatabase, FromDatabase, StringComparison.OrdinalIgnoreCase);
+    public string ToFullName => ToDatabase is not null
+        ? $"{ToDatabase}.{ToSchema}.{ToName}"
+        : FromDatabase is not null
+            ? $"{FromDatabase}.{ToSchema}.{ToName}"
+            : $"{ToSchema}.{ToName}";
+    public string FromFullName => FromDatabase is not null
+        ? $"{FromDatabase}.{FromSchema}.{FromName}"
+        : $"{FromSchema}.{FromName}";
 }

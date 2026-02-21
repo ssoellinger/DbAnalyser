@@ -32,6 +32,8 @@ export function Sidebar() {
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
   const databaseName = useStore((s) => s.databaseName);
+  const isServerMode = useStore((s) => s.isServerMode);
+  const serverName = useStore((s) => s.serverName);
   const analyzerStatus = useStore((s) => s.analyzerStatus);
 
   return (
@@ -41,9 +43,10 @@ export function Sidebar() {
       }`}
     >
       <div className="flex items-center h-14 px-4 border-b border-border">
+        <img src="/icon.svg" alt="DbAnalyser" className="w-10 h-10 flex-shrink-0" />
         {!collapsed && (
-          <span className="text-accent font-semibold text-sm truncate">
-            {databaseName ?? 'DbAnalyser'}
+          <span className="text-accent font-semibold text-sm truncate ml-2">
+            {isServerMode ? `Server: ${serverName}` : (databaseName ?? 'DbAnalyser')}
           </span>
         )}
         <button

@@ -8,6 +8,14 @@ export interface AnalysisResult {
   relationships: RelationshipMap | null;
   qualityIssues: QualityIssue[] | null;
   usageAnalysis: UsageAnalysis | null;
+  isServerMode: boolean;
+  databases: string[];
+  failedDatabases: DatabaseError[];
+}
+
+export interface DatabaseError {
+  databaseName: string;
+  error: string;
 }
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -28,6 +36,7 @@ export interface DatabaseSchema {
 export interface TableInfo {
   schemaName: string;
   tableName: string;
+  databaseName?: string;
   fullName: string;
   columns: ColumnInfo[];
   indexes: IndexInfo[];
@@ -66,11 +75,14 @@ export interface ForeignKeyInfo {
   toColumn: string;
   deleteRule: string;
   updateRule: string;
+  fromDatabase?: string;
+  toDatabase?: string;
 }
 
 export interface ViewInfo {
   schemaName: string;
   viewName: string;
+  databaseName?: string;
   fullName: string;
   definition: string;
   columns: ColumnInfo[];
@@ -79,6 +91,7 @@ export interface ViewInfo {
 export interface StoredProcedureInfo {
   schemaName: string;
   procedureName: string;
+  databaseName?: string;
   fullName: string;
   definition: string;
   lastModified: string | null;
@@ -87,6 +100,7 @@ export interface StoredProcedureInfo {
 export interface FunctionInfo {
   schemaName: string;
   functionName: string;
+  databaseName?: string;
   fullName: string;
   functionType: string;
   definition: string;
@@ -96,6 +110,7 @@ export interface FunctionInfo {
 export interface TriggerInfo {
   schemaName: string;
   triggerName: string;
+  databaseName?: string;
   fullName: string;
   parentTable: string;
   parentFullName: string;
@@ -108,6 +123,7 @@ export interface TriggerInfo {
 export interface SynonymInfo {
   schemaName: string;
   synonymName: string;
+  databaseName?: string;
   fullName: string;
   baseObjectName: string;
 }
@@ -115,6 +131,7 @@ export interface SynonymInfo {
 export interface SequenceInfo {
   schemaName: string;
   sequenceName: string;
+  databaseName?: string;
   fullName: string;
   dataType: string;
   currentValue: number;
@@ -127,6 +144,7 @@ export interface SequenceInfo {
 export interface UserDefinedTypeInfo {
   schemaName: string;
   typeName: string;
+  databaseName?: string;
   fullName: string;
   baseType: string;
   isTableType: boolean;
@@ -156,6 +174,7 @@ export interface JobStepInfo {
 export interface TableProfile {
   schemaName: string;
   tableName: string;
+  databaseName?: string;
   fullName: string;
   rowCount: number;
   columnProfiles: ColumnProfile[];
@@ -190,11 +209,14 @@ export interface ImplicitRelationship {
   toColumn: string;
   confidence: number;
   reason: string;
+  fromDatabase?: string;
+  toDatabase?: string;
 }
 
 export interface TableDependency {
   schemaName: string;
   tableName: string;
+  databaseName?: string;
   fullName: string;
   objectType: string;
   externalDatabase: string | null;
@@ -217,6 +239,8 @@ export interface ObjectDependency {
   detectedVia: string | null;
   isCrossDatabase: boolean;
   toFullName: string;
+  fromDatabase?: string;
+  fromFullName: string;
 }
 
 // ── Quality ─────────────────────────────────────────────────────────────────
@@ -238,6 +262,7 @@ export type UsageLevel = 'active' | 'low' | 'unused' | 'unknown';
 export interface ObjectUsage {
   objectName: string;
   objectType: string;
+  databaseName?: string;
   usageLevel: UsageLevel;
   score: number;
   evidence: string[];
@@ -259,7 +284,9 @@ export type AnalyzerStatus = 'idle' | 'loading' | 'loaded' | 'error';
 
 export interface ConnectResult {
   sessionId: string;
-  databaseName: string;
+  databaseName: string | null;
+  isServerMode: boolean;
+  serverName: string | null;
 }
 
 export interface AnalysisProgress {

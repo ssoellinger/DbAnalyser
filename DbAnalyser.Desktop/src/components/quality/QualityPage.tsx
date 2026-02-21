@@ -13,11 +13,11 @@ const SEVERITY_CONFIG: Record<IssueSeverity, { color: string; icon: string; labe
 };
 
 export function QualityPage() {
-  const { status, error, refresh } = useAnalyzer('quality');
+  const { status, error, progress, refresh } = useAnalyzer('quality');
   const issues = useStore((s) => s.result?.qualityIssues);
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="quality">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="quality" progress={progress}>
       <QualityContent issues={issues ?? []} refresh={refresh} loading={status === 'loading'} />
     </AnalyzerLoader>
   );

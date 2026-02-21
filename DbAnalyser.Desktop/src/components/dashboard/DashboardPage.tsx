@@ -19,8 +19,26 @@ function SkeletonCard() {
   );
 }
 
+// ── Database color utility ────────────────────────────────────────────────────
+
+const DB_PALETTE = [
+  '#e94560', '#4ecca3', '#f0a500', '#bb86fc', '#4fc3f7',
+  '#ff7043', '#78909c', '#26a69a', '#ef5350', '#ab47bc',
+  '#42a5f5', '#66bb6a', '#ffa726', '#ec407a', '#8d6e63',
+];
+
+export function getDatabaseColor(dbName: string): string {
+  let hash = 0;
+  for (let i = 0; i < dbName.length; i++) {
+    hash = ((hash << 5) - hash + dbName.charCodeAt(i)) | 0;
+  }
+  return DB_PALETTE[Math.abs(hash) % DB_PALETTE.length];
+}
+
 export function DashboardPage() {
   const databaseName = useStore((s) => s.databaseName);
+  const isServerMode = useStore((s) => s.isServerMode);
+  const serverName = useStore((s) => s.serverName);
   const navigate = useNavigate();
 
   // Primary: always load schema
@@ -83,13 +101,51 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-text-primary">{databaseName ?? 'Dashboard'}</h2>
+        <h2 className="text-lg font-semibold text-text-primary">
+          {isServerMode ? `Server: ${serverName}` : (databaseName ?? 'Dashboard')}
+        </h2>
         {result?.analyzedAt && (
           <p className="text-xs text-text-muted mt-1">
             Analyzed at {new Date(result.analyzedAt).toLocaleString()}
           </p>
         )}
       </div>
+
+      {/* Server mode: database badges */}
+      {isServerMode && result?.databases && result.databases.length > 0 && (
+        <div className="bg-bg-card border border-border rounded-lg p-4">
+          <h3 className="text-sm font-medium text-text-primary mb-3">
+            Databases Analyzed ({result.databases.length})
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {result.databases.map((db) => (
+              <span
+                key={db}
+                className="px-2.5 py-1 rounded-full text-xs font-medium text-white"
+                style={{ backgroundColor: getDatabaseColor(db) }}
+              >
+                {db}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Failed databases warning */}
+      {isServerMode && result?.failedDatabases && result.failedDatabases.length > 0 && (
+        <div className="bg-severity-warning/10 border border-severity-warning/30 rounded-lg p-4">
+          <h3 className="text-sm font-medium text-severity-warning mb-2">
+            Failed Databases ({result.failedDatabases.length})
+          </h3>
+          <div className="space-y-1">
+            {result.failedDatabases.map((f) => (
+              <p key={f.databaseName} className="text-xs text-text-secondary">
+                <span className="font-medium text-text-primary">{f.databaseName}</span>: {f.error}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {schemaLoading ? (

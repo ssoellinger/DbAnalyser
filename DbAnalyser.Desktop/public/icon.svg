@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-label="DB Analyser Icon">
+  <!-- Transparent background (good for Electron titlebar) -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- DB cylinder: strong outline + simple fills -->
+    <!-- Top ellipse -->
+    <ellipse cx="112" cy="72" rx="62" ry="20" fill="#2F80ED" stroke="#0B2F66" stroke-width="10"/>
+    <!-- Body -->
+    <path d="M50 72v92c0 12 28 22 62 22s62-10 62-22V72"
+          fill="#1F6FDB" stroke="#0B2F66" stroke-width="10"/>
+    <!-- Middle ring -->
+    <ellipse cx="112" cy="118" rx="62" ry="20" fill="#1A57B8" stroke="#0B2F66" stroke-width="10"/>
+    <!-- Bottom ellipse -->
+    <ellipse cx="112" cy="164" rx="62" ry="20" fill="#0E3F8A" stroke="#0B2F66" stroke-width="10"/>
+
+    <!-- Magnifying glass (smaller, to not hide DB) -->
+    <circle cx="176" cy="156" r="38" fill="#EAF2FF" stroke="#1F2937" stroke-width="10"/>
+    <rect x="198" y="182" width="42" height="14" rx="7"
+          transform="rotate(40 198 182)"
+          fill="#1F2937" stroke="#1F2937" stroke-width="2"/>
+
+    <!-- Tiny chart inside lens (simple, readable) -->
+    <rect x="160" y="156" width="10" height="20" fill="#10B981" stroke="none"/>
+    <rect x="174" y="146" width="10" height="30" fill="#22D3EE" stroke="none"/>
+    <rect x="188" y="136" width="10" height="40" fill="#2F80ED" stroke="none"/>
+  </g>
+</svg>

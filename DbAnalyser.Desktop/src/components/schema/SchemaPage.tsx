@@ -100,7 +100,7 @@ function ViewDetail({ view }: { view: ViewInfo }) {
 /* ── Main SchemaPage ───────────────────────────────────────────────────── */
 
 export function SchemaPage() {
-  const { status, error, refresh } = useAnalyzer('schema');
+  const { status, error, progress, refresh } = useAnalyzer('schema');
   const schema = useStore((s) => s.result?.schema);
   const profiles = useStore((s) => s.result?.profiles);
   const relationships = useStore((s) => s.result?.relationships);
@@ -110,7 +110,7 @@ export function SchemaPage() {
   const [expandedDef, setExpandedDef] = useState<string | null>(null);
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema" progress={progress}>
       <SchemaContent
         schema={schema!}
         profiles={profiles ?? null}

@@ -9,12 +9,12 @@ import type { ForeignKeyInfo, ObjectDependency, ImplicitRelationship } from '../
 type TabKey = 'fks' | 'dependencies' | 'implicit';
 
 export function RelationshipsPage() {
-  const { status, error, refresh } = useAnalyzer('relationships');
+  const { status, error, progress, refresh } = useAnalyzer('relationships');
   const rels = useStore((s) => s.result?.relationships);
   const [activeTab, setActiveTab] = useState<TabKey>('fks');
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships" progress={progress}>
       <RelationshipsContent rels={rels!} activeTab={activeTab} setActiveTab={setActiveTab} refresh={refresh} loading={status === 'loading'} />
     </AnalyzerLoader>
   );
@@ -66,8 +66,14 @@ function RelationshipsContent({ rels, activeTab, setActiveTab, refresh, loading 
 function ForeignKeysTab({ data }: { data: ForeignKeyInfo[] }) {
   const columns: ColumnDef<ForeignKeyInfo, any>[] = [
     { header: 'Name', accessorKey: 'name' },
-    { header: 'From', accessorFn: (r) => `${r.fromSchema}.${r.fromTable}.${r.fromColumn}` },
-    { header: 'To', accessorFn: (r) => `${r.toSchema}.${r.toTable}.${r.toColumn}` },
+    { header: 'From', accessorFn: (r) => {
+      const prefix = r.fromDatabase ? `${r.fromDatabase}.` : '';
+      return `${prefix}${r.fromSchema}.${r.fromTable}.${r.fromColumn}`;
+    }},
+    { header: 'To', accessorFn: (r) => {
+      const prefix = r.toDatabase ? `${r.toDatabase}.` : '';
+      return `${prefix}${r.toSchema}.${r.toTable}.${r.toColumn}`;
+    }},
     { header: 'Delete Rule', accessorKey: 'deleteRule' },
     { header: 'Update Rule', accessorKey: 'updateRule' },
   ];
@@ -76,7 +82,7 @@ function ForeignKeysTab({ data }: { data: ForeignKeyInfo[] }) {
 
 function DependenciesTab({ data }: { data: ObjectDependency[] }) {
   const columns: ColumnDef<ObjectDependency, any>[] = [
-    { header: 'From', accessorFn: (r) => `${r.fromSchema}.${r.fromName}` },
+    { header: 'From', accessorFn: (r) => r.fromFullName ?? `${r.fromSchema}.${r.fromName}` },
     { header: 'From Type', accessorKey: 'fromType' },
     { header: 'To', accessorKey: 'toFullName' },
     { header: 'To Type', accessorKey: 'toType' },
@@ -91,8 +97,14 @@ function DependenciesTab({ data }: { data: ObjectDependency[] }) {
 
 function ImplicitTab({ data }: { data: ImplicitRelationship[] }) {
   const columns: ColumnDef<ImplicitRelationship, any>[] = [
-    { header: 'From', accessorFn: (r) => `${r.fromSchema}.${r.fromTable}.${r.fromColumn}` },
-    { header: 'To', accessorFn: (r) => `${r.toSchema}.${r.toTable}.${r.toColumn}` },
+    { header: 'From', accessorFn: (r) => {
+      const prefix = r.fromDatabase ? `${r.fromDatabase}.` : '';
+      return `${prefix}${r.fromSchema}.${r.fromTable}.${r.fromColumn}`;
+    }},
+    { header: 'To', accessorFn: (r) => {
+      const prefix = r.toDatabase ? `${r.toDatabase}.` : '';
+      return `${prefix}${r.toSchema}.${r.toTable}.${r.toColumn}`;
+    }},
     {
       header: 'Confidence',
       accessorKey: 'confidence',

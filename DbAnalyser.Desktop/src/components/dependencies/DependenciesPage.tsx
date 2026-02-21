@@ -105,8 +105,12 @@ function DependencyGraphInner() {
     // FK edges
     if (activeEdges.has('fk')) {
       rels.explicitRelationships.forEach((fk, i) => {
-        const from = `${fk.fromSchema}.${fk.fromTable}`;
-        const to = `${fk.toSchema}.${fk.toTable}`;
+        const from = fk.fromDatabase
+          ? `${fk.fromDatabase}.${fk.fromSchema}.${fk.fromTable}`
+          : `${fk.fromSchema}.${fk.fromTable}`;
+        const to = fk.toDatabase
+          ? `${fk.toDatabase}.${fk.toSchema}.${fk.toTable}`
+          : `${fk.toSchema}.${fk.toTable}`;
         if (nodeSet.has(from) && nodeSet.has(to)) {
           edges.push({
             id: `fk-${i}`,
@@ -123,7 +127,7 @@ function DependencyGraphInner() {
     rels.viewDependencies
       .filter((d) => !d.isCrossDatabase && activeEdges.has(d.fromType.toLowerCase()))
       .forEach((d, i) => {
-        const from = `${d.fromSchema}.${d.fromName}`;
+        const from = d.fromFullName ?? `${d.fromSchema}.${d.fromName}`;
         const to = d.toFullName;
         if (nodeSet.has(from) && nodeSet.has(to)) {
           edges.push({
@@ -140,8 +144,12 @@ function DependencyGraphInner() {
       rels.implicitRelationships
         .filter((r) => r.confidence >= 0.7)
         .forEach((r, i) => {
-          const from = `${r.fromSchema}.${r.fromTable}`;
-          const to = `${r.toSchema}.${r.toTable}`;
+          const from = r.fromDatabase
+            ? `${r.fromDatabase}.${r.fromSchema}.${r.fromTable}`
+            : `${r.fromSchema}.${r.fromTable}`;
+          const to = r.toDatabase
+            ? `${r.toDatabase}.${r.toSchema}.${r.toTable}`
+            : `${r.toSchema}.${r.toTable}`;
           if (nodeSet.has(from) && nodeSet.has(to)) {
             edges.push({
               id: `impl-${i}`,
@@ -234,11 +242,11 @@ function DependencyGraphInner() {
 }
 
 export function DependenciesPage() {
-  const { status, error, refresh } = useAnalyzer('relationships');
+  const { status, error, progress, refresh } = useAnalyzer('relationships');
   const rels = useStore((s) => s.result?.relationships);
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships" progress={progress}>
       {rels && rels.dependencies.length > 0 ? (
         <ReactFlowProvider>
           <DependencyGraphInner />

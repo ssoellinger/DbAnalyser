@@ -16,11 +16,70 @@ const LEVEL_CONFIG: Record<UsageLevel, { color: string; icon: string; label: str
 const LEVELS: UsageLevel[] = ['active', 'low', 'unused', 'unknown'];
 
 export function UsagePage() {
-  const { status, error, refresh } = useAnalyzer('usage');
+  const isServerMode = useStore((s) => s.isServerMode);
+  const { status, error, progress, refresh } = useAnalyzer('usage', !isServerMode);
   const usage = useStore((s) => s.result?.usageAnalysis);
+  const databases = useStore((s) => s.result?.databases ?? []);
+  const runAnalyzer = useStore((s) => s.runAnalyzer);
+  const [selectedDb, setSelectedDb] = useState('');
 
+  const handleLoad = () => {
+    if (selectedDb) {
+      runAnalyzer('usage', false, selectedDb);
+    }
+  };
+
+  // Server mode: show DB picker instead of auto-loading
+  if (isServerMode) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-lg font-semibold text-text-primary">Usage Analysis</h2>
+
+        <div className="flex items-end gap-3">
+          <div className="flex-1 max-w-xs">
+            <label className="block text-xs text-text-secondary mb-1">Database</label>
+            <select
+              value={selectedDb}
+              onChange={(e) => setSelectedDb(e.target.value)}
+              className="w-full bg-bg-card border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent [&>option]:bg-bg-card [&>option]:text-text-primary"
+            >
+              <option value="">Select a database...</option>
+              {databases.map((db) => (
+                <option key={db} value={db}>{db}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleLoad}
+            disabled={!selectedDb || status === 'loading'}
+            className="px-4 py-2 rounded bg-accent text-bg-primary text-sm font-medium hover:bg-accent-hover transition-colors disabled:opacity-50"
+          >
+            {status === 'loading' ? 'Loading...' : 'Load'}
+          </button>
+        </div>
+
+        {status === 'loading' && (
+          <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="usage" progress={progress}>
+            <div />
+          </AnalyzerLoader>
+        )}
+
+        {error && (
+          <p className="text-sm text-severity-error">{error}</p>
+        )}
+
+        {usage && usage.objects.length > 0 ? (
+          <UsageContent usage={usage} refresh={refresh} isServerMode />
+        ) : status !== 'loading' && usage !== null && (
+          <p className="text-text-muted text-sm">No usage data loaded. Select a database and click Load.</p>
+        )}
+      </div>
+    );
+  }
+
+  // Single-DB mode: auto-load as before
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="usage">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="usage" progress={progress}>
       {usage ? (
         <UsageContent usage={usage} refresh={refresh} />
       ) : (
@@ -33,7 +92,7 @@ export function UsagePage() {
   );
 }
 
-function UsageContent({ usage, refresh }: { usage: import('../../api/types').UsageAnalysis; refresh: () => void }) {
+function UsageContent({ usage, refresh, isServerMode }: { usage: import('../../api/types').UsageAnalysis; refresh: () => void; isServerMode?: boolean }) {
   const [filter, setFilter] = useState<UsageLevel | 'all'>('all');
   const analyzerStatus = useStore((s) => s.analyzerStatus.usage);
 
@@ -98,20 +157,31 @@ function UsageContent({ usage, refresh }: { usage: import('../../api/types').Usa
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-text-primary">Usage Analysis</h2>
-          <RefreshButton onClick={refresh} loading={analyzerStatus === 'loading'} />
+      {!isServerMode && (
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-text-primary">Usage Analysis</h2>
+            <RefreshButton onClick={refresh} loading={analyzerStatus === 'loading'} />
+          </div>
+          {usage.serverUptimeDays != null && (
+            <p className="text-xs text-text-muted mt-1">
+              Server uptime: {usage.serverUptimeDays} days
+              {usage.serverStartTime && (
+                <> (since {new Date(usage.serverStartTime).toLocaleDateString()})</>
+              )}
+            </p>
+          )}
         </div>
-        {usage.serverUptimeDays != null && (
-          <p className="text-xs text-text-muted mt-1">
-            Server uptime: {usage.serverUptimeDays} days
-            {usage.serverStartTime && (
-              <> (since {new Date(usage.serverStartTime).toLocaleDateString()})</>
-            )}
-          </p>
-        )}
-      </div>
+      )}
+
+      {isServerMode && usage.serverUptimeDays != null && (
+        <p className="text-xs text-text-muted">
+          Server uptime: {usage.serverUptimeDays} days
+          {usage.serverStartTime && (
+            <> (since {new Date(usage.serverStartTime).toLocaleDateString()})</>
+          )}
+        </p>
+      )}
 
       {/* Summary cards */}
       <div className="flex gap-3 flex-wrap">

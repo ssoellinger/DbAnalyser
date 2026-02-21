@@ -10,5 +10,8 @@ public record SequenceInfo(
     long MaxValue,
     bool IsCycling)
 {
-    public string FullName => $"{SchemaName}.{SequenceName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{SequenceName}"
+        : $"{SchemaName}.{SequenceName}";
 }

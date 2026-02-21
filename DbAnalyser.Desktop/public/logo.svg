@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="90 45 680 165" role="img" aria-label="DB Analyser Logo">
+  <defs>
+    <!-- Colors -->
+    <linearGradient id="dbBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2F80ED"/>
+      <stop offset="1" stop-color="#0B4FA3"/>
+    </linearGradient>
+
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F6F9FF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#DCE8FF" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B3F49"/>
+      <stop offset="0.5" stop-color="#7E8796"/>
+      <stop offset="1" stop-color="#2C2F36"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.18"/>
+    </filter>
+
+    <style>
+      .brand { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Icon group -->
+  <g transform="translate(60,40)" filter="url(#softShadow)">
+    <!-- Database (cylinder) -->
+    <g>
+      <!-- Top -->
+      <ellipse cx="140" cy="40" rx="78" ry="22" fill="url(#dbBlue)"/>
+      <ellipse cx="140" cy="40" rx="78" ry="22" fill="#ffffff" opacity="0.10"/>
+      <!-- Body -->
+      <path d="M62,40 v86 c0,12 35,22 78,22 s78-10 78-22 V40"
+            fill="url(#dbBlue)"/>
+      <!-- Middle ring -->
+      <ellipse cx="140" cy="92" rx="78" ry="22" fill="#0A3F83" opacity="0.55"/>
+      <path d="M62,92 v38 c0,12 35,22 78,22 s78-10 78-22 V92"
+            fill="url(#dbBlue)" opacity="0.95"/>
+      <!-- Bottom -->
+      <ellipse cx="140" cy="168" rx="78" ry="22" fill="#08336B"/>
+      <!-- Highlight stripe -->
+      <path d="M88,56 c10,6 18,62 18,112 c0,10 -6,16 -18,20"
+            fill="#ffffff" opacity="0.12"/>
+    </g>
+
+    <!-- Magnifying glass -->
+    <g transform="translate(150,20)">
+      <!-- Lens outer ring -->
+      <circle cx="110" cy="95" r="60" fill="none" stroke="url(#metal)" stroke-width="14"/>
+      <!-- Lens -->
+      <circle cx="110" cy="95" r="52" fill="url(#glass)" stroke="#8FB0FF" stroke-opacity="0.55" stroke-width="2"/>
+      <!-- Handle -->
+      <g transform="rotate(38 110 95)">
+        <rect x="155" y="122" width="95" height="20" rx="10" fill="url(#metal)"/>
+        <rect x="162" y="127" width="82" height="10" rx="5" fill="#ffffff" opacity="0.10"/>
+      </g>
+
+      <!-- Chart bars inside lens -->
+      <g transform="translate(78,68)">
+        <rect x="0"  y="40" width="12" height="34" rx="3" fill="#1DB954"/>
+        <rect x="18" y="26" width="12" height="48" rx="3" fill="#20C997"/>
+        <rect x="36" y="12" width="12" height="62" rx="3" fill="#2F80ED"/>
+      </g>
+
+      <!-- Upward trend arrow -->
+      <path d="M86 114 C108 92, 125 87, 148 72"
+            fill="none" stroke="#FF8A00" stroke-width="8" stroke-linecap="round"/>
+      <path d="M148 72 l-6 20 l20 -6 z" fill="#FF8A00"/>
+    </g>
+  </g>
+
+  <!-- Wordmark -->
+  <g class="brand" transform="translate(380,150)">
+    <text x="0" y="0" font-size="64" font-weight="800" fill="#0B4FA3" letter-spacing="0.5">DB</text>
+    <text x="102" y="0" font-size="64" font-weight="600" fill="#1F2937" letter-spacing="0.2">Analyser</text>
+    <text x="2" y="44" font-size="18" font-weight="500" fill="#6B7280">
+      Inspect • Optimize • Understand
+    </text>
+  </g>
+</svg>

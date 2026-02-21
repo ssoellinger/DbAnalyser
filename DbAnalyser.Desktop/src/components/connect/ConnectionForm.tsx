@@ -25,8 +25,8 @@ export const DEFAULT_FIELDS: ConnectionFields = {
 export function buildConnectionString(f: ConnectionFields): string {
   const parts: string[] = [
     `Server=${f.server}`,
-    `Database=${f.database}`,
   ];
+  if (f.database.trim()) parts.push(`Database=${f.database}`);
   if (f.authMode === 'windows') {
     parts.push('Trusted_Connection=true');
   } else {
@@ -74,16 +74,17 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
   const connectionString = rawMode ? rawConnectionString : buildConnectionString(fields);
   const canConnect = rawMode
     ? rawConnectionString.trim().length > 0
-    : fields.server.trim().length > 0 && fields.database.trim().length > 0;
+    : fields.server.trim().length > 0;
 
   const handleConnect = async () => {
     if (!canConnect) return;
 
     store.setConnecting(true);
     try {
-      const { sessionId, databaseName } = await api.connect(connectionString);
-      store.setConnected(sessionId, databaseName);
-      store.addToHistory(connectionString, databaseName);
+      const { sessionId, databaseName, isServerMode, serverName } = await api.connect(connectionString);
+      await store.initSignalR();
+      store.setConnected(sessionId, databaseName, isServerMode, serverName);
+      store.addToHistory(connectionString, databaseName ?? serverName ?? 'Server');
     } catch (err) {
       store.setConnectionError(err instanceof Error ? err.message : 'Connection failed');
     }
@@ -119,11 +120,11 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
               />
             </div>
             <div>
-              <label className="block text-xs text-text-secondary mb-1.5">Database</label>
+              <label className="block text-xs text-text-secondary mb-1.5">Database <span className="text-text-muted">(optional)</span></label>
               <input
                 value={fields.database}
                 onChange={(e) => update({ database: e.target.value })}
-                placeholder="MyDatabase"
+                placeholder="Leave empty for server-wide analysis"
                 className={inputClass}
               />
             </div>

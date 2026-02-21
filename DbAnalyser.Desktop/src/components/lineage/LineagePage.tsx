@@ -234,11 +234,11 @@ function LineageGraphInner() {
 }
 
 export function LineagePage() {
-  const { status, error, refresh } = useAnalyzer('relationships');
+  const { status, error, progress, refresh } = useAnalyzer('relationships');
   const rels = useStore((s) => s.result?.relationships);
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships">
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships" progress={progress}>
       {rels && rels.dependencies.length > 0 ? (
         <ReactFlowProvider>
           <LineageGraphInner />

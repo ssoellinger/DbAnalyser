@@ -7,5 +7,8 @@ public record FunctionInfo(
     string Definition,
     DateTime? LastModified)
 {
-    public string FullName => $"{SchemaName}.{FunctionName}";
+    public string? DatabaseName { get; init; }
+    public string FullName => DatabaseName is not null
+        ? $"{DatabaseName}.{SchemaName}.{FunctionName}"
+        : $"{SchemaName}.{FunctionName}";
 }
