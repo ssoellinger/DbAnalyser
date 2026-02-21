@@ -14,8 +14,22 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
-    builder.Host.UseSerilog((context, services, configuration) => configuration
-        .ReadFrom.Configuration(context.Configuration));
+    // If DBANALYSER_LOG_DIR is set (e.g. by Electron), override the log file path
+    var logDir = Environment.GetEnvironmentVariable("DBANALYSER_LOG_DIR");
+    builder.Host.UseSerilog((context, services, configuration) =>
+    {
+        configuration.ReadFrom.Configuration(context.Configuration);
+        if (!string.IsNullOrEmpty(logDir))
+        {
+            var logPath = Path.Combine(logDir, "api-.log");
+            configuration.WriteTo.File(
+                logPath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 14,
+                fileSizeLimitBytes: 10_485_760,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}");
+        }
+    });
 
     // JSON serialization matching JsonReportGenerator
     builder.Services.ConfigureHttpJsonOptions(options =>

@@ -1,8 +1,15 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import net from 'net';
+import log from 'electron-log/main';
+
+// Configure electron-log
+log.transports.file.maxSize = 5 * 1024 * 1024; // 5MB
+log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}';
+log.transports.file.resolvePathFn = () =>
+  path.join(app.getPath('userData'), 'logs', 'main.log');
 
 let apiProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -46,34 +53,35 @@ function waitForPort(port: number, timeout = 15000): Promise<void> {
 
 async function startApi(): Promise<void> {
   const apiPath = getApiPath();
-  console.log(`Starting API: ${apiPath}`);
+  log.info(`Starting API: ${apiPath}`);
 
   if (!fs.existsSync(apiPath)) {
-    console.error(`API executable not found at: ${apiPath}`);
-    console.error('Run "dotnet build DbAnalyser.Api" first.');
+    log.error(`API executable not found at: ${apiPath}`);
+    log.error('Run "dotnet build DbAnalyser.Api" first.');
     return;
   }
 
+  const logDir = path.join(app.getPath('userData'), 'logs');
   apiProcess = spawn(apiPath, [`--port=${API_PORT}`], {
     stdio: 'pipe',
-    env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development' },
+    env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development', DBANALYSER_LOG_DIR: logDir },
   });
 
   apiProcess.stdout?.on('data', (data: Buffer) => {
-    console.log(`[API] ${data.toString().trim()}`);
+    log.info(`[API] ${data.toString().trim()}`);
   });
 
   apiProcess.stderr?.on('data', (data: Buffer) => {
-    console.error(`[API Error] ${data.toString().trim()}`);
+    log.error(`[API Error] ${data.toString().trim()}`);
   });
 
   apiProcess.on('exit', (code) => {
-    console.log(`API process exited with code ${code}`);
+    log.info(`API process exited with code ${code}`);
     apiProcess = null;
   });
 
   await waitForPort(API_PORT);
-  console.log('API is ready');
+  log.info('API is ready');
 }
 
 function createWindow(): void {
@@ -108,14 +116,27 @@ function createWindow(): void {
   });
 }
 
+// IPC handler for renderer log messages
+ipcMain.on('log-message', (_event, level: string, ...args: unknown[]) => {
+  const message = `[Renderer] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}`;
+  switch (level) {
+    case 'error': log.error(message); break;
+    case 'warn': log.warn(message); break;
+    default: log.info(message); break;
+  }
+});
+
 app.whenReady().then(async () => {
+  log.info(`DbAnalyser v${app.getVersion()} starting`);
+
   // Start API in background — don't block window creation
-  startApi().catch((e) => console.error('Failed to start API:', e));
+  startApi().catch((e) => log.error('Failed to start API:', e));
 
   createWindow();
 });
 
 app.on('window-all-closed', () => {
+  log.info('All windows closed, shutting down');
   if (apiProcess) {
     apiProcess.kill();
     apiProcess = null;
@@ -124,6 +145,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  log.info('App shutting down');
   if (apiProcess) {
     apiProcess.kill();
     apiProcess = null;

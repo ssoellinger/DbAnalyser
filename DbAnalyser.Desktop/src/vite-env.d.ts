@@ -5,5 +5,10 @@ declare const __APP_VERSION__: string;
 interface Window {
   electronAPI?: {
     apiPort: number;
+    log: {
+      info: (...args: unknown[]) => void;
+      warn: (...args: unknown[]) => void;
+      error: (...args: unknown[]) => void;
+    };
   };
 }

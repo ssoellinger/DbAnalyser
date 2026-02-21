@@ -111,6 +111,7 @@ export const useStore = create<AppState>((set, get) => ({
       set({ signalRConnection: connection, signalRConnectionId: connection.connectionId });
     } catch (err) {
       console.warn('SignalR connection failed, progress updates will be unavailable:', err);
+      window.electronAPI?.log.warn('SignalR connection failed:', err instanceof Error ? err.message : String(err));
       set({ signalRConnection: null, signalRConnectionId: null });
     }
   },
@@ -195,6 +196,7 @@ export const useStore = create<AppState>((set, get) => ({
         return;
       }
       const message = err instanceof Error ? err.message : 'Analysis failed';
+      window.electronAPI?.log.error(`Analyzer '${name}' failed:`, message);
       set((s) => ({
         analyzerStatus: { ...s.analyzerStatus, [name]: 'error' as AnalyzerStatus },
         analyzerErrors: { ...s.analyzerErrors, [name]: message },
