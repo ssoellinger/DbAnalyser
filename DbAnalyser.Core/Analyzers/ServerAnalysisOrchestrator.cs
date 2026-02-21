@@ -1,3 +1,4 @@
+using DbAnalyser.Models.Indexing;
 using DbAnalyser.Models.Profiling;
 using DbAnalyser.Models.Quality;
 using DbAnalyser.Models.Relationships;
@@ -94,6 +95,11 @@ public class ServerAnalysisOrchestrator
             merged.QualityIssues = [];
         if (enabledNames.Contains("usage"))
             merged.UsageAnalysis = new UsageAnalysis();
+        if (enabledNames.Contains("indexing"))
+        {
+            merged.IndexRecommendations = [];
+            merged.IndexInventory = [];
+        }
         var analyzerInstances = _analyzers
             .Where(a => enabledNames.Contains(a.Name.ToLowerInvariant()))
             .ToList();
@@ -252,6 +258,18 @@ public class ServerAnalysisOrchestrator
             merged.UsageAnalysis.Objects.AddRange(dbResult.UsageAnalysis.Objects);
             merged.UsageAnalysis.ServerStartTime ??= dbResult.UsageAnalysis.ServerStartTime;
             merged.UsageAnalysis.ServerUptimeDays ??= dbResult.UsageAnalysis.ServerUptimeDays;
+        }
+
+        // Indexing
+        if (dbResult.IndexRecommendations is not null && merged.IndexRecommendations is not null)
+        {
+            merged.IndexRecommendations.AddRange(
+                dbResult.IndexRecommendations.Select(r => r with { DatabaseName = dbName }));
+        }
+        if (dbResult.IndexInventory is not null && merged.IndexInventory is not null)
+        {
+            merged.IndexInventory.AddRange(
+                dbResult.IndexInventory.Select(r => r with { DatabaseName = dbName }));
         }
     }
 

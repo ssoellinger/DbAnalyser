@@ -128,6 +128,7 @@ public class AnalysisSessionService : IAsyncDisposable
         ["relationships"] = ["schema"],
         ["quality"] = ["schema", "relationships"],
         ["usage"] = ["schema", "profiling", "relationships"],
+        ["indexing"] = ["schema"],
     };
 
     // Which result sections each analyzer populates
@@ -138,17 +139,19 @@ public class AnalysisSessionService : IAsyncDisposable
         "relationships" => result.Relationships is not null,
         "quality" => result.QualityIssues is not null,
         "usage" => result.UsageAnalysis is not null,
+        "indexing" => result.IndexRecommendations is not null,
         _ => false
     };
 
     // Which downstream analyzers depend on a given analyzer
     private static readonly Dictionary<string, string[]> AnalyzerDependents = new()
     {
-        ["schema"] = ["profiling", "relationships", "quality", "usage"],
+        ["schema"] = ["profiling", "relationships", "quality", "usage", "indexing"],
         ["profiling"] = ["usage"],
         ["relationships"] = ["quality", "usage"],
         ["quality"] = [],
         ["usage"] = [],
+        ["indexing"] = [],
     };
 
     private static void ClearAnalyzerResult(string analyzer, AnalysisResult result)
@@ -160,6 +163,7 @@ public class AnalysisSessionService : IAsyncDisposable
             case "relationships": result.Relationships = null; break;
             case "quality": result.QualityIssues = null; break;
             case "usage": result.UsageAnalysis = null; break;
+            case "indexing": result.IndexRecommendations = null; result.IndexInventory = null; break;
         }
     }
 
@@ -218,6 +222,18 @@ public class AnalysisSessionService : IAsyncDisposable
                         await SendProgress(signalRConnectionId, $"{name} ({database})", i + 1, toRunDb.Count, "running");
                         await instance.AnalyzeAsync(dbProvider, dbResult, ct);
                         await SendProgress(signalRConnectionId, $"{name} ({database})", i + 1, toRunDb.Count, "completed");
+                    }
+
+                    // Stamp DatabaseName on index recommendations and inventory
+                    if (dbResult.IndexRecommendations is not null)
+                    {
+                        for (var idx = 0; idx < dbResult.IndexRecommendations.Count; idx++)
+                            dbResult.IndexRecommendations[idx] = dbResult.IndexRecommendations[idx] with { DatabaseName = database };
+                    }
+                    if (dbResult.IndexInventory is not null)
+                    {
+                        for (var idx = 0; idx < dbResult.IndexInventory.Count; idx++)
+                            dbResult.IndexInventory[idx] = dbResult.IndexInventory[idx] with { DatabaseName = database };
                     }
 
                     // Stamp DatabaseName on usage objects
@@ -387,6 +403,8 @@ public class AnalysisSessionService : IAsyncDisposable
         if (incoming.Relationships is not null) existing.Relationships = incoming.Relationships;
         if (incoming.QualityIssues is not null) existing.QualityIssues = incoming.QualityIssues;
         if (incoming.UsageAnalysis is not null) existing.UsageAnalysis = incoming.UsageAnalysis;
+        if (incoming.IndexRecommendations is not null) existing.IndexRecommendations = incoming.IndexRecommendations;
+        if (incoming.IndexInventory is not null) existing.IndexInventory = incoming.IndexInventory;
         if (incoming.Databases?.Count > 0) existing.Databases = incoming.Databases;
         if (incoming.FailedDatabases?.Count > 0) existing.FailedDatabases = incoming.FailedDatabases;
     }
@@ -415,6 +433,20 @@ public class AnalysisSessionService : IAsyncDisposable
                     string.Equals(p.DatabaseName, database, StringComparison.OrdinalIgnoreCase));
                 if (dbResult.Profiles is not null)
                     merged.Profiles.AddRange(dbResult.Profiles);
+                break;
+
+            case "indexing":
+                merged.IndexRecommendations ??= [];
+                merged.IndexRecommendations.RemoveAll(r =>
+                    string.Equals(r.DatabaseName, database, StringComparison.OrdinalIgnoreCase));
+                if (dbResult.IndexRecommendations is not null)
+                    merged.IndexRecommendations.AddRange(dbResult.IndexRecommendations);
+
+                merged.IndexInventory ??= [];
+                merged.IndexInventory.RemoveAll(r =>
+                    string.Equals(r.DatabaseName, database, StringComparison.OrdinalIgnoreCase));
+                if (dbResult.IndexInventory is not null)
+                    merged.IndexInventory.AddRange(dbResult.IndexInventory);
                 break;
         }
     }

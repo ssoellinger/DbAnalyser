@@ -64,6 +64,7 @@ try
     builder.Services.AddSingleton<IAnalyzer, RelationshipAnalyzer>();
     builder.Services.AddSingleton<IAnalyzer, QualityAnalyzer>();
     builder.Services.AddSingleton<IAnalyzer, UsageAnalyzer>();
+    builder.Services.AddSingleton<IAnalyzer, IndexingAnalyzer>();
 
     // Session service
     builder.Services.AddSingleton<AnalysisSessionService>();

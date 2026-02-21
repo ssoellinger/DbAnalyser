@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
 import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
@@ -10,7 +11,7 @@ export function ProfilingPage() {
   const isServerMode = useStore((s) => s.isServerMode);
   const { status, error, progress, refresh, cancel } = useAnalyzer('profiling', !isServerMode);
   const profiles = useStore((s) => s.result?.profiles);
-  const databases = useStore((s) => s.result?.databases ?? []);
+  const databases = useStore(useShallow((s) => s.result?.databases ?? []));
   const runAnalyzer = useStore((s) => s.runAnalyzer);
   const [selectedDb, setSelectedDb] = useState('');
 

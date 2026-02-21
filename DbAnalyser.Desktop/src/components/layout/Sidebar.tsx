@@ -11,6 +11,7 @@ const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: Analyze
   { path: '/profiling', label: 'Profiling', icon: '⊠', analyzer: 'profiling' },
   { path: '/relationships', label: 'Relationships', icon: '⋈', analyzer: 'relationships' },
   { path: '/quality', label: 'Quality', icon: '⚑', analyzer: 'quality' },
+  { path: '/indexing', label: 'Indexing', icon: '⊕', analyzer: 'indexing' },
   { path: '/usage', label: 'Usage', icon: '◎', analyzer: 'usage' },
 ];
 

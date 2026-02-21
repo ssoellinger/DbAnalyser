@@ -10,6 +10,7 @@ import { SchemaPage } from './components/schema/SchemaPage';
 import { ProfilingPage } from './components/profiling/ProfilingPage';
 import { RelationshipsPage } from './components/relationships/RelationshipsPage';
 import { QualityPage } from './components/quality/QualityPage';
+import { IndexingPage } from './components/indexing/IndexingPage';
 import { UsagePage } from './components/usage/UsagePage';
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/profiling" element={<ProfilingPage />} />
         <Route path="/relationships" element={<RelationshipsPage />} />
         <Route path="/quality" element={<QualityPage />} />
+        <Route path="/indexing" element={<IndexingPage />} />
         <Route path="/usage" element={<UsagePage />} />
       </Routes>
     </AppShell>

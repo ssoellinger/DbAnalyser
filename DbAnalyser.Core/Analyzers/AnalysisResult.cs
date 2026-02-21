@@ -1,3 +1,4 @@
+using DbAnalyser.Models.Indexing;
 using DbAnalyser.Models.Profiling;
 using DbAnalyser.Models.Quality;
 using DbAnalyser.Models.Relationships;
@@ -15,6 +16,8 @@ public class AnalysisResult
     public RelationshipMap? Relationships { get; set; }
     public List<QualityIssue>? QualityIssues { get; set; }
     public UsageAnalysis? UsageAnalysis { get; set; }
+    public List<IndexRecommendation>? IndexRecommendations { get; set; }
+    public List<IndexInventoryItem>? IndexInventory { get; set; }
 
     // Server-wide analysis
     public bool IsServerMode { get; set; }

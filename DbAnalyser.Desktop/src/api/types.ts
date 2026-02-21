@@ -8,6 +8,8 @@ export interface AnalysisResult {
   relationships: RelationshipMap | null;
   qualityIssues: QualityIssue[] | null;
   usageAnalysis: UsageAnalysis | null;
+  indexRecommendations: IndexRecommendation[] | null;
+  indexInventory: IndexInventoryItem[] | null;
   isServerMode: boolean;
   databases: string[];
   failedDatabases: DatabaseError[];
@@ -274,9 +276,46 @@ export interface UsageAnalysis {
   objects: ObjectUsage[];
 }
 
+// ── Indexing ─────────────────────────────────────────────────────────────────
+
+export interface IndexRecommendation {
+  category: string;
+  severity: string;
+  schemaName: string;
+  tableName: string;
+  description: string;
+  recommendation: string | null;
+  impactScore: number | null;
+  equalityColumns: string | null;
+  inequalityColumns: string | null;
+  includeColumns: string | null;
+  indexName: string | null;
+  userSeeks: number | null;
+  userScans: number | null;
+  userLookups: number | null;
+  userUpdates: number | null;
+  databaseName?: string;
+}
+
+export interface IndexInventoryItem {
+  schemaName: string;
+  tableName: string;
+  indexName: string;
+  indexType: string;
+  isUnique: boolean;
+  isClustered: boolean;
+  columns: string;
+  userSeeks: number;
+  userScans: number;
+  userLookups: number;
+  userUpdates: number;
+  sizeKB: number;
+  databaseName?: string;
+}
+
 // ── Analyzer Names ──────────────────────────────────────────────────────────
 
-export type AnalyzerName = 'schema' | 'profiling' | 'relationships' | 'quality' | 'usage';
+export type AnalyzerName = 'schema' | 'profiling' | 'relationships' | 'quality' | 'usage' | 'indexing';
 
 export type AnalyzerStatus = 'idle' | 'loading' | 'loaded' | 'error';
 

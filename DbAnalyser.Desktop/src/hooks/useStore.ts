@@ -9,17 +9,18 @@ interface ConnectionHistoryEntry {
   timestamp: string;
 }
 
-const ALL_ANALYZERS: AnalyzerName[] = ['schema', 'profiling', 'relationships', 'quality', 'usage'];
+const ALL_ANALYZERS: AnalyzerName[] = ['schema', 'profiling', 'relationships', 'quality', 'usage', 'indexing'];
 
 // Which result fields map to which analyzer
 function analyzerStatusFromResult(result: AnalysisResult | null): Record<AnalyzerName, AnalyzerStatus> {
-  if (!result) return { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' };
+  if (!result) return { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle', indexing: 'idle' };
   return {
     schema: result.schema ? 'loaded' : 'idle',
     profiling: result.profiles ? 'loaded' : 'idle',
     relationships: result.relationships ? 'loaded' : 'idle',
     quality: result.qualityIssues ? 'loaded' : 'idle',
     usage: result.usageAnalysis ? 'loaded' : 'idle',
+    indexing: result.indexRecommendations ? 'loaded' : 'idle',
   };
 }
 
@@ -81,7 +82,7 @@ export const useStore = create<AppState>((set, get) => ({
   result: null,
   isAnalyzing: false,
   progress: null,
-  analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' },
+  analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle', indexing: 'idle' },
   analyzerErrors: {},
   analyzerAbortControllers: {},
   signalRConnection: null,
@@ -141,6 +142,8 @@ export const useStore = create<AppState>((set, get) => ({
       relationships: incoming.relationships ?? existing.relationships,
       qualityIssues: incoming.qualityIssues ?? existing.qualityIssues,
       usageAnalysis: incoming.usageAnalysis ?? existing.usageAnalysis,
+      indexRecommendations: incoming.indexRecommendations ?? existing.indexRecommendations,
+      indexInventory: incoming.indexInventory ?? existing.indexInventory,
       isServerMode: incoming.isServerMode || existing.isServerMode,
       databases: incoming.databases?.length ? incoming.databases : existing.databases,
       failedDatabases: incoming.failedDatabases?.length ? incoming.failedDatabases : existing.failedDatabases,
@@ -228,7 +231,7 @@ export const useStore = create<AppState>((set, get) => ({
       progress: null,
       signalRConnection: null,
       signalRConnectionId: null,
-      analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' },
+      analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle', indexing: 'idle' },
       analyzerErrors: {},
       analyzerAbortControllers: {},
     });
