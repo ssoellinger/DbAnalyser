@@ -23,11 +23,11 @@ export function AnalyzerLoader({ status, error, onRefresh, onCancel, analyzerNam
               <div className="w-full bg-bg-primary border border-border rounded-full h-2 overflow-hidden">
                 <div
                   className="h-full bg-accent rounded-full transition-all duration-300"
-                  style={{ width: `${Math.max(progress.percentage, 2)}%` }}
+                  style={{ width: `${Math.max(Math.min(progress.percentage, 99), 2)}%` }}
                 />
               </div>
               <p className="text-xs text-text-muted">
-                {progress.current} of {progress.total} &middot; {Math.round(progress.percentage)}%
+                {progress.current} of {progress.total} &middot; {Math.min(Math.round(progress.percentage), 99)}%
               </p>
             </>
           ) : (

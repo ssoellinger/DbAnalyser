@@ -246,12 +246,22 @@ public class AnalysisSessionService : IAsyncDisposable
                     var toRun = new List<string>();
                     ResolveAllDependencies(analyzerName, toRun);
 
-                    session.LastResult = await orchestrator.RunAsync(
+                    var orchestratorResult = await orchestrator.RunAsync(
                         session.ConnectionString,
                         toRun,
                         async (step, current, total, status) =>
                             await SendProgress(signalRConnectionId, step, current, total, status),
                         ct);
+
+                    // Merge into existing result instead of replacing
+                    if (session.LastResult is null)
+                    {
+                        session.LastResult = orchestratorResult;
+                    }
+                    else
+                    {
+                        MergeServerResult(session.LastResult, orchestratorResult);
+                    }
                 }
                 return session.LastResult;
             }
@@ -352,6 +362,19 @@ public class AnalysisSessionService : IAsyncDisposable
             status,
             percentage = total > 0 ? (int)(current * 100.0 / total) : 0
         });
+    }
+
+    /// <summary>Merge an orchestrator result into the existing session result (server mode).</summary>
+    private static void MergeServerResult(AnalysisResult existing, AnalysisResult incoming)
+    {
+        existing.AnalyzedAt = incoming.AnalyzedAt;
+        if (incoming.Schema is not null) existing.Schema = incoming.Schema;
+        if (incoming.Profiles is not null) existing.Profiles = incoming.Profiles;
+        if (incoming.Relationships is not null) existing.Relationships = incoming.Relationships;
+        if (incoming.QualityIssues is not null) existing.QualityIssues = incoming.QualityIssues;
+        if (incoming.UsageAnalysis is not null) existing.UsageAnalysis = incoming.UsageAnalysis;
+        if (incoming.Databases?.Count > 0) existing.Databases = incoming.Databases;
+        if (incoming.FailedDatabases?.Count > 0) existing.FailedDatabases = incoming.FailedDatabases;
     }
 
     /// <summary>Merge results from a single-DB analysis into the session's aggregate result.</summary>

@@ -132,15 +132,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   mergeResult: (incoming) => {
     const existing = get().result;
-    if (!existing) {
-      set({
-        result: incoming,
-        analyzerStatus: analyzerStatusFromResult(incoming),
-      });
-      return;
-    }
-    // Overlay non-null sections from incoming onto existing
-    const merged: AnalysisResult = {
+    const merged: AnalysisResult = existing ? {
       databaseName: incoming.databaseName || existing.databaseName,
       analyzedAt: incoming.analyzedAt || existing.analyzedAt,
       schema: incoming.schema ?? existing.schema,
@@ -151,10 +143,19 @@ export const useStore = create<AppState>((set, get) => ({
       isServerMode: incoming.isServerMode || existing.isServerMode,
       databases: incoming.databases?.length ? incoming.databases : existing.databases,
       failedDatabases: incoming.failedDatabases?.length ? incoming.failedDatabases : existing.failedDatabases,
-    };
+    } : incoming;
+    const newStatus = analyzerStatusFromResult(merged);
+    const currentStatus = get().analyzerStatus;
+    const controllers = get().analyzerAbortControllers;
+    // Preserve 'loading' only for analyzers that still have an active request
+    for (const key of ALL_ANALYZERS) {
+      if (currentStatus[key] === 'loading' && controllers[key] != null) {
+        newStatus[key] = 'loading';
+      }
+    }
     set({
       result: merged,
-      analyzerStatus: analyzerStatusFromResult(merged),
+      analyzerStatus: newStatus,
     });
   },
 
@@ -183,12 +184,14 @@ export const useStore = create<AppState>((set, get) => ({
       get().mergeResult(result);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
-        // Cancelled by user — reset to idle
-        set((s) => ({
-          analyzerStatus: { ...s.analyzerStatus, [name]: 'idle' as AnalyzerStatus },
-          analyzerAbortControllers: { ...s.analyzerAbortControllers, [name]: null },
-          progress: null,
-        }));
+        // Only reset to idle if no newer request has replaced this one
+        if (get().analyzerAbortControllers[name] === controller) {
+          set((s) => ({
+            analyzerStatus: { ...s.analyzerStatus, [name]: 'idle' as AnalyzerStatus },
+            analyzerAbortControllers: { ...s.analyzerAbortControllers, [name]: null },
+            progress: null,
+          }));
+        }
         return;
       }
       const message = err instanceof Error ? err.message : 'Analysis failed';

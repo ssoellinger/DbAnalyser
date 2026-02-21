@@ -53,20 +53,27 @@ public class ServerAnalysisOrchestrator
             databases = await EnumerateDatabasesAsync(masterProvider, ct);
         }
 
+        var enabledNames = analyzerNames.Select(a => a.ToLowerInvariant()).ToHashSet();
+
         var merged = new AnalysisResult
         {
             DatabaseName = serverName,
             AnalyzedAt = DateTime.UtcNow,
             IsServerMode = true,
             Databases = [],
-            Schema = new DatabaseSchema { DatabaseName = serverName },
-            Profiles = [],
-            Relationships = new RelationshipMap(),
-            QualityIssues = [],
-            UsageAnalysis = new UsageAnalysis(),
         };
 
-        var enabledNames = analyzerNames.Select(a => a.ToLowerInvariant()).ToHashSet();
+        // Only initialize sections for analyzers that will actually run
+        if (enabledNames.Contains("schema"))
+            merged.Schema = new DatabaseSchema { DatabaseName = serverName };
+        if (enabledNames.Contains("profiling"))
+            merged.Profiles = [];
+        if (enabledNames.Contains("relationships"))
+            merged.Relationships = new RelationshipMap();
+        if (enabledNames.Contains("quality"))
+            merged.QualityIssues = [];
+        if (enabledNames.Contains("usage"))
+            merged.UsageAnalysis = new UsageAnalysis();
         var analyzerInstances = _analyzers
             .Where(a => enabledNames.Contains(a.Name.ToLowerInvariant()))
             .ToList();
@@ -143,9 +150,9 @@ public class ServerAnalysisOrchestrator
     private static void MergeResult(AnalysisResult merged, AnalysisResult dbResult, string dbName)
     {
         // Schema
-        if (dbResult.Schema is not null)
+        if (dbResult.Schema is not null && merged.Schema is not null)
         {
-            merged.Schema!.Tables.AddRange(
+            merged.Schema.Tables.AddRange(
                 dbResult.Schema.Tables.Select(t => t with { DatabaseName = dbName }));
             merged.Schema.Views.AddRange(
                 dbResult.Schema.Views.Select(v => v with { DatabaseName = dbName }));
@@ -165,19 +172,19 @@ public class ServerAnalysisOrchestrator
         }
 
         // Profiling
-        if (dbResult.Profiles is not null)
+        if (dbResult.Profiles is not null && merged.Profiles is not null)
         {
             foreach (var p in dbResult.Profiles)
             {
                 p.DatabaseName = dbName;
             }
-            merged.Profiles!.AddRange(dbResult.Profiles);
+            merged.Profiles.AddRange(dbResult.Profiles);
         }
 
         // Relationships
-        if (dbResult.Relationships is not null)
+        if (dbResult.Relationships is not null && merged.Relationships is not null)
         {
-            merged.Relationships!.ExplicitRelationships.AddRange(
+            merged.Relationships.ExplicitRelationships.AddRange(
                 dbResult.Relationships.ExplicitRelationships.Select(fk => fk with
                 {
                     FromDatabase = dbName,
@@ -210,15 +217,15 @@ public class ServerAnalysisOrchestrator
         }
 
         // Quality
-        if (dbResult.QualityIssues is not null)
+        if (dbResult.QualityIssues is not null && merged.QualityIssues is not null)
         {
-            merged.QualityIssues!.AddRange(dbResult.QualityIssues);
+            merged.QualityIssues.AddRange(dbResult.QualityIssues);
         }
 
         // Usage
-        if (dbResult.UsageAnalysis is not null)
+        if (dbResult.UsageAnalysis is not null && merged.UsageAnalysis is not null)
         {
-            merged.UsageAnalysis!.Objects.AddRange(dbResult.UsageAnalysis.Objects);
+            merged.UsageAnalysis.Objects.AddRange(dbResult.UsageAnalysis.Objects);
             merged.UsageAnalysis.ServerStartTime ??= dbResult.UsageAnalysis.ServerStartTime;
             merged.UsageAnalysis.ServerUptimeDays ??= dbResult.UsageAnalysis.ServerUptimeDays;
         }
