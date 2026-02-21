@@ -6,24 +6,41 @@ using DbAnalyser.Models.Usage;
 using DbAnalyser.Providers;
 using DbAnalyser.Providers.SqlServer;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DbAnalyser.Analyzers;
 
 public class ServerAnalysisOrchestrator
 {
     private readonly IEnumerable<IAnalyzer> _analyzers;
+    private readonly ILogger<ServerAnalysisOrchestrator> _logger;
     private readonly Func<string, CancellationToken, Task<IDbProvider>> _providerFactory;
 
     public ServerAnalysisOrchestrator(IEnumerable<IAnalyzer> analyzers)
-        : this(analyzers, DefaultProviderFactory)
+        : this(analyzers, NullLogger<ServerAnalysisOrchestrator>.Instance)
+    {
+    }
+
+    public ServerAnalysisOrchestrator(IEnumerable<IAnalyzer> analyzers, ILogger<ServerAnalysisOrchestrator> logger)
+        : this(analyzers, logger, DefaultProviderFactory)
     {
     }
 
     public ServerAnalysisOrchestrator(
         IEnumerable<IAnalyzer> analyzers,
         Func<string, CancellationToken, Task<IDbProvider>> providerFactory)
+        : this(analyzers, NullLogger<ServerAnalysisOrchestrator>.Instance, providerFactory)
+    {
+    }
+
+    public ServerAnalysisOrchestrator(
+        IEnumerable<IAnalyzer> analyzers,
+        ILogger<ServerAnalysisOrchestrator> logger,
+        Func<string, CancellationToken, Task<IDbProvider>> providerFactory)
     {
         _analyzers = analyzers;
+        _logger = logger;
         _providerFactory = providerFactory;
     }
 
@@ -52,6 +69,9 @@ public class ServerAnalysisOrchestrator
             serverName = masterProvider.ServerName;
             databases = await EnumerateDatabasesAsync(masterProvider, ct);
         }
+
+        _logger.LogInformation("Server analysis started on {Server} — found {Count} databases: [{Databases}]",
+            serverName, databases.Count, string.Join(", ", databases));
 
         var enabledNames = analyzerNames.Select(a => a.ToLowerInvariant()).ToHashSet();
 
@@ -116,12 +136,16 @@ public class ServerAnalysisOrchestrator
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to analyze database {Database}", dbName);
                 merged.FailedDatabases.Add(new DatabaseError(dbName, ex.Message));
             }
         }
 
         // 4. Post-merge: resolve cross-database external references
         ResolveCrossDatabaseReferences(merged);
+
+        _logger.LogInformation("Server analysis completed — {Succeeded} succeeded, {Failed} failed",
+            merged.Databases.Count, merged.FailedDatabases.Count);
 
         return merged;
     }

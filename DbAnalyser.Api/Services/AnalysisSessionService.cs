@@ -8,6 +8,7 @@ using DbAnalyser.Providers;
 using DbAnalyser.Providers.SqlServer;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 
 namespace DbAnalyser.Api.Services;
 
@@ -15,12 +16,14 @@ public class AnalysisSessionService : IAsyncDisposable
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<AnalysisHub> _hubContext;
+    private readonly ILogger<AnalysisSessionService> _logger;
     private readonly ConcurrentDictionary<string, SessionState> _sessions = new();
 
-    public AnalysisSessionService(IServiceProvider serviceProvider, IHubContext<AnalysisHub> hubContext)
+    public AnalysisSessionService(IServiceProvider serviceProvider, IHubContext<AnalysisHub> hubContext, ILogger<AnalysisSessionService> logger)
     {
         _serviceProvider = serviceProvider;
         _hubContext = hubContext;
+        _logger = logger;
     }
 
     public async Task<ConnectResult> ConnectAsync(string connectionString, CancellationToken ct = default)
@@ -44,6 +47,10 @@ public class AnalysisSessionService : IAsyncDisposable
         var sessionId = Guid.NewGuid().ToString("N")[..12];
         _sessions[sessionId] = new SessionState(provider) { IsServerMode = isServerMode, ConnectionString = connectionString };
 
+        _logger.LogInformation("Session {SessionId} created — server: {Server}, database: {Database}, mode: {Mode}",
+            sessionId, provider.ServerName, isServerMode ? "(server)" : provider.DatabaseName,
+            isServerMode ? "server" : "single-db");
+
         return new ConnectResult(
             sessionId,
             isServerMode ? null : provider.DatabaseName,
@@ -62,11 +69,15 @@ public class AnalysisSessionService : IAsyncDisposable
 
         var analyzerNames = analyzers ?? ["schema", "profiling", "relationships", "quality", "usage"];
 
+        _logger.LogInformation("Running analysis for session {SessionId}, analyzers: [{Analyzers}]",
+            sessionId, string.Join(", ", analyzerNames));
+
         // Server mode: delegate to ServerAnalysisOrchestrator
         if (session.IsServerMode)
         {
+            var orchestratorLogger = _serviceProvider.GetRequiredService<ILogger<ServerAnalysisOrchestrator>>();
             var orchestrator = new ServerAnalysisOrchestrator(
-                _serviceProvider.GetServices<IAnalyzer>());
+                _serviceProvider.GetServices<IAnalyzer>(), orchestratorLogger);
 
             var result = await orchestrator.RunAsync(
                 session.ConnectionString,
@@ -104,6 +115,7 @@ public class AnalysisSessionService : IAsyncDisposable
             await SendProgress(signalRConnectionId, analyzer.Name, current2, total2, "completed");
         }
 
+        _logger.LogInformation("Analysis completed for session {SessionId}", sessionId);
         session.LastResult = singleResult;
         return singleResult;
     }
@@ -239,8 +251,9 @@ public class AnalysisSessionService : IAsyncDisposable
                 // Full server-mode: delegate to ServerAnalysisOrchestrator (all databases)
                 if (force || session.LastResult is null || !HasAnalyzerRun(analyzerName, session.LastResult))
                 {
+                    var orchLogger = _serviceProvider.GetRequiredService<ILogger<ServerAnalysisOrchestrator>>();
                     var orchestrator = new ServerAnalysisOrchestrator(
-                        _serviceProvider.GetServices<IAnalyzer>());
+                        _serviceProvider.GetServices<IAnalyzer>(), orchLogger);
 
                     // Resolve which analyzers to run (requested + dependencies)
                     var toRun = new List<string>();
@@ -347,6 +360,7 @@ public class AnalysisSessionService : IAsyncDisposable
         if (_sessions.TryRemove(sessionId, out var session))
         {
             await session.Provider.DisposeAsync();
+            _logger.LogInformation("Session {SessionId} disconnected", sessionId);
         }
     }
 

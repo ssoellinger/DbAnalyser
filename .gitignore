@@ -39,6 +39,10 @@ artifacts/
 !DbAnalyser.Desktop/vite.renderer.config.ts
 !DbAnalyser.IntegrationTests/testsettings.example.json
 
+## Logs
+logs/
+*.log
+
 ## Node / Electron
 DbAnalyser.Desktop/node_modules/
 DbAnalyser.Desktop/.vite/

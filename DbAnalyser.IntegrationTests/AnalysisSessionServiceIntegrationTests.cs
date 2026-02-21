@@ -4,6 +4,7 @@ using DbAnalyser.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace DbAnalyser.IntegrationTests;
 
@@ -34,7 +35,8 @@ public class AnalysisSessionServiceIntegrationTests : IClassFixture<TestFixture>
 
         _service = new AnalysisSessionService(
             provider,
-            provider.GetRequiredService<IHubContext<AnalysisHub>>());
+            provider.GetRequiredService<IHubContext<AnalysisHub>>(),
+            provider.GetRequiredService<ILogger<AnalysisSessionService>>());
     }
 
     [SqlServerFact]
