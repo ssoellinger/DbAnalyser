@@ -1,25 +1,12 @@
-import { useState, useMemo, useCallback } from 'react';
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  type Node,
-  type Edge,
-  useNodesState,
-  useEdgesState,
-  useReactFlow,
-  ReactFlowProvider,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+import { useState, useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { FilterBar } from '../shared/FilterBar';
-import { GraphControls } from '../shared/GraphControls';
-import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
+import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { CycleWarning } from './CycleWarning';
-import { getLayoutedElements } from '../../hooks/useDagreLayout';
 import { detectCycles } from '../../hooks/useCycleDetection';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
+import { ForceGraph, type GraphNode, type GraphEdge } from './ForceGraph';
 
 function DependencyGraphInner() {
   const result = useStore((s) => s.result)!;
@@ -65,77 +52,53 @@ function DependencyGraphInner() {
 
   // Cycle detection
   const cycles = useMemo(() => detectCycles(deps), [deps]);
-  const cycleNodes = useMemo(() => {
-    const s = new Set<string>();
-    cycles.forEach((c) => c.nodes.forEach((n) => s.add(n)));
-    return s;
-  }, [cycles]);
 
-  // Build graph
-  const { initialNodes, initialEdges } = useMemo(() => {
+  // Build graph data for ForceGraph
+  const { graphNodes, graphEdges } = useMemo(() => {
     const filteredDeps = deps.filter((d) => activeNodes.has(d.objectType.toLowerCase()));
-    const nodeSet = new Set(filteredDeps.map((d) => d.fullName));
-
-    const nodes: Node[] = filteredDeps.map((dep) => {
-      const label = dep.fullName.split('.').pop() ?? dep.fullName;
-      const estimatedWidth = Math.max(90, label.length * 7 + 20);
+    const nodeMap = new Map<string, number>();
+    const gNodes: GraphNode[] = filteredDeps.map((d, i) => {
+      nodeMap.set(d.fullName, i);
       return {
-        id: dep.fullName,
-        type: 'default',
-        position: { x: 0, y: 0 },
-        width: estimatedWidth,
-        height: 36,
-        data: { label },
-        style: {
-          background: OBJECT_TYPE_COLORS[dep.objectType] ?? '#666',
-          color: '#fff',
-          border: cycleNodes.has(dep.fullName) ? '2px solid #ff0' : 'none',
-          borderRadius: '6px',
-          padding: '6px 12px',
-          fontSize: '11px',
-          fontWeight: 500,
-          width: estimatedWidth,
-          textAlign: 'center' as const,
-        },
+        id: d.fullName,
+        label: d.fullName.split('.').pop() ?? d.fullName,
+        type: d.objectType.toLowerCase(),
+        refBy: d.referencedBy.length,
+        depOn: d.dependsOn.length,
+        impact: d.transitiveImpact.length,
+        score: d.importanceScore,
       };
     });
 
-    const edges: Edge[] = [];
+    const gEdges: GraphEdge[] = [];
 
     // FK edges
     if (activeEdges.has('fk')) {
-      rels.explicitRelationships.forEach((fk, i) => {
+      rels.explicitRelationships.forEach((fk) => {
         const from = fk.fromDatabase
           ? `${fk.fromDatabase}.${fk.fromSchema}.${fk.fromTable}`
           : `${fk.fromSchema}.${fk.fromTable}`;
         const to = fk.toDatabase
           ? `${fk.toDatabase}.${fk.toSchema}.${fk.toTable}`
           : `${fk.toSchema}.${fk.toTable}`;
-        if (nodeSet.has(from) && nodeSet.has(to)) {
-          edges.push({
-            id: `fk-${i}`,
-            source: from,
-            target: to,
-            style: { stroke: '#4fc3f7' },
-            animated: false,
-          });
+        const si = nodeMap.get(from);
+        const ti = nodeMap.get(to);
+        if (si !== undefined && ti !== undefined) {
+          gEdges.push({ source: si, target: ti, type: 'fk' });
         }
       });
     }
 
-    // Object dependency edges
+    // Object dependency edges (view deps)
     rels.viewDependencies
       .filter((d) => !d.isCrossDatabase && activeEdges.has(d.fromType.toLowerCase()))
-      .forEach((d, i) => {
+      .forEach((d) => {
         const from = d.fromFullName ?? `${d.fromSchema}.${d.fromName}`;
         const to = d.toFullName;
-        if (nodeSet.has(from) && nodeSet.has(to)) {
-          edges.push({
-            id: `dep-${i}`,
-            source: from,
-            target: to,
-            style: { stroke: OBJECT_TYPE_COLORS[d.fromType] ?? '#666', strokeDasharray: '5 3' },
-          });
+        const si = nodeMap.get(from);
+        const ti = nodeMap.get(to);
+        if (si !== undefined && ti !== undefined) {
+          gEdges.push({ source: si, target: ti, type: 'view' });
         }
       });
 
@@ -143,44 +106,23 @@ function DependencyGraphInner() {
     if (activeEdges.has('implicit')) {
       rels.implicitRelationships
         .filter((r) => r.confidence >= 0.7)
-        .forEach((r, i) => {
+        .forEach((r) => {
           const from = r.fromDatabase
             ? `${r.fromDatabase}.${r.fromSchema}.${r.fromTable}`
             : `${r.fromSchema}.${r.fromTable}`;
           const to = r.toDatabase
             ? `${r.toDatabase}.${r.toSchema}.${r.toTable}`
             : `${r.toSchema}.${r.toTable}`;
-          if (nodeSet.has(from) && nodeSet.has(to)) {
-            edges.push({
-              id: `impl-${i}`,
-              source: from,
-              target: to,
-              style: { stroke: '#78909c', strokeDasharray: '2 4' },
-            });
+          const si = nodeMap.get(from);
+          const ti = nodeMap.get(to);
+          if (si !== undefined && ti !== undefined) {
+            gEdges.push({ source: si, target: ti, type: 'implicit' });
           }
         });
     }
 
-    const laid = getLayoutedElements(nodes, edges, { rankSep: 120, nodeSep: 30 });
-    return { initialNodes: laid.nodes, initialEdges: laid.edges };
-  }, [deps, rels, activeNodes, activeEdges, cycleNodes]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-
-  // Sync when filters change
-  useMemo(() => {
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges]);
-
-  const { fitView } = useReactFlow();
-
-  const handleAutoLayout = useCallback(() => {
-    const laid = getLayoutedElements(nodes, edges, { rankSep: 120, nodeSep: 30 });
-    setNodes(laid.nodes);
-    setTimeout(() => fitView({ padding: 0.1 }), 50);
-  }, [nodes, edges, setNodes, fitView]);
+    return { graphNodes: gNodes, graphEdges: gEdges };
+  }, [deps, rels, activeNodes, activeEdges]);
 
   const toggleNode = (key: string) => {
     setActiveNodes((prev) => {
@@ -203,7 +145,7 @@ function DependencyGraphInner() {
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-text-primary">Dependency Graph</h2>
-          <span className="text-xs text-text-muted">{nodes.length} objects</span>
+          <span className="text-xs text-text-muted">{graphNodes.length} objects</span>
         </div>
         <div className="flex items-center gap-2">
           {rels.implicitRelationships.length > 0 && (
@@ -223,19 +165,7 @@ function DependencyGraphInner() {
       </div>
 
       <div className="flex-1 min-h-0 bg-bg-secondary border border-border rounded-lg relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          fitView
-          fitViewOptions={{ padding: 0, maxZoom: 3 }}
-          minZoom={0.1}
-          maxZoom={3}
-        >
-          <Background />
-          <GraphControls onAutoLayout={handleAutoLayout} />
-        </ReactFlow>
+        <ForceGraph nodes={graphNodes} edges={graphEdges} />
       </div>
     </div>
   );
@@ -248,9 +178,7 @@ export function DependenciesPage() {
   return (
     <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships" progress={progress}>
       {rels && rels.dependencies.length > 0 ? (
-        <ReactFlowProvider>
-          <DependencyGraphInner />
-        </ReactFlowProvider>
+        <DependencyGraphInner />
       ) : (
         <p className="text-text-muted">No dependency data available.</p>
       )}
