@@ -17,7 +17,7 @@ const LEVELS: UsageLevel[] = ['active', 'low', 'unused', 'unknown'];
 
 export function UsagePage() {
   const isServerMode = useStore((s) => s.isServerMode);
-  const { status, error, progress, refresh } = useAnalyzer('usage', !isServerMode);
+  const { status, error, progress, refresh, cancel } = useAnalyzer('usage', !isServerMode);
   const usage = useStore((s) => s.result?.usageAnalysis);
   const databases = useStore((s) => s.result?.databases ?? []);
   const runAnalyzer = useStore((s) => s.runAnalyzer);
@@ -59,7 +59,7 @@ export function UsagePage() {
         </div>
 
         {status === 'loading' && (
-          <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="usage" progress={progress}>
+          <AnalyzerLoader status={status} error={error} onRefresh={refresh} onCancel={cancel} analyzerName="usage" progress={progress}>
             <div />
           </AnalyzerLoader>
         )}
@@ -79,7 +79,7 @@ export function UsagePage() {
 
   // Single-DB mode: auto-load as before
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="usage" progress={progress}>
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} onCancel={cancel} analyzerName="usage" progress={progress}>
       {usage ? (
         <UsageContent usage={usage} refresh={refresh} />
       ) : (

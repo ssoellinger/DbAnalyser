@@ -5,12 +5,13 @@ interface AnalyzerLoaderProps {
   status: AnalyzerStatus;
   error: string | null;
   onRefresh: () => void;
+  onCancel?: () => void;
   analyzerName: string;
   progress?: AnalysisProgress | null;
   children: ReactNode;
 }
 
-export function AnalyzerLoader({ status, error, onRefresh, analyzerName, progress, children }: AnalyzerLoaderProps) {
+export function AnalyzerLoader({ status, error, onRefresh, onCancel, analyzerName, progress, children }: AnalyzerLoaderProps) {
   if (status === 'loading' || status === 'idle') {
     return (
       <div className="flex items-center justify-center py-20">
@@ -31,6 +32,14 @@ export function AnalyzerLoader({ status, error, onRefresh, analyzerName, progres
             </>
           ) : (
             <p className="text-sm text-text-secondary">Loading {analyzerName}...</p>
+          )}
+          {onCancel && status === 'loading' && (
+            <button
+              onClick={onCancel}
+              className="px-4 py-1.5 rounded border border-border text-text-secondary text-xs hover:text-text-primary hover:border-text-muted transition-colors"
+            >
+              Cancel
+            </button>
           )}
         </div>
       </div>

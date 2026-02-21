@@ -40,6 +40,7 @@ interface AppState {
   // Per-analyzer status
   analyzerStatus: Record<AnalyzerName, AnalyzerStatus>;
   analyzerErrors: Record<string, string | null>;
+  analyzerAbortControllers: Record<string, AbortController | null>;
 
   // SignalR
   signalRConnection: HubConnection | null;
@@ -62,6 +63,7 @@ interface AppState {
   setResult: (result: AnalysisResult) => void;
   mergeResult: (incoming: AnalysisResult) => void;
   runAnalyzer: (name: AnalyzerName, force?: boolean, database?: string) => Promise<void>;
+  cancelAnalyzer: (name: AnalyzerName) => void;
   disconnect: () => void;
   toggleSidebar: () => void;
   toggleSearch: () => void;
@@ -81,6 +83,7 @@ export const useStore = create<AppState>((set, get) => ({
   progress: null,
   analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' },
   analyzerErrors: {},
+  analyzerAbortControllers: {},
   signalRConnection: null,
   signalRConnectionId: null,
   sidebarCollapsed: false,
@@ -159,27 +162,54 @@ export const useStore = create<AppState>((set, get) => ({
     const { sessionId, signalRConnectionId } = get();
     if (!sessionId) return;
 
+    // Abort any previous in-flight request for this analyzer
+    const prev = get().analyzerAbortControllers[name];
+    if (prev) prev.abort();
+
+    const controller = new AbortController();
+
     console.log('[runAnalyzer]', name, 'signalRConnectionId:', signalRConnectionId, 'database:', database);
 
     set((s) => ({
       analyzerStatus: { ...s.analyzerStatus, [name]: 'loading' as AnalyzerStatus },
       analyzerErrors: { ...s.analyzerErrors, [name]: null },
+      analyzerAbortControllers: { ...s.analyzerAbortControllers, [name]: controller },
       progress: null,
     }));
 
     try {
-      const result = await api.runAnalyzer(sessionId, name, force, signalRConnectionId ?? undefined, database);
+      const result = await api.runAnalyzer(sessionId, name, force, signalRConnectionId ?? undefined, database, controller.signal);
+      set((s) => ({ analyzerAbortControllers: { ...s.analyzerAbortControllers, [name]: null } }));
       get().mergeResult(result);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Cancelled by user — reset to idle
+        set((s) => ({
+          analyzerStatus: { ...s.analyzerStatus, [name]: 'idle' as AnalyzerStatus },
+          analyzerAbortControllers: { ...s.analyzerAbortControllers, [name]: null },
+          progress: null,
+        }));
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Analysis failed';
       set((s) => ({
         analyzerStatus: { ...s.analyzerStatus, [name]: 'error' as AnalyzerStatus },
         analyzerErrors: { ...s.analyzerErrors, [name]: message },
+        analyzerAbortControllers: { ...s.analyzerAbortControllers, [name]: null },
       }));
     }
   },
 
+  cancelAnalyzer: (name) => {
+    const controller = get().analyzerAbortControllers[name];
+    if (controller) controller.abort();
+  },
+
   disconnect: () => {
+    // Abort all in-flight analyzers
+    const controllers = get().analyzerAbortControllers;
+    Object.values(controllers).forEach((c) => c?.abort());
+
     const connection = get().signalRConnection;
     if (connection) {
       connection.stop().catch(() => { /* ignore */ });
@@ -195,6 +225,7 @@ export const useStore = create<AppState>((set, get) => ({
       signalRConnectionId: null,
       analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle' },
       analyzerErrors: {},
+      analyzerAbortControllers: {},
     });
   },
 

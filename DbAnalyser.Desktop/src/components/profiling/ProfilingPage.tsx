@@ -8,7 +8,7 @@ import type { TableProfile, ColumnProfile } from '../../api/types';
 
 export function ProfilingPage() {
   const isServerMode = useStore((s) => s.isServerMode);
-  const { status, error, progress, refresh } = useAnalyzer('profiling', !isServerMode);
+  const { status, error, progress, refresh, cancel } = useAnalyzer('profiling', !isServerMode);
   const profiles = useStore((s) => s.result?.profiles);
   const databases = useStore((s) => s.result?.databases ?? []);
   const runAnalyzer = useStore((s) => s.runAnalyzer);
@@ -55,7 +55,7 @@ export function ProfilingPage() {
         </div>
 
         {status === 'loading' && (
-          <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="profiling" progress={progress}>
+          <AnalyzerLoader status={status} error={error} onRefresh={refresh} onCancel={cancel} analyzerName="profiling" progress={progress}>
             <div />
           </AnalyzerLoader>
         )}
@@ -77,7 +77,7 @@ export function ProfilingPage() {
 
   // Single-DB mode: auto-load as before
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="profiling" progress={progress}>
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} onCancel={cancel} analyzerName="profiling" progress={progress}>
     <div className="space-y-6">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold text-text-primary">Data Profiling</h2>

@@ -7,11 +7,13 @@ export function useAnalyzer(name: AnalyzerName, autoLoad = true): {
   error: string | null;
   progress: AnalysisProgress | null;
   refresh: () => void;
+  cancel: () => void;
 } {
   const status = useStore((s) => s.analyzerStatus[name]);
   const error = useStore((s) => s.analyzerErrors[name] ?? null);
   const progress = useStore((s) => s.analyzerStatus[name] === 'loading' ? s.progress : null);
   const runAnalyzer = useStore((s) => s.runAnalyzer);
+  const cancelAnalyzer = useStore((s) => s.cancelAnalyzer);
 
   useEffect(() => {
     if (autoLoad && status === 'idle') {
@@ -23,5 +25,9 @@ export function useAnalyzer(name: AnalyzerName, autoLoad = true): {
     runAnalyzer(name, true);
   }, [name, runAnalyzer]);
 
-  return { status, error, progress, refresh };
+  const cancel = useCallback(() => {
+    cancelAnalyzer(name);
+  }, [name, cancelAnalyzer]);
+
+  return { status, error, progress, refresh, cancel };
 }

@@ -81,6 +81,14 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      <div className="px-4 py-3 border-t border-border">
+        {!collapsed ? (
+          <p className="text-[10px] text-text-muted">v{__APP_VERSION__} &middot; by Simon Soellinger</p>
+        ) : (
+          <p className="text-[10px] text-text-muted text-center">{__APP_VERSION__}</p>
+        )}
+      </div>
     </aside>
   );
 }

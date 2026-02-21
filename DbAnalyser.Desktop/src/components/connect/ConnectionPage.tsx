@@ -45,7 +45,7 @@ export function ConnectionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-primary flex items-start justify-center pt-12 p-8">
+    <div className="min-h-screen bg-bg-primary flex flex-col items-center justify-between pt-12 p-8">
       <div className="w-full max-w-lg space-y-6">
         <div className="flex justify-center mb-4">
           <img src="/logo.svg" alt="DB Analyser" className="h-36" />
@@ -70,6 +70,10 @@ export function ConnectionPage() {
 
         <ConnectionHistory onSelect={handleSelectHistory} onConnect={handleConnectHistory} />
       </div>
+
+      <p className="text-xs text-text-muted mt-8">
+        v{__APP_VERSION__} &middot; by Simon Soellinger
+      </p>
     </div>
   );
 }
