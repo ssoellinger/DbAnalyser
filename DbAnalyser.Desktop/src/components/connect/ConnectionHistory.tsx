@@ -2,9 +2,10 @@ import { useStore } from '../../hooks/useStore';
 
 interface ConnectionHistoryProps {
   onSelect: (connectionString: string) => void;
+  onConnect: (connectionString: string) => void;
 }
 
-export function ConnectionHistory({ onSelect }: ConnectionHistoryProps) {
+export function ConnectionHistory({ onSelect, onConnect }: ConnectionHistoryProps) {
   const history = useStore((s) => s.connectionHistory);
 
   if (history.length === 0) return null;
@@ -17,6 +18,7 @@ export function ConnectionHistory({ onSelect }: ConnectionHistoryProps) {
           <button
             key={i}
             onClick={() => onSelect(entry.connectionString)}
+            onDoubleClick={() => onConnect(entry.connectionString)}
             className="w-full text-left px-3 py-2 rounded text-xs hover:bg-bg-hover transition-colors group"
           >
             <span className="text-text-primary group-hover:text-accent transition-colors">

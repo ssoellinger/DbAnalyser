@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useStore } from '../../hooks/useStore';
+import { api } from '../../api/client';
 import { ConnectionForm, DEFAULT_FIELDS, parseConnectionString, buildConnectionString } from './ConnectionForm';
 import { ConnectionHistory } from './ConnectionHistory';
 import type { ConnectionFields } from './ConnectionForm';
@@ -12,11 +13,25 @@ export function ConnectionPage() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  const store = useStore();
+
   const handleSelectHistory = (connectionString: string) => {
     setFields(parseConnectionString(connectionString));
     setRawConnectionString(connectionString);
     setRawMode(false);
   };
+
+  const handleConnectHistory = useCallback(async (connectionString: string) => {
+    store.setConnecting(true);
+    try {
+      const { sessionId, databaseName, isServerMode, serverName } = await api.connect(connectionString);
+      await store.initSignalR();
+      store.setConnected(sessionId, databaseName, isServerMode, serverName);
+      store.addToHistory(connectionString, databaseName ?? serverName ?? 'Server');
+    } catch (err) {
+      store.setConnectionError(err instanceof Error ? err.message : 'Connection failed');
+    }
+  }, [store]);
 
   const handleToggleMode = () => {
     if (rawMode) {
@@ -53,7 +68,7 @@ export function ConnectionPage() {
           setRawConnectionString={setRawConnectionString}
         />
 
-        <ConnectionHistory onSelect={handleSelectHistory} />
+        <ConnectionHistory onSelect={handleSelectHistory} onConnect={handleConnectHistory} />
       </div>
     </div>
   );

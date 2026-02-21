@@ -428,11 +428,12 @@ function ErdGraphInner() {
 }
 
 export function ErdPage() {
-  const { status, error, progress, refresh } = useAnalyzer('schema');
+  // Load relationships (which depends on schema, so both get loaded)
+  const { status, error, progress, refresh } = useAnalyzer('relationships');
   const schema = useStore((s) => s.result?.schema);
 
   return (
-    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="schema" progress={progress}>
+    <AnalyzerLoader status={status} error={error} onRefresh={refresh} analyzerName="relationships" progress={progress}>
       {schema && schema.tables.length > 0 ? (
         <ReactFlowProvider>
           <ErdGraphInner />
