@@ -18,26 +18,14 @@ public class UsageAnalyzer : IAnalyzer
         new NamingPatternSignal(),
     ];
 
-    public async Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default)
+    public async Task AnalyzeAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct = default)
     {
         var analysis = new UsageAnalysis();
 
         // Query server uptime
-        try
-        {
-            var startTime = await provider.ExecuteScalarAsync(
-                "SELECT sqlserver_start_time FROM sys.dm_os_sys_info", ct);
-
-            if (startTime is DateTime st)
-            {
-                analysis.ServerStartTime = st;
-                analysis.ServerUptimeDays = (int)(DateTime.UtcNow - st).TotalDays;
-            }
-        }
-        catch
-        {
-            // DMV may not be accessible — leave uptime null
-        }
+        var (startTime, uptimeDays) = await context.ServerQueries.GetServerUptimeAsync(context.Provider, ct);
+        analysis.ServerStartTime = startTime;
+        analysis.ServerUptimeDays = uptimeDays;
 
         // Attach early so signals can read uptime
         result.UsageAnalysis = analysis;
@@ -49,7 +37,7 @@ public class UsageAnalyzer : IAnalyzer
         {
             try
             {
-                var signalResults = await signal.EvaluateAsync(provider, result, ct);
+                var signalResults = await signal.EvaluateAsync(context, result, ct);
                 allSignals.AddRange(signalResults);
             }
             catch

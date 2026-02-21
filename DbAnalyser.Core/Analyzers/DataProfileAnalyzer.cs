@@ -16,7 +16,7 @@ public class DataProfileAnalyzer : IAnalyzer
         "bit", "uniqueidentifier"
     ];
 
-    public async Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default)
+    public async Task AnalyzeAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct = default)
     {
         if (result.Schema is null)
             throw new InvalidOperationException("Schema analysis must run before profiling.");
@@ -25,7 +25,7 @@ public class DataProfileAnalyzer : IAnalyzer
 
         foreach (var table in result.Schema.Tables)
         {
-            var profile = await ProfileTableAsync(provider, table.SchemaName, table.TableName, table.Columns, ct);
+            var profile = await ProfileTableAsync(context, table.SchemaName, table.TableName, table.Columns, ct);
             profiles.Add(profile);
         }
 
@@ -33,7 +33,7 @@ public class DataProfileAnalyzer : IAnalyzer
     }
 
     private async Task<TableProfile> ProfileTableAsync(
-        IDbProvider provider,
+        AnalysisContext context,
         string schema,
         string table,
         List<Models.Schema.ColumnInfo> columns,
@@ -45,8 +45,8 @@ public class DataProfileAnalyzer : IAnalyzer
             TableName = table
         };
 
-        var countResult = await provider.ExecuteScalarAsync(
-            $"SELECT COUNT(*) FROM [{schema}].[{table}]", ct);
+        var countSql = context.CatalogQueries.BuildCountSql(schema, table);
+        var countResult = await context.Provider.ExecuteScalarAsync(countSql, ct);
         profile.RowCount = Convert.ToInt64(countResult ?? 0);
 
         if (profile.RowCount == 0)
@@ -64,7 +64,7 @@ public class DataProfileAnalyzer : IAnalyzer
 
         foreach (var col in columns)
         {
-            var colProfile = await ProfileColumnAsync(provider, schema, table, col, profile.RowCount, ct);
+            var colProfile = await ProfileColumnAsync(context, schema, table, col, profile.RowCount, ct);
             profile.ColumnProfiles.Add(colProfile);
         }
 
@@ -72,7 +72,7 @@ public class DataProfileAnalyzer : IAnalyzer
     }
 
     private async Task<ColumnProfile> ProfileColumnAsync(
-        IDbProvider provider,
+        AnalysisContext context,
         string schema,
         string table,
         Models.Schema.ColumnInfo column,
@@ -89,34 +89,23 @@ public class DataProfileAnalyzer : IAnalyzer
         var baseType = column.DataType.ToLowerInvariant();
         if (!ProfileableTypes.Contains(baseType))
         {
-            colProfile.NullCount = column.IsNullable
-                ? Convert.ToInt64(await provider.ExecuteScalarAsync(
-                    $"SELECT COUNT(*) FROM [{schema}].[{table}] WHERE [{column.Name}] IS NULL", ct) ?? 0)
-                : 0;
+            if (column.IsNullable)
+            {
+                var nullSql = context.CatalogQueries.BuildNullCountSql(schema, table, column.Name);
+                colProfile.NullCount = Convert.ToInt64(
+                    await context.Provider.ExecuteScalarAsync(nullSql, ct) ?? 0);
+            }
+            else
+            {
+                colProfile.NullCount = 0;
+            }
             return colProfile;
         }
 
         var canMinMax = baseType is not ("bit" or "text" or "ntext" or "uniqueidentifier");
+        var sql = context.CatalogQueries.BuildColumnProfileSql(schema, table, column.Name, canMinMax);
 
-        var sql = canMinMax
-            ? $"""
-               SELECT
-                   SUM(CASE WHEN [{column.Name}] IS NULL THEN 1 ELSE 0 END) AS NullCount,
-                   COUNT(DISTINCT [{column.Name}]) AS DistinctCount,
-                   CAST(MIN([{column.Name}]) AS NVARCHAR(500)) AS MinVal,
-                   CAST(MAX([{column.Name}]) AS NVARCHAR(500)) AS MaxVal
-               FROM [{schema}].[{table}]
-               """
-            : $"""
-               SELECT
-                   SUM(CASE WHEN [{column.Name}] IS NULL THEN 1 ELSE 0 END) AS NullCount,
-                   COUNT(DISTINCT [{column.Name}]) AS DistinctCount,
-                   NULL AS MinVal,
-                   NULL AS MaxVal
-               FROM [{schema}].[{table}]
-               """;
-
-        var data = await provider.ExecuteQueryAsync(sql, ct);
+        var data = await context.Provider.ExecuteQueryAsync(sql, ct);
         if (data.Rows.Count > 0)
         {
             var row = data.Rows[0];

@@ -1,4 +1,5 @@
 using DbAnalyser.Api.Services;
+using DbAnalyser.Providers;
 
 namespace DbAnalyser.Api.Endpoints;
 
@@ -12,7 +13,7 @@ public static class AnalysisEndpoints
         {
             try
             {
-                var result = await sessionService.ConnectAsync(request.ConnectionString, ct);
+                var result = await sessionService.ConnectAsync(request.ConnectionString, request.ProviderType ?? "sqlserver", ct);
                 logger.LogInformation("Connected session {SessionId} to server {Server} (server mode: {IsServerMode})",
                     result.SessionId, result.ServerName, result.IsServerMode);
                 return Results.Ok(result);
@@ -84,11 +85,16 @@ public static class AnalysisEndpoints
             return Results.Ok(new { message = "Disconnected" });
         });
 
+        group.MapGet("/providers", (ProviderRegistry registry) =>
+        {
+            return Results.Ok(new { providers = registry.AvailableProviders });
+        });
+
         group.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     }
 }
 
-public record ConnectRequest(string ConnectionString);
+public record ConnectRequest(string ConnectionString, string? ProviderType = "sqlserver");
 public record StartAnalysisRequest(string SessionId, List<string>? Analyzers = null, string? SignalRConnectionId = null);
 public record DisconnectRequest(string SessionId);
 public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false, string? Database = null);

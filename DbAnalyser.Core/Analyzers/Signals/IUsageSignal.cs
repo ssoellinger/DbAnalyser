@@ -6,5 +6,5 @@ namespace DbAnalyser.Analyzers.Signals;
 public interface IUsageSignal
 {
     string Name { get; }
-    Task<List<SignalResult>> EvaluateAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct);
+    Task<List<SignalResult>> EvaluateAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct);
 }

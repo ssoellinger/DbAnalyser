@@ -10,7 +10,7 @@ public partial class QualityAnalyzer : IAnalyzer
 {
     public string Name => "quality";
 
-    public Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default)
+    public Task AnalyzeAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct = default)
     {
         if (result.Schema is null)
             throw new InvalidOperationException("Schema analysis must run before quality analysis.");

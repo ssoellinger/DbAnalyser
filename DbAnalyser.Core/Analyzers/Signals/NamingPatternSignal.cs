@@ -13,7 +13,7 @@ public class NamingPatternSignal : IUsageSignal
     private static readonly string[] SuspiciousContains =
         ["deprecated", "archive"];
 
-    public Task<List<SignalResult>> EvaluateAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct)
+    public Task<List<SignalResult>> EvaluateAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct)
     {
         var results = new List<SignalResult>();
 

@@ -5,9 +5,7 @@ using DbAnalyser.Configuration;
 using DbAnalyser.Models.Schema;
 using DbAnalyser.Models.Usage;
 using DbAnalyser.Providers;
-using DbAnalyser.Providers.SqlServer;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 
 namespace DbAnalyser.Api.Services;
@@ -17,39 +15,41 @@ public class AnalysisSessionService : IAsyncDisposable
     private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<AnalysisHub> _hubContext;
     private readonly ILogger<AnalysisSessionService> _logger;
+    private readonly ProviderRegistry _registry;
     private readonly ConcurrentDictionary<string, SessionState> _sessions = new();
 
-    public AnalysisSessionService(IServiceProvider serviceProvider, IHubContext<AnalysisHub> hubContext, ILogger<AnalysisSessionService> logger)
+    public AnalysisSessionService(
+        IServiceProvider serviceProvider,
+        IHubContext<AnalysisHub> hubContext,
+        ILogger<AnalysisSessionService> logger,
+        ProviderRegistry registry)
     {
         _serviceProvider = serviceProvider;
         _hubContext = hubContext;
         _logger = logger;
+        _registry = registry;
     }
 
-    public async Task<ConnectResult> ConnectAsync(string connectionString, CancellationToken ct = default)
+    public async Task<ConnectResult> ConnectAsync(string connectionString, string providerType = "sqlserver", CancellationToken ct = default)
     {
-        // Ensure MARS is enabled (required for parallel analyzer queries)
-        var builder = new SqlConnectionStringBuilder(connectionString)
-        {
-            MultipleActiveResultSets = true
-        };
+        var bundle = _registry.GetBundle(providerType);
 
-        // Detect server mode: no database specified → connect to master
-        var isServerMode = string.IsNullOrWhiteSpace(builder.InitialCatalog);
+        // Normalize (e.g. add MARS for SQL Server)
+        connectionString = bundle.Factory.NormalizeConnectionString(connectionString);
+
+        // Detect server mode: no database specified → connect to system database
+        var isServerMode = bundle.Factory.IsServerMode(connectionString);
         if (isServerMode)
-            builder.InitialCatalog = "master";
+            connectionString = bundle.Factory.SetDatabase(connectionString, bundle.Factory.DefaultSystemDatabase);
 
-        connectionString = builder.ConnectionString;
-
-        var provider = new SqlServerProvider();
-        await provider.ConnectAsync(connectionString, ct);
+        var provider = await bundle.Factory.CreateAsync(connectionString, ct);
 
         var sessionId = Guid.NewGuid().ToString("N")[..12];
-        _sessions[sessionId] = new SessionState(provider) { IsServerMode = isServerMode, ConnectionString = connectionString };
+        _sessions[sessionId] = new SessionState(provider, bundle) { IsServerMode = isServerMode, ConnectionString = connectionString };
 
-        _logger.LogInformation("Session {SessionId} created — server: {Server}, database: {Database}, mode: {Mode}",
+        _logger.LogInformation("Session {SessionId} created — server: {Server}, database: {Database}, mode: {Mode}, provider: {Provider}",
             sessionId, provider.ServerName, isServerMode ? "(server)" : provider.DatabaseName,
-            isServerMode ? "server" : "single-db");
+            isServerMode ? "server" : "single-db", providerType);
 
         return new ConnectResult(
             sessionId,
@@ -77,7 +77,7 @@ public class AnalysisSessionService : IAsyncDisposable
         {
             var orchestratorLogger = _serviceProvider.GetRequiredService<ILogger<ServerAnalysisOrchestrator>>();
             var orchestrator = new ServerAnalysisOrchestrator(
-                _serviceProvider.GetServices<IAnalyzer>(), orchestratorLogger);
+                _serviceProvider.GetServices<IAnalyzer>(), session.Bundle, orchestratorLogger);
 
             var result = await orchestrator.RunAsync(
                 session.ConnectionString,
@@ -92,6 +92,15 @@ public class AnalysisSessionService : IAsyncDisposable
 
         var enabledNames = analyzerNames.Select(a => a.ToLowerInvariant()).ToHashSet();
         var analyzerInstances = _serviceProvider.GetServices<IAnalyzer>().ToList();
+
+        var context = new AnalysisContext
+        {
+            Provider = session.Provider,
+            CatalogQueries = session.Bundle.CatalogQueries,
+            PerformanceQueries = session.Bundle.PerformanceQueries,
+            ServerQueries = session.Bundle.ServerQueries,
+            ProviderType = session.Bundle.ProviderType
+        };
 
         var singleResult = new AnalysisResult
         {
@@ -110,7 +119,7 @@ public class AnalysisSessionService : IAsyncDisposable
             current2++;
             await SendProgress(signalRConnectionId, analyzer.Name, current2, total2, "running");
 
-            await analyzer.AnalyzeAsync(session.Provider, singleResult, ct);
+            await analyzer.AnalyzeAsync(context, singleResult, ct);
 
             await SendProgress(signalRConnectionId, analyzer.Name, current2, total2, "completed");
         }
@@ -191,14 +200,19 @@ public class AnalysisSessionService : IAsyncDisposable
                 // Single-database targeting: connect to just that DB and run the analyzer
                 if (!string.IsNullOrWhiteSpace(database))
                 {
-                    var dbBuilder = new SqlConnectionStringBuilder(session.ConnectionString)
-                    {
-                        InitialCatalog = database,
-                        MultipleActiveResultSets = true
-                    };
+                    var dbConnStr = session.Bundle.Factory.SetDatabase(session.ConnectionString, database);
+                    dbConnStr = session.Bundle.Factory.NormalizeConnectionString(dbConnStr);
 
-                    await using var dbProvider = new SqlServerProvider();
-                    await dbProvider.ConnectAsync(dbBuilder.ConnectionString, ct);
+                    await using var dbProvider = await session.Bundle.Factory.CreateAsync(dbConnStr, ct);
+
+                    var context = new AnalysisContext
+                    {
+                        Provider = dbProvider,
+                        CatalogQueries = session.Bundle.CatalogQueries,
+                        PerformanceQueries = session.Bundle.PerformanceQueries,
+                        ServerQueries = session.Bundle.ServerQueries,
+                        ProviderType = session.Bundle.ProviderType
+                    };
 
                     // Build a fresh result for this single DB
                     var dbResult = new AnalysisResult
@@ -220,7 +234,7 @@ public class AnalysisSessionService : IAsyncDisposable
                         if (instance is null) continue;
 
                         await SendProgress(signalRConnectionId, $"{name} ({database})", i + 1, toRunDb.Count, "running");
-                        await instance.AnalyzeAsync(dbProvider, dbResult, ct);
+                        await instance.AnalyzeAsync(context, dbResult, ct);
                         await SendProgress(signalRConnectionId, $"{name} ({database})", i + 1, toRunDb.Count, "completed");
                     }
 
@@ -269,7 +283,7 @@ public class AnalysisSessionService : IAsyncDisposable
                 {
                     var orchLogger = _serviceProvider.GetRequiredService<ILogger<ServerAnalysisOrchestrator>>();
                     var orchestrator = new ServerAnalysisOrchestrator(
-                        _serviceProvider.GetServices<IAnalyzer>(), orchLogger);
+                        _serviceProvider.GetServices<IAnalyzer>(), session.Bundle, orchLogger);
 
                     // Resolve which analyzers to run (requested + dependencies)
                     var toRun = new List<string>();
@@ -316,6 +330,15 @@ public class AnalysisSessionService : IAsyncDisposable
             if (toRunSingle.Count == 0)
                 return result; // Already loaded, nothing to do
 
+            var analysisContext = new AnalysisContext
+            {
+                Provider = session.Provider,
+                CatalogQueries = session.Bundle.CatalogQueries,
+                PerformanceQueries = session.Bundle.PerformanceQueries,
+                ServerQueries = session.Bundle.ServerQueries,
+                ProviderType = session.Bundle.ProviderType
+            };
+
             var analyzerInstances = _serviceProvider.GetServices<IAnalyzer>().ToList();
             var total2 = toRunSingle.Count;
 
@@ -328,7 +351,7 @@ public class AnalysisSessionService : IAsyncDisposable
                 if (instance is null) continue;
 
                 await SendProgress(signalRConnectionId, name, i + 1, total2, "running");
-                await instance.AnalyzeAsync(session.Provider, result, ct);
+                await instance.AnalyzeAsync(analysisContext, result, ct);
                 await SendProgress(signalRConnectionId, name, i + 1, total2, "completed");
             }
 
@@ -460,9 +483,10 @@ public class AnalysisSessionService : IAsyncDisposable
         _sessions.Clear();
     }
 
-    private class SessionState(IDbProvider provider)
+    private class SessionState(IDbProvider provider, IProviderBundle bundle)
     {
         public IDbProvider Provider { get; } = provider;
+        public IProviderBundle Bundle { get; } = bundle;
         public AnalysisResult? LastResult { get; set; }
         public SemaphoreSlim Lock { get; } = new(1, 1);
         public bool IsServerMode { get; init; }

@@ -5,8 +5,6 @@ using DbAnalyser.Models.Relationships;
 using DbAnalyser.Models.Schema;
 using DbAnalyser.Models.Usage;
 using DbAnalyser.Providers;
-using DbAnalyser.Providers.SqlServer;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -16,40 +14,21 @@ public class ServerAnalysisOrchestrator
 {
     private readonly IEnumerable<IAnalyzer> _analyzers;
     private readonly ILogger<ServerAnalysisOrchestrator> _logger;
-    private readonly Func<string, CancellationToken, Task<IDbProvider>> _providerFactory;
+    private readonly IProviderBundle _bundle;
 
-    public ServerAnalysisOrchestrator(IEnumerable<IAnalyzer> analyzers)
-        : this(analyzers, NullLogger<ServerAnalysisOrchestrator>.Instance)
-    {
-    }
-
-    public ServerAnalysisOrchestrator(IEnumerable<IAnalyzer> analyzers, ILogger<ServerAnalysisOrchestrator> logger)
-        : this(analyzers, logger, DefaultProviderFactory)
+    public ServerAnalysisOrchestrator(IEnumerable<IAnalyzer> analyzers, IProviderBundle bundle)
+        : this(analyzers, bundle, NullLogger<ServerAnalysisOrchestrator>.Instance)
     {
     }
 
     public ServerAnalysisOrchestrator(
         IEnumerable<IAnalyzer> analyzers,
-        Func<string, CancellationToken, Task<IDbProvider>> providerFactory)
-        : this(analyzers, NullLogger<ServerAnalysisOrchestrator>.Instance, providerFactory)
-    {
-    }
-
-    public ServerAnalysisOrchestrator(
-        IEnumerable<IAnalyzer> analyzers,
-        ILogger<ServerAnalysisOrchestrator> logger,
-        Func<string, CancellationToken, Task<IDbProvider>> providerFactory)
+        IProviderBundle bundle,
+        ILogger<ServerAnalysisOrchestrator> logger)
     {
         _analyzers = analyzers;
+        _bundle = bundle;
         _logger = logger;
-        _providerFactory = providerFactory;
-    }
-
-    private static async Task<IDbProvider> DefaultProviderFactory(string connectionString, CancellationToken ct)
-    {
-        var provider = new SqlServerProvider();
-        await provider.ConnectAsync(connectionString, ct);
-        return provider;
     }
 
     public async Task<AnalysisResult> RunAsync(
@@ -58,17 +37,14 @@ public class ServerAnalysisOrchestrator
         Func<string, int, int, string, Task>? onProgress = null,
         CancellationToken ct = default)
     {
-        // 1. Enumerate user databases using a temporary connection to master
-        var masterBuilder = new SqlConnectionStringBuilder(connectionString)
-        {
-            InitialCatalog = "master"
-        };
+        // 1. Enumerate user databases using a temporary connection to the system database
+        var masterConnStr = _bundle.Factory.SetDatabase(connectionString, _bundle.Factory.DefaultSystemDatabase);
         List<string> databases;
         string serverName;
-        await using (var masterProvider = await _providerFactory(masterBuilder.ConnectionString, ct))
+        await using (var masterProvider = await _bundle.Factory.CreateAsync(masterConnStr, ct))
         {
             serverName = masterProvider.ServerName;
-            databases = await EnumerateDatabasesAsync(masterProvider, ct);
+            databases = await _bundle.ServerQueries.EnumerateDatabasesAsync(masterProvider, ct);
         }
 
         _logger.LogInformation("Server analysis started on {Server} — found {Count} databases: [{Databases}]",
@@ -115,12 +91,17 @@ public class ServerAnalysisOrchestrator
                 if (onProgress is not null)
                     await onProgress($"Analyzing {dbName}", i + 1, databases.Count, "running");
 
-                var dbBuilder = new SqlConnectionStringBuilder(connectionString)
-                {
-                    InitialCatalog = dbName
-                };
+                var dbConnStr = _bundle.Factory.SetDatabase(connectionString, dbName);
+                await using var dbProvider = await _bundle.Factory.CreateAsync(dbConnStr, ct);
 
-                await using var dbProvider = await _providerFactory(dbBuilder.ConnectionString, ct);
+                var context = new AnalysisContext
+                {
+                    Provider = dbProvider,
+                    CatalogQueries = _bundle.CatalogQueries,
+                    PerformanceQueries = _bundle.PerformanceQueries,
+                    ServerQueries = _bundle.ServerQueries,
+                    ProviderType = _bundle.ProviderType
+                };
 
                 var dbResult = new AnalysisResult
                 {
@@ -130,7 +111,7 @@ public class ServerAnalysisOrchestrator
 
                 foreach (var analyzer in analyzerInstances)
                 {
-                    await analyzer.AnalyzeAsync(dbProvider, dbResult, ct);
+                    await analyzer.AnalyzeAsync(context, dbResult, ct);
                 }
 
                 // 3. Merge into unified result, stamping DatabaseName
@@ -154,27 +135,6 @@ public class ServerAnalysisOrchestrator
             merged.Databases.Count, merged.FailedDatabases.Count);
 
         return merged;
-    }
-
-    private static async Task<List<string>> EnumerateDatabasesAsync(IDbProvider provider, CancellationToken ct)
-    {
-        // HAS_DBACCESS is omitted: on Azure SQL it returns 0 from master context
-        // even when the login has access. Inaccessible databases will fail at
-        // connection time and land in FailedDatabases instead.
-        const string sql = """
-            SELECT name FROM sys.databases
-            WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')
-              AND state_desc = 'ONLINE'
-            ORDER BY name
-            """;
-
-        var table = await provider.ExecuteQueryAsync(sql, ct);
-        var databases = new List<string>();
-        foreach (System.Data.DataRow row in table.Rows)
-        {
-            databases.Add(row["name"].ToString()!);
-        }
-        return databases;
     }
 
     private static void MergeResult(AnalysisResult merged, AnalysisResult dbResult, string dbName)
@@ -231,7 +191,6 @@ public class ServerAnalysisOrchestrator
             foreach (var dep in dbResult.Relationships.Dependencies)
             {
                 dep.DatabaseName = dbName;
-                // Rewrite DependsOn/ReferencedBy/TransitiveImpact to use 3-part names
                 dep.DependsOn = dep.DependsOn.Select(n => QualifyName(n, dbName)).ToList();
                 dep.ReferencedBy = dep.ReferencedBy.Select(n => QualifyName(n, dbName)).ToList();
                 dep.TransitiveImpact = dep.TransitiveImpact.Select(n => QualifyName(n, dbName)).ToList();
@@ -273,28 +232,18 @@ public class ServerAnalysisOrchestrator
         }
     }
 
-    /// <summary>
-    /// Qualify a 2-part name (schema.object) into a 3-part name (db.schema.object).
-    /// If the name already has 3+ parts, leave it as-is.
-    /// </summary>
     private static string QualifyName(string name, string dbName)
     {
         var dotCount = name.Count(c => c == '.');
         return dotCount >= 2 ? name : $"{dbName}.{name}";
     }
 
-    /// <summary>
-    /// Post-merge: resolve cross-database external references.
-    /// External TableDependencies whose target DB is in our analyzed set
-    /// are no longer truly external.
-    /// </summary>
     private static void ResolveCrossDatabaseReferences(AnalysisResult merged)
     {
         if (merged.Relationships is null) return;
 
         var analyzedDbs = new HashSet<string>(merged.Databases, StringComparer.OrdinalIgnoreCase);
 
-        // For external TableDependencies pointing to an analyzed DB, clear ExternalDatabase
         foreach (var dep in merged.Relationships.Dependencies)
         {
             if (dep.ExternalDatabase is not null && analyzedDbs.Contains(dep.ExternalDatabase))

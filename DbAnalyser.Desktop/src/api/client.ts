@@ -18,10 +18,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
 
-  connect: (connectionString: string) =>
+  getProviders: () => request<{ providers: string[] }>('/api/providers'),
+
+  connect: (connectionString: string, providerType: string = 'sqlserver') =>
     request<ConnectResult>('/api/connect', {
       method: 'POST',
-      body: JSON.stringify({ connectionString }),
+      body: JSON.stringify({ connectionString, providerType }),
     }),
 
   startAnalysis: (sessionId: string, analyzers?: string[], signalRConnectionId?: string) =>

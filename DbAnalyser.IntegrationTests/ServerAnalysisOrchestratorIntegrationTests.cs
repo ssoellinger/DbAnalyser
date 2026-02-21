@@ -1,4 +1,5 @@
 using DbAnalyser.Analyzers;
+using DbAnalyser.Providers.SqlServer;
 using Microsoft.Data.SqlClient;
 
 namespace DbAnalyser.IntegrationTests;
@@ -10,6 +11,7 @@ namespace DbAnalyser.IntegrationTests;
 public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixture>
 {
     private readonly TestFixture _fixture;
+    private readonly SqlServerBundle _bundle = new();
 
     public ServerAnalysisOrchestratorIntegrationTests(TestFixture fixture)
     {
@@ -29,7 +31,7 @@ public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixt
     public async Task RunAsync_ServerMode_EnumeratesDatabases()
     {
         var analyzers = new IAnalyzer[] { new SchemaAnalyzer() };
-        var orchestrator = new ServerAnalysisOrchestrator(analyzers);
+        var orchestrator = new ServerAnalysisOrchestrator(analyzers, _bundle);
 
         var result = await orchestrator.RunAsync(
             GetConnectionString(),
@@ -45,7 +47,7 @@ public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixt
     public async Task RunAsync_ServerMode_FindsTables()
     {
         var analyzers = new IAnalyzer[] { new SchemaAnalyzer() };
-        var orchestrator = new ServerAnalysisOrchestrator(analyzers);
+        var orchestrator = new ServerAnalysisOrchestrator(analyzers, _bundle);
 
         var result = await orchestrator.RunAsync(
             GetConnectionString(),
@@ -65,7 +67,7 @@ public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixt
         // Verify each database is analyzed via its own connection (not ChangeDatabase)
         // by checking that tables come from multiple databases
         var analyzers = new IAnalyzer[] { new SchemaAnalyzer() };
-        var orchestrator = new ServerAnalysisOrchestrator(analyzers);
+        var orchestrator = new ServerAnalysisOrchestrator(analyzers, _bundle);
 
         var result = await orchestrator.RunAsync(
             GetConnectionString(),
@@ -89,7 +91,7 @@ public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixt
     public async Task RunAsync_ServerMode_Relationships()
     {
         var analyzers = new IAnalyzer[] { new SchemaAnalyzer(), new RelationshipAnalyzer() };
-        var orchestrator = new ServerAnalysisOrchestrator(analyzers);
+        var orchestrator = new ServerAnalysisOrchestrator(analyzers, _bundle);
 
         var result = await orchestrator.RunAsync(
             GetConnectionString(),
@@ -109,7 +111,7 @@ public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixt
     public async Task RunAsync_ServerMode_ProgressIsReported()
     {
         var analyzers = new IAnalyzer[] { new SchemaAnalyzer() };
-        var orchestrator = new ServerAnalysisOrchestrator(analyzers);
+        var orchestrator = new ServerAnalysisOrchestrator(analyzers, _bundle);
 
         var progressCalls = new List<(string Step, int Current, int Total, string Status)>();
 
@@ -142,7 +144,7 @@ public class ServerAnalysisOrchestratorIntegrationTests : IClassFixture<TestFixt
     public async Task RunAsync_ServerMode_FailedDatabases_DoNotCrashRun()
     {
         var analyzers = new IAnalyzer[] { new SchemaAnalyzer() };
-        var orchestrator = new ServerAnalysisOrchestrator(analyzers);
+        var orchestrator = new ServerAnalysisOrchestrator(analyzers, _bundle);
 
         var result = await orchestrator.RunAsync(
             GetConnectionString(),

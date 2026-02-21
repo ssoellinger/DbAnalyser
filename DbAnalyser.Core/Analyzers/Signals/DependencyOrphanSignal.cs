@@ -7,7 +7,7 @@ public class DependencyOrphanSignal : IUsageSignal
 {
     public string Name => "Dependency Orphan";
 
-    public Task<List<SignalResult>> EvaluateAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct)
+    public Task<List<SignalResult>> EvaluateAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct)
     {
         var results = new List<SignalResult>();
 

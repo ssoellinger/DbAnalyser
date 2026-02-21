@@ -7,7 +7,7 @@ public class RowCountSignal : IUsageSignal
 {
     public string Name => "Row Count";
 
-    public Task<List<SignalResult>> EvaluateAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct)
+    public Task<List<SignalResult>> EvaluateAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct)
     {
         var results = new List<SignalResult>();
 

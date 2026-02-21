@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 
 export interface ConnectionFields {
   server: string;
+  port: string;
   database: string;
   authMode: 'windows' | 'sql';
   username: string;
@@ -14,6 +15,7 @@ export interface ConnectionFields {
 
 export const DEFAULT_FIELDS: ConnectionFields = {
   server: '',
+  port: '',
   database: '',
   authMode: 'windows',
   username: '',
@@ -22,10 +24,17 @@ export const DEFAULT_FIELDS: ConnectionFields = {
   trustCertificate: true,
 };
 
-export function buildConnectionString(f: ConnectionFields): string {
-  const parts: string[] = [
-    `Server=${f.server}`,
-  ];
+export function buildConnectionString(f: ConnectionFields, providerType = 'sqlserver'): string {
+  if (providerType === 'postgresql') {
+    const parts: string[] = [`Host=${f.server}`];
+    parts.push(`Port=${f.port || '5432'}`);
+    if (f.database.trim()) parts.push(`Database=${f.database}`);
+    if (f.username.trim()) parts.push(`Username=${f.username}`);
+    if (f.password) parts.push(`Password=${f.password}`);
+    return parts.join(';');
+  }
+
+  const parts: string[] = [`Server=${f.server}`];
   if (f.database.trim()) parts.push(`Database=${f.database}`);
   if (f.authMode === 'windows') {
     parts.push('Trusted_Connection=true');
@@ -38,17 +47,21 @@ export function buildConnectionString(f: ConnectionFields): string {
   return parts.join(';');
 }
 
-export function parseConnectionString(cs: string): ConnectionFields {
+export function parseConnectionString(cs: string, providerType = 'sqlserver'): ConnectionFields {
   const fields = { ...DEFAULT_FIELDS };
+  if (providerType !== 'sqlserver') {
+    fields.authMode = 'sql';
+  }
   const pairs = cs.split(';').map((p) => p.trim()).filter(Boolean);
   for (const pair of pairs) {
     const eq = pair.indexOf('=');
     if (eq < 0) continue;
     const key = pair.substring(0, eq).trim().toLowerCase();
     const val = pair.substring(eq + 1).trim();
-    if (key === 'server' || key === 'data source') fields.server = val;
+    if (key === 'server' || key === 'data source' || key === 'host') fields.server = val;
+    else if (key === 'port') fields.port = val;
     else if (key === 'database' || key === 'initial catalog') fields.database = val;
-    else if (key === 'user id' || key === 'uid') { fields.username = val; fields.authMode = 'sql'; }
+    else if (key === 'user id' || key === 'uid' || key === 'username') { fields.username = val; fields.authMode = 'sql'; }
     else if (key === 'password' || key === 'pwd') { fields.password = val; fields.authMode = 'sql'; }
     else if (key === 'trusted_connection' || key === 'integrated security') {
       if (val.toLowerCase() === 'true' || val.toLowerCase() === 'sspi') fields.authMode = 'windows';
@@ -65,13 +78,15 @@ interface ConnectionFormProps {
   rawMode: boolean;
   rawConnectionString: string;
   setRawConnectionString: (value: string) => void;
+  providerType: string;
 }
 
-export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString, setRawConnectionString }: ConnectionFormProps) {
+export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString, setRawConnectionString, providerType }: ConnectionFormProps) {
   const store = useStore();
   const [showPassword, setShowPassword] = useState(false);
 
-  const connectionString = rawMode ? rawConnectionString : buildConnectionString(fields);
+  const isSqlServer = providerType === 'sqlserver';
+  const connectionString = rawMode ? rawConnectionString : buildConnectionString(fields, providerType);
   const canConnect = rawMode
     ? rawConnectionString.trim().length > 0
     : fields.server.trim().length > 0;
@@ -81,10 +96,10 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
 
     store.setConnecting(true);
     try {
-      const { sessionId, databaseName, isServerMode, serverName } = await api.connect(connectionString);
+      const { sessionId, databaseName, isServerMode, serverName } = await api.connect(connectionString, providerType);
       await store.initSignalR();
       store.setConnected(sessionId, databaseName, isServerMode, serverName);
-      store.addToHistory(connectionString, databaseName ?? serverName ?? 'Server');
+      store.addToHistory(connectionString, databaseName ?? serverName ?? 'Server', providerType);
     } catch (err) {
       store.setConnectionError(err instanceof Error ? err.message : 'Connection failed');
     }
@@ -110,14 +125,27 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-text-secondary mb-1.5">Server</label>
-              <input
-                value={fields.server}
-                onChange={(e) => update({ server: e.target.value })}
-                placeholder="localhost"
-                className={inputClass}
-              />
+            <div className={isSqlServer ? '' : 'flex gap-2'}>
+              <div className={isSqlServer ? '' : 'flex-1'}>
+                <label className="block text-xs text-text-secondary mb-1.5">{isSqlServer ? 'Server' : 'Host'}</label>
+                <input
+                  value={fields.server}
+                  onChange={(e) => update({ server: e.target.value })}
+                  placeholder="localhost"
+                  className={inputClass}
+                />
+              </div>
+              {!isSqlServer && (
+                <div className="w-24">
+                  <label className="block text-xs text-text-secondary mb-1.5">Port</label>
+                  <input
+                    value={fields.port}
+                    onChange={(e) => update({ port: e.target.value })}
+                    placeholder="5432"
+                    className={inputClass}
+                  />
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-xs text-text-secondary mb-1.5">Database <span className="text-text-muted">(optional)</span></label>
@@ -130,42 +158,44 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-text-secondary mb-1.5">Authentication</label>
-            <div className="flex gap-1 bg-bg-primary border border-border rounded p-0.5">
-              <button
-                type="button"
-                onClick={() => update({ authMode: 'windows' })}
-                className={`flex-1 py-1.5 text-xs rounded transition-colors ${
-                  fields.authMode === 'windows'
-                    ? 'bg-accent text-bg-primary font-medium'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                Windows Auth
-              </button>
-              <button
-                type="button"
-                onClick={() => update({ authMode: 'sql' })}
-                className={`flex-1 py-1.5 text-xs rounded transition-colors ${
-                  fields.authMode === 'sql'
-                    ? 'bg-accent text-bg-primary font-medium'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                SQL Server Auth
-              </button>
+          {isSqlServer && (
+            <div>
+              <label className="block text-xs text-text-secondary mb-1.5">Authentication</label>
+              <div className="flex gap-1 bg-bg-primary border border-border rounded p-0.5">
+                <button
+                  type="button"
+                  onClick={() => update({ authMode: 'windows' })}
+                  className={`flex-1 py-1.5 text-xs rounded transition-colors ${
+                    fields.authMode === 'windows'
+                      ? 'bg-accent text-bg-primary font-medium'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Windows Auth
+                </button>
+                <button
+                  type="button"
+                  onClick={() => update({ authMode: 'sql' })}
+                  className={`flex-1 py-1.5 text-xs rounded transition-colors ${
+                    fields.authMode === 'sql'
+                      ? 'bg-accent text-bg-primary font-medium'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  SQL Server Auth
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          {fields.authMode === 'sql' && (
+          {(!isSqlServer || fields.authMode === 'sql') && (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-text-secondary mb-1.5">Username</label>
                 <input
                   value={fields.username}
                   onChange={(e) => update({ username: e.target.value })}
-                  placeholder="sa"
+                  placeholder={isSqlServer ? 'sa' : 'postgres'}
                   className={inputClass}
                 />
               </div>
@@ -190,26 +220,28 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
             </div>
           )}
 
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-              <input
-                type="checkbox"
-                checked={fields.encrypt}
-                onChange={(e) => update({ encrypt: e.target.checked })}
-                className="rounded border-border accent-accent"
-              />
-              Encrypt
-            </label>
-            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-              <input
-                type="checkbox"
-                checked={fields.trustCertificate}
-                onChange={(e) => update({ trustCertificate: e.target.checked })}
-                className="rounded border-border accent-accent"
-              />
-              Trust Server Certificate
-            </label>
-          </div>
+          {isSqlServer && (
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={fields.encrypt}
+                  onChange={(e) => update({ encrypt: e.target.checked })}
+                  className="rounded border-border accent-accent"
+                />
+                Encrypt
+              </label>
+              <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={fields.trustCertificate}
+                  onChange={(e) => update({ trustCertificate: e.target.checked })}
+                  className="rounded border-border accent-accent"
+                />
+                Trust Server Certificate
+              </label>
+            </div>
+          )}
         </>
       )}
 

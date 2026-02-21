@@ -1,6 +1,8 @@
 using DbAnalyser.Analyzers;
 using DbAnalyser.Api.Hubs;
 using DbAnalyser.Api.Services;
+using DbAnalyser.Providers;
+using DbAnalyser.Providers.SqlServer;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +12,7 @@ namespace DbAnalyser.IntegrationTests;
 
 /// <summary>
 /// Integration tests for AnalysisSessionService — verifies the full
-/// connect → analyze → disconnect flow in both server mode and single-DB mode.
+/// connect -> analyze -> disconnect flow in both server mode and single-DB mode.
 /// </summary>
 public class AnalysisSessionServiceIntegrationTests : IClassFixture<TestFixture>, IAsyncDisposable
 {
@@ -28,6 +30,8 @@ public class AnalysisSessionServiceIntegrationTests : IClassFixture<TestFixture>
         services.AddSingleton<IAnalyzer, RelationshipAnalyzer>();
         services.AddSingleton<IAnalyzer, QualityAnalyzer>();
         services.AddSingleton<IAnalyzer, UsageAnalyzer>();
+        services.AddSingleton<IProviderBundle, SqlServerBundle>();
+        services.AddSingleton<ProviderRegistry>();
         services.AddSignalRCore();
         services.AddLogging();
 
@@ -36,13 +40,14 @@ public class AnalysisSessionServiceIntegrationTests : IClassFixture<TestFixture>
         _service = new AnalysisSessionService(
             provider,
             provider.GetRequiredService<IHubContext<AnalysisHub>>(),
-            provider.GetRequiredService<ILogger<AnalysisSessionService>>());
+            provider.GetRequiredService<ILogger<AnalysisSessionService>>(),
+            provider.GetRequiredService<ProviderRegistry>());
     }
 
     [SqlServerFact]
     public async Task ConnectAsync_ServerMode_NoDatabase_ReturnsServerModeResult()
     {
-        // Connection string WITHOUT Initial Catalog → server mode
+        // Connection string WITHOUT Initial Catalog -> server mode
         var builder = new SqlConnectionStringBuilder(_fixture.ConnectionString!);
         builder.Remove("Initial Catalog");
         builder.Remove("Database");

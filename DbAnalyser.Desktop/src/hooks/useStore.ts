@@ -7,6 +7,7 @@ interface ConnectionHistoryEntry {
   connectionString: string;
   databaseName: string;
   timestamp: string;
+  providerType?: string;
 }
 
 const ALL_ANALYZERS: AnalyzerName[] = ['schema', 'profiling', 'relationships', 'quality', 'usage', 'indexing'];
@@ -68,7 +69,7 @@ interface AppState {
   disconnect: () => void;
   toggleSidebar: () => void;
   toggleSearch: () => void;
-  addToHistory: (connectionString: string, databaseName: string) => void;
+  addToHistory: (connectionString: string, databaseName: string, providerType?: string) => void;
   loadHistory: () => void;
 }
 
@@ -240,11 +241,12 @@ export const useStore = create<AppState>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
 
-  addToHistory: (connectionString, databaseName) => {
+  addToHistory: (connectionString, databaseName, providerType) => {
     const entry: ConnectionHistoryEntry = {
       connectionString,
       databaseName,
       timestamp: new Date().toISOString(),
+      providerType,
     };
     const history = [entry, ...get().connectionHistory.filter(
       (h) => h.connectionString !== connectionString

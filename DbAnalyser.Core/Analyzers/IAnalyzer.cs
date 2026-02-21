@@ -5,5 +5,5 @@ namespace DbAnalyser.Analyzers;
 public interface IAnalyzer
 {
     string Name { get; }
-    Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default);
+    Task AnalyzeAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct = default);
 }

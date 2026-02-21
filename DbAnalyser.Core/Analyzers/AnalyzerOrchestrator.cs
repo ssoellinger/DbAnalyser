@@ -13,13 +13,13 @@ public class AnalyzerOrchestrator
     }
 
     public async Task<AnalysisResult> RunAsync(
-        IDbProvider provider,
+        AnalysisContext context,
         AnalysisOptions options,
         CancellationToken ct = default)
     {
         var result = new AnalysisResult
         {
-            DatabaseName = provider.DatabaseName,
+            DatabaseName = context.Provider.DatabaseName,
             AnalyzedAt = DateTime.UtcNow
         };
 
@@ -32,7 +32,7 @@ public class AnalyzerOrchestrator
             if (!enabledNames.Contains(analyzer.Name.ToLowerInvariant()))
                 continue;
 
-            await analyzer.AnalyzeAsync(provider, result, ct);
+            await analyzer.AnalyzeAsync(context, result, ct);
         }
 
         return result;

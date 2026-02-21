@@ -1,4 +1,3 @@
-using System.Data;
 using System.Text.RegularExpressions;
 using DbAnalyser.Models.Relationships;
 using DbAnalyser.Models.Schema;
@@ -10,7 +9,7 @@ public partial class RelationshipAnalyzer : IAnalyzer
 {
     public string Name => "relationships";
 
-    public async Task AnalyzeAsync(IDbProvider provider, AnalysisResult result, CancellationToken ct = default)
+    public async Task AnalyzeAsync(AnalysisContext context, AnalysisResult result, CancellationToken ct = default)
     {
         if (result.Schema is null)
             throw new InvalidOperationException("Schema analysis must run before relationship analysis.");
@@ -27,7 +26,11 @@ public partial class RelationshipAnalyzer : IAnalyzer
         map.ImplicitRelationships = DetectImplicitRelationships(result.Schema.Tables, map.ExplicitRelationships);
 
         // Get view/sproc -> table dependencies from both sources and merge
-        var sysDeps = await GetObjectDependenciesAsync(provider, ct);
+        var depRows = await context.CatalogQueries.GetObjectDependenciesAsync(context.Provider, ct);
+        var sysDeps = depRows.Select(r => new ObjectDependency(
+            r.FromSchema, r.FromName, r.FromType,
+            r.ToSchema, r.ToName, r.ToType, r.ToDatabase,
+            DetectedVia: "sys.sql_expression_dependencies")).ToList();
         var parsedDeps = ParseViewDependencies(result.Schema);
         var synonymDeps = ResolveSynonymDependencies(result.Schema);
 
@@ -298,56 +301,6 @@ public partial class RelationshipAnalyzer : IAnalyzer
         }
 
         return null;
-    }
-
-    private async Task<List<ObjectDependency>> GetObjectDependenciesAsync(
-        IDbProvider provider, CancellationToken ct)
-    {
-        var data = await provider.ExecuteQueryAsync("""
-            SELECT DISTINCT
-                OBJECT_SCHEMA_NAME(d.referencing_id) AS FromSchema,
-                OBJECT_NAME(d.referencing_id) AS FromName,
-                CASE o1.type
-                    WHEN 'V' THEN 'View'
-                    WHEN 'P' THEN 'Procedure'
-                    WHEN 'FN' THEN 'Function'
-                    WHEN 'IF' THEN 'Function'
-                    WHEN 'TF' THEN 'Function'
-                    WHEN 'TR' THEN 'Trigger'
-                    ELSE o1.type_desc
-                END AS FromType,
-                ISNULL(d.referenced_schema_name, 'dbo') AS ToSchema,
-                d.referenced_entity_name AS ToName,
-                CASE ISNULL(o2.type, 'U')
-                    WHEN 'U' THEN 'Table'
-                    WHEN 'V' THEN 'View'
-                    WHEN 'P' THEN 'Procedure'
-                    WHEN 'FN' THEN 'Function'
-                    WHEN 'IF' THEN 'Function'
-                    WHEN 'TF' THEN 'Function'
-                    ELSE ISNULL(o2.type_desc, 'Table')
-                END AS ToType,
-                d.referenced_database_name AS ToDatabase
-            FROM sys.sql_expression_dependencies d
-            JOIN sys.objects o1 ON d.referencing_id = o1.object_id
-            LEFT JOIN sys.objects o2
-                ON o2.object_id = OBJECT_ID(ISNULL(d.referenced_schema_name, 'dbo') + '.' + d.referenced_entity_name)
-            WHERE o1.type IN ('V', 'P', 'FN', 'IF', 'TF', 'TR')
-              AND d.referenced_entity_name IS NOT NULL
-              AND OBJECT_NAME(d.referencing_id) IS NOT NULL
-            ORDER BY FromSchema, FromName, ToSchema, ToName
-            """, ct);
-
-        return data.Rows.Cast<DataRow>().Select(r => new ObjectDependency(
-            FromSchema: r["FromSchema"].ToString()!,
-            FromName: r["FromName"].ToString()!,
-            FromType: r["FromType"].ToString()!,
-            ToSchema: r["ToSchema"].ToString()!,
-            ToName: r["ToName"].ToString()!,
-            ToType: r["ToType"].ToString()!,
-            ToDatabase: r["ToDatabase"] is DBNull ? null : r["ToDatabase"].ToString(),
-            DetectedVia: "sys.sql_expression_dependencies"
-        )).ToList();
     }
 
     private List<TableDependency> BuildDependencyGraph(

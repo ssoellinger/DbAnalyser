@@ -4,6 +4,9 @@ using DbAnalyser.Analyzers;
 using DbAnalyser.Api.Endpoints;
 using DbAnalyser.Api.Hubs;
 using DbAnalyser.Api.Services;
+using DbAnalyser.Providers;
+using DbAnalyser.Providers.PostgreSql;
+using DbAnalyser.Providers.SqlServer;
 using Serilog;
 
 Log.Logger = new LoggerConfiguration()
@@ -57,6 +60,11 @@ try
                   .AllowCredentials();
         });
     });
+
+    // Provider bundles
+    builder.Services.AddSingleton<IProviderBundle, SqlServerBundle>();
+    builder.Services.AddSingleton<IProviderBundle, PostgreSqlBundle>();
+    builder.Services.AddSingleton<ProviderRegistry>();
 
     // Analyzers
     builder.Services.AddSingleton<IAnalyzer, SchemaAnalyzer>();

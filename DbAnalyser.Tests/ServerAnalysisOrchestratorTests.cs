@@ -1,4 +1,3 @@
-using System.Data;
 using DbAnalyser.Analyzers;
 using DbAnalyser.Models.Profiling;
 using DbAnalyser.Models.Quality;
@@ -13,92 +12,119 @@ namespace DbAnalyser.Tests;
 public class ServerAnalysisOrchestratorTests
 {
     /// <summary>
-    /// Creates a mock IDbProvider that returns the given database names
-    /// from the sys.databases enumeration query, and reports the given server name.
+    /// Creates a mock IDbProvider with the given server and database name.
     /// </summary>
-    private static IDbProvider CreateMasterProvider(string serverName, params string[] databaseNames)
+    private static IDbProvider CreateProvider(string serverName, string databaseName = "master")
     {
         var provider = Substitute.For<IDbProvider>();
         provider.ServerName.Returns(serverName);
-        provider.DatabaseName.Returns("master");
-
-        var table = new DataTable();
-        table.Columns.Add("name", typeof(string));
-        foreach (var db in databaseNames)
-            table.Rows.Add(db);
-
-        provider.ExecuteQueryAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(table));
-
+        provider.DatabaseName.Returns(databaseName);
         return provider;
     }
 
     /// <summary>
-    /// Creates a mock IDbProvider for a specific database (used per-DB connections).
+    /// Creates a mock IProviderBundle that returns the given database names
+    /// from ServerQueries.EnumerateDatabasesAsync, and creates mock providers per database.
     /// </summary>
-    private static IDbProvider CreateDbProvider(string dbName)
-    {
-        var provider = Substitute.For<IDbProvider>();
-        provider.DatabaseName.Returns(dbName);
-        provider.ServerName.Returns("test-server");
-        return provider;
-    }
-
-    /// <summary>
-    /// Builds a provider factory that returns the master provider for master connections
-    /// and per-database providers for each database name.
-    /// </summary>
-    private static Func<string, CancellationToken, Task<IDbProvider>> CreateFactory(
-        IDbProvider masterProvider,
+    private static IProviderBundle CreateBundle(
+        string serverName,
+        string[] databaseNames,
         Dictionary<string, IDbProvider>? dbProviders = null)
     {
-        return (connectionString, ct) =>
-        {
-            // Parse Initial Catalog from the connection string to decide which provider to return
-            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
-            var catalog = builder.InitialCatalog;
+        var masterProvider = CreateProvider(serverName, "master");
 
-            if (catalog == "master" || string.IsNullOrEmpty(catalog))
-                return Task.FromResult(masterProvider);
+        var factory = Substitute.For<IDbProviderFactory>();
+        factory.ProviderType.Returns("sqlserver");
+        factory.DefaultSystemDatabase.Returns("master");
 
-            if (dbProviders is not null && dbProviders.TryGetValue(catalog, out var dbProvider))
-                return Task.FromResult(dbProvider);
+        factory.SetDatabase(Arg.Any<string>(), Arg.Any<string>())
+            .Returns(callInfo => $"Server={serverName};Database={callInfo.ArgAt<string>(1)}");
 
-            // Return a generic mock for any unspecified database
-            return Task.FromResult(CreateDbProvider(catalog));
-        };
+        factory.CreateAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var connStr = callInfo.ArgAt<string>(0);
+                var match = System.Text.RegularExpressions.Regex.Match(connStr, @"Database=([^;]+)");
+                var catalog = match.Success ? match.Groups[1].Value : "master";
+
+                if (string.Equals(catalog, "master", StringComparison.OrdinalIgnoreCase))
+                    return Task.FromResult(masterProvider);
+
+                if (dbProviders?.TryGetValue(catalog, out var p) == true)
+                    return Task.FromResult(p);
+
+                return Task.FromResult(CreateProvider(serverName, catalog));
+            });
+
+        var serverQueries = Substitute.For<IServerQueries>();
+        serverQueries.EnumerateDatabasesAsync(Arg.Any<IDbProvider>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(databaseNames.ToList()));
+
+        var bundle = Substitute.For<IProviderBundle>();
+        bundle.ProviderType.Returns("sqlserver");
+        bundle.Factory.Returns(factory);
+        bundle.ServerQueries.Returns(serverQueries);
+        bundle.CatalogQueries.Returns(Substitute.For<ICatalogQueries>());
+        bundle.PerformanceQueries.Returns(Substitute.For<IPerformanceQueries>());
+
+        return bundle;
     }
 
     /// <summary>
-    /// Creates a factory that throws for a specific database name (simulates connection failure).
+    /// Creates a bundle whose factory throws when connecting to a specific database.
     /// </summary>
-    private static Func<string, CancellationToken, Task<IDbProvider>> CreateFactoryWithFailure(
-        IDbProvider masterProvider,
+    private static IProviderBundle CreateBundleWithFailure(
+        string serverName,
+        string[] databaseNames,
         string failingDatabase)
     {
-        return (connectionString, ct) =>
-        {
-            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
-            var catalog = builder.InitialCatalog;
+        var masterProvider = CreateProvider(serverName, "master");
 
-            if (catalog == "master")
-                return Task.FromResult(masterProvider);
+        var factory = Substitute.For<IDbProviderFactory>();
+        factory.ProviderType.Returns("sqlserver");
+        factory.DefaultSystemDatabase.Returns("master");
 
-            if (string.Equals(catalog, failingDatabase, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Cannot connect to database '{catalog}'");
+        factory.SetDatabase(Arg.Any<string>(), Arg.Any<string>())
+            .Returns(callInfo => $"Server={serverName};Database={callInfo.ArgAt<string>(1)}");
 
-            return Task.FromResult(CreateDbProvider(catalog));
-        };
+        factory.CreateAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var connStr = callInfo.ArgAt<string>(0);
+                var match = System.Text.RegularExpressions.Regex.Match(connStr, @"Database=([^;]+)");
+                var catalog = match.Success ? match.Groups[1].Value : "master";
+
+                if (string.Equals(catalog, failingDatabase, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Cannot connect to database '{catalog}'");
+
+                if (string.Equals(catalog, "master", StringComparison.OrdinalIgnoreCase))
+                    return Task.FromResult(masterProvider);
+
+                return Task.FromResult(CreateProvider(serverName, catalog));
+            });
+
+        var serverQueries = Substitute.For<IServerQueries>();
+        serverQueries.EnumerateDatabasesAsync(Arg.Any<IDbProvider>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(databaseNames.ToList()));
+
+        var bundle = Substitute.For<IProviderBundle>();
+        bundle.ProviderType.Returns("sqlserver");
+        bundle.Factory.Returns(factory);
+        bundle.ServerQueries.Returns(serverQueries);
+        bundle.CatalogQueries.Returns(Substitute.For<ICatalogQueries>());
+        bundle.PerformanceQueries.Returns(Substitute.For<IPerformanceQueries>());
+
+        return bundle;
     }
 
-    private static IAnalyzer CreateMockAnalyzer(string name, Action<IDbProvider, AnalysisResult>? onAnalyze = null)
+    private static IAnalyzer CreateMockAnalyzer(string name, Action<AnalysisContext, AnalysisResult>? onAnalyze = null)
     {
         var analyzer = Substitute.For<IAnalyzer>();
         analyzer.Name.Returns(name);
-        analyzer.AnalyzeAsync(Arg.Any<IDbProvider>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>())
+        analyzer.AnalyzeAsync(Arg.Any<AnalysisContext>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>())
             .Returns(callInfo =>
             {
-                onAnalyze?.Invoke(callInfo.ArgAt<IDbProvider>(0), callInfo.ArgAt<AnalysisResult>(1));
+                onAnalyze?.Invoke(callInfo.ArgAt<AnalysisContext>(0), callInfo.ArgAt<AnalysisResult>(1));
                 return Task.CompletedTask;
             });
         return analyzer;
@@ -111,9 +137,8 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_EnumeratesDatabases_AndReturnsServerModeResult()
     {
-        var master = CreateMasterProvider("myserver", "DbA", "DbB");
-        var factory = CreateFactory(master);
-        var orchestrator = new ServerAnalysisOrchestrator([], factory);
+        var bundle = CreateBundle("myserver", ["DbA", "DbB"]);
+        var orchestrator = new ServerAnalysisOrchestrator([], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=myserver;Initial Catalog=master",
@@ -128,9 +153,8 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_NoDatabases_ReturnsEmptyResult()
     {
-        var master = CreateMasterProvider("myserver"); // no databases
-        var factory = CreateFactory(master);
-        var orchestrator = new ServerAnalysisOrchestrator([], factory);
+        var bundle = CreateBundle("myserver", []);
+        var orchestrator = new ServerAnalysisOrchestrator([], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=myserver;Initial Catalog=master",
@@ -144,11 +168,10 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_ConnectionFailure_LandsInFailedDatabases()
     {
-        var master = CreateMasterProvider("myserver", "GoodDb", "BadDb", "GoodDb2");
-        var factory = CreateFactoryWithFailure(master, "BadDb");
+        var bundle = CreateBundleWithFailure("myserver", ["GoodDb", "BadDb", "GoodDb2"], "BadDb");
 
         var schemaAnalyzer = CreateMockAnalyzer("schema");
-        var orchestrator = new ServerAnalysisOrchestrator([schemaAnalyzer], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([schemaAnalyzer], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=myserver;Initial Catalog=master",
@@ -163,44 +186,41 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_FiltersAnalyzersByName()
     {
-        var master = CreateMasterProvider("srv", "Db1");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Db1"]);
 
         var schema = CreateMockAnalyzer("Schema");
         var profiling = CreateMockAnalyzer("Profiling");
-        var orchestrator = new ServerAnalysisOrchestrator([schema, profiling], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([schema, profiling], bundle);
 
         await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
             ["schema"]); // Only request schema, not profiling
 
-        await schema.Received(1).AnalyzeAsync(Arg.Any<IDbProvider>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>());
-        await profiling.DidNotReceive().AnalyzeAsync(Arg.Any<IDbProvider>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>());
+        await schema.Received(1).AnalyzeAsync(Arg.Any<AnalysisContext>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>());
+        await profiling.DidNotReceive().AnalyzeAsync(Arg.Any<AnalysisContext>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task RunAsync_AnalyzerNameMatching_IsCaseInsensitive()
     {
-        var master = CreateMasterProvider("srv", "Db1");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Db1"]);
 
         var schema = CreateMockAnalyzer("Schema"); // PascalCase
-        var orchestrator = new ServerAnalysisOrchestrator([schema], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([schema], bundle);
 
         await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
             ["SCHEMA"]); // UPPER CASE
 
-        await schema.Received(1).AnalyzeAsync(Arg.Any<IDbProvider>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>());
+        await schema.Received(1).AnalyzeAsync(Arg.Any<AnalysisContext>(), Arg.Any<AnalysisResult>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task RunAsync_MergesSchemaAcrossDatabases_WithDatabaseNameStamped()
     {
-        var master = CreateMasterProvider("srv", "Sales", "HR");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Sales", "HR"]);
 
-        var schema = CreateMockAnalyzer("schema", (provider, result) =>
+        var schema = CreateMockAnalyzer("schema", (_, result) =>
         {
             result.Schema = new DatabaseSchema
             {
@@ -208,7 +228,7 @@ public class ServerAnalysisOrchestratorTests
                 Views = [new ViewInfo("dbo", "vOrders", "SELECT 1", [])]
             };
         });
-        var orchestrator = new ServerAnalysisOrchestrator([schema], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([schema], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -228,8 +248,7 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_MergesProfiles_WithDatabaseNameStamped()
     {
-        var master = CreateMasterProvider("srv", "App");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["App"]);
 
         var profiling = CreateMockAnalyzer("profiling", (_, result) =>
         {
@@ -238,7 +257,7 @@ public class ServerAnalysisOrchestratorTests
                 new TableProfile { SchemaName = "dbo", TableName = "Users", RowCount = 100 }
             ];
         });
-        var orchestrator = new ServerAnalysisOrchestrator([profiling], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([profiling], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -253,8 +272,7 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_MergesExplicitRelationships_WithDatabaseNameStamped()
     {
-        var master = CreateMasterProvider("srv", "Shop");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Shop"]);
 
         var rel = CreateMockAnalyzer("relationships", (_, result) =>
         {
@@ -266,7 +284,7 @@ public class ServerAnalysisOrchestratorTests
                 ]
             };
         });
-        var orchestrator = new ServerAnalysisOrchestrator([rel], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([rel], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -280,8 +298,7 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_MergesImplicitRelationships_WithDatabaseNameStamped()
     {
-        var master = CreateMasterProvider("srv", "Db1");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Db1"]);
 
         var rel = CreateMockAnalyzer("relationships", (_, result) =>
         {
@@ -293,7 +310,7 @@ public class ServerAnalysisOrchestratorTests
                 ]
             };
         });
-        var orchestrator = new ServerAnalysisOrchestrator([rel], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([rel], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -307,8 +324,7 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_MergesDependencies_QualifiesNames()
     {
-        var master = CreateMasterProvider("srv", "App");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["App"]);
 
         var rel = CreateMockAnalyzer("relationships", (_, result) =>
         {
@@ -320,14 +336,14 @@ public class ServerAnalysisOrchestratorTests
                     {
                         SchemaName = "dbo",
                         TableName = "Orders",
-                        DependsOn = ["dbo.Customers"],           // 2-part → should become 3-part
-                        ReferencedBy = ["App.dbo.LineItems"],    // 3-part → stays as-is
+                        DependsOn = ["dbo.Customers"],           // 2-part -> should become 3-part
+                        ReferencedBy = ["App.dbo.LineItems"],    // 3-part -> stays as-is
                         TransitiveImpact = ["dbo.Invoices"]
                     }
                 ]
             };
         });
-        var orchestrator = new ServerAnalysisOrchestrator([rel], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([rel], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -343,12 +359,18 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_ResolvesCrossDatabaseReferences()
     {
-        var master = CreateMasterProvider("srv", "Sales", "Shared");
-        var factory = CreateFactory(master);
-
-        var rel = CreateMockAnalyzer("relationships", (provider, result) =>
+        var salesProvider = CreateProvider("srv", "Sales");
+        var sharedProvider = CreateProvider("srv", "Shared");
+        var dbProviders = new Dictionary<string, IDbProvider>
         {
-            var dbName = provider.DatabaseName;
+            ["Sales"] = salesProvider,
+            ["Shared"] = sharedProvider
+        };
+        var bundle = CreateBundle("srv", ["Sales", "Shared"], dbProviders);
+
+        var rel = CreateMockAnalyzer("relationships", (context, result) =>
+        {
+            var dbName = context.Provider.DatabaseName;
             if (dbName == "Sales")
             {
                 result.Relationships = new RelationshipMap
@@ -370,18 +392,7 @@ public class ServerAnalysisOrchestratorTests
             }
         });
 
-        // Provide distinct providers per database so the analyzer sees the correct DatabaseName
-        var salesProvider = CreateDbProvider("Sales");
-        var sharedProvider = CreateDbProvider("Shared");
-        var dbProviders = new Dictionary<string, IDbProvider>
-        {
-            ["Sales"] = salesProvider,
-            ["Shared"] = sharedProvider
-        };
-        var masterProvider = CreateMasterProvider("srv", "Sales", "Shared");
-        var factoryWithProviders = CreateFactory(masterProvider, dbProviders);
-
-        var orchestrator = new ServerAnalysisOrchestrator([rel], factoryWithProviders);
+        var orchestrator = new ServerAnalysisOrchestrator([rel], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -395,9 +406,8 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_ProgressCallbackIsCalled()
     {
-        var master = CreateMasterProvider("srv", "Db1", "Db2");
-        var factory = CreateFactory(master);
-        var orchestrator = new ServerAnalysisOrchestrator([], factory);
+        var bundle = CreateBundle("srv", ["Db1", "Db2"]);
+        var orchestrator = new ServerAnalysisOrchestrator([], bundle);
 
         var progressCalls = new List<(string Step, int Current, int Total, string Status)>();
 
@@ -428,9 +438,8 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_Cancellation_ThrowsOperationCanceled()
     {
-        var master = CreateMasterProvider("srv", "Db1", "Db2");
-        var factory = CreateFactory(master);
-        var orchestrator = new ServerAnalysisOrchestrator([], factory);
+        var bundle = CreateBundle("srv", ["Db1", "Db2"]);
+        var orchestrator = new ServerAnalysisOrchestrator([], bundle);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -443,65 +452,41 @@ public class ServerAnalysisOrchestratorTests
     }
 
     [Fact]
-    public async Task RunAsync_ConnectionString_SetsMasterForEnumeration()
+    public async Task RunAsync_UsesFactorySetDatabase_ForSystemDb()
     {
-        // Verify the orchestrator connects to master for enumeration,
-        // regardless of what Initial Catalog is in the input connection string
-        string? capturedConnectionString = null;
-        var master = CreateMasterProvider("srv", "MyDb");
+        // Verify the orchestrator calls Factory.SetDatabase to switch to the system database
+        var bundle = CreateBundle("srv", ["MyDb"]);
+        var orchestrator = new ServerAnalysisOrchestrator([], bundle);
 
-        Func<string, CancellationToken, Task<IDbProvider>> factory = (connStr, ct) =>
-        {
-            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connStr);
-            if (builder.InitialCatalog == "master")
-            {
-                capturedConnectionString = connStr;
-                return Task.FromResult(master);
-            }
-            return Task.FromResult(CreateDbProvider(builder.InitialCatalog));
-        };
-
-        var orchestrator = new ServerAnalysisOrchestrator([], factory);
         await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=SomeOtherDb",
             ["schema"]);
 
-        Assert.NotNull(capturedConnectionString);
-        var parsed = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(capturedConnectionString!);
-        Assert.Equal("master", parsed.InitialCatalog);
+        bundle.Factory.Received().SetDatabase(
+            "Server=srv;Initial Catalog=SomeOtherDb",
+            "master");
     }
 
     [Fact]
-    public async Task RunAsync_PerDatabaseConnection_SetsCorrectInitialCatalog()
+    public async Task RunAsync_UsesFactorySetDatabase_ForEachDatabase()
     {
-        var master = CreateMasterProvider("srv", "Alpha", "Beta");
-        var capturedCatalogs = new List<string>();
+        var bundle = CreateBundle("srv", ["Alpha", "Beta"]);
+        var orchestrator = new ServerAnalysisOrchestrator([], bundle);
 
-        Func<string, CancellationToken, Task<IDbProvider>> factory = (connStr, ct) =>
-        {
-            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connStr);
-            capturedCatalogs.Add(builder.InitialCatalog);
-
-            if (builder.InitialCatalog == "master")
-                return Task.FromResult(master);
-
-            return Task.FromResult(CreateDbProvider(builder.InitialCatalog));
-        };
-
-        var orchestrator = new ServerAnalysisOrchestrator([], factory);
         await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
             ["schema"]);
 
-        // master + Alpha + Beta
-        Assert.Equal(["master", "Alpha", "Beta"], capturedCatalogs);
+        // SetDatabase should have been called for master + Alpha + Beta
+        bundle.Factory.Received().SetDatabase(Arg.Any<string>(), "master");
+        bundle.Factory.Received().SetDatabase(Arg.Any<string>(), "Alpha");
+        bundle.Factory.Received().SetDatabase(Arg.Any<string>(), "Beta");
     }
 
     [Fact]
     public async Task RunAsync_MergesQualityIssues()
     {
-        var master = CreateMasterProvider("srv", "Db1");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Db1"]);
 
         var quality = CreateMockAnalyzer("quality", (_, result) =>
         {
@@ -510,7 +495,7 @@ public class ServerAnalysisOrchestratorTests
                 new QualityIssue("Naming", IssueSeverity.Warning, "dbo.Foo", "Bad name", "Rename it")
             ];
         });
-        var orchestrator = new ServerAnalysisOrchestrator([quality], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([quality], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -523,8 +508,7 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_MergesUsageAnalysis()
     {
-        var master = CreateMasterProvider("srv", "Db1");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Db1"]);
 
         var usage = CreateMockAnalyzer("usage", (_, result) =>
         {
@@ -534,7 +518,7 @@ public class ServerAnalysisOrchestratorTests
                 ServerUptimeDays = 50
             };
         });
-        var orchestrator = new ServerAnalysisOrchestrator([usage], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([usage], bundle);
 
         var result = await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
@@ -547,13 +531,12 @@ public class ServerAnalysisOrchestratorTests
     [Fact]
     public async Task RunAsync_MultipleAnalyzers_AllRunPerDatabase()
     {
-        var master = CreateMasterProvider("srv", "Db1");
-        var factory = CreateFactory(master);
+        var bundle = CreateBundle("srv", ["Db1"]);
 
         var callOrder = new List<string>();
         var schema = CreateMockAnalyzer("schema", (_, _) => callOrder.Add("schema"));
         var profiling = CreateMockAnalyzer("profiling", (_, _) => callOrder.Add("profiling"));
-        var orchestrator = new ServerAnalysisOrchestrator([schema, profiling], factory);
+        var orchestrator = new ServerAnalysisOrchestrator([schema, profiling], bundle);
 
         await orchestrator.RunAsync(
             "Server=srv;Initial Catalog=master",
