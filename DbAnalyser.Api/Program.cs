@@ -51,14 +51,17 @@ try
         options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
     });
 
-    // CORS for Vite dev server
+    // CORS — allow Vite dev server (localhost:5173) and packaged Electron app (null origin from file://)
     builder.Services.AddCors(options =>
     {
         options.AddDefaultPolicy(policy =>
         {
-            policy.WithOrigins("http://localhost:5173")
-                  .WithHeaders("Content-Type", "Authorization")
-                  .WithMethods("GET", "POST")
+            policy.SetIsOriginAllowed(origin =>
+                      origin == "http://localhost:5173" ||  // Vite dev server
+                      origin == "null" ||                   // Electron packaged (file:// origin)
+                      origin == "file://")                  // Electron packaged (alternative)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
                   .AllowCredentials();
         });
     });

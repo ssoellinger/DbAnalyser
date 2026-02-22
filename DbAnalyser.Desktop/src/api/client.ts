@@ -53,7 +53,7 @@ export const api = {
 
 export function createSignalRConnection() {
   const connection = new signalR.HubConnectionBuilder()
-    .withUrl(`${API_BASE}/hubs/analysis`)
+    .withUrl(`${API_BASE}/hubs/analysis`, { withCredentials: false })
     .withAutomaticReconnect()
     .build();
 

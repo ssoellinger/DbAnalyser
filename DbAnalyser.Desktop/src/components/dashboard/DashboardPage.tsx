@@ -95,8 +95,10 @@ export function DashboardPage() {
     return c;
   }, [result]);
 
+  const progress = useStore((s) => s.progress);
   const schemaLoading = schemaStatus === 'loading' || schemaStatus === 'idle';
   const relsLoading = relsStatus === 'loading' || relsStatus === 'idle';
+  const isLoading = schemaLoading || relsLoading;
 
   return (
     <div className="space-y-6">
@@ -110,6 +112,31 @@ export function DashboardPage() {
           </p>
         )}
       </div>
+
+      {/* Loading progress (especially useful in server mode) */}
+      {isLoading && (
+        <div className="bg-bg-card border border-border rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-sm text-text-primary font-medium">
+              {progress?.step ?? (schemaLoading ? 'Loading schema...' : 'Loading relationships...')}
+            </p>
+          </div>
+          {progress && progress.total > 0 && (
+            <>
+              <div className="w-full bg-bg-primary border border-border rounded-full h-2 overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(Math.min(progress.percentage, 99), 2)}%` }}
+                />
+              </div>
+              <p className="text-xs text-text-muted">
+                {progress.current} of {progress.total} &middot; {Math.min(Math.round(progress.percentage), 99)}%
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Server mode: database badges */}
       {isServerMode && result?.databases && result.databases.length > 0 && (
