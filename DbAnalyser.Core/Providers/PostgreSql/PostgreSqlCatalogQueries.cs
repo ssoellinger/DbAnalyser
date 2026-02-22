@@ -352,28 +352,31 @@ public class PostgreSqlCatalogQueries : ICatalogQueries
         )).ToList();
     }
 
+    private static string EscapeIdentifier(string identifier) =>
+        "\"" + identifier.Replace("\"", "\"\"") + "\"";
+
     public string BuildCountSql(string schema, string table) =>
-        $"SELECT COUNT(*) FROM \"{schema}\".\"{table}\"";
+        $"SELECT COUNT(*) FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)}";
 
     public string BuildColumnProfileSql(string schema, string table, string column, bool canMinMax) =>
         canMinMax
             ? $"""
                SELECT
-                   SUM(CASE WHEN "{column}" IS NULL THEN 1 ELSE 0 END) AS "NullCount",
-                   COUNT(DISTINCT "{column}") AS "DistinctCount",
-                   CAST(MIN("{column}") AS VARCHAR(500)) AS "MinVal",
-                   CAST(MAX("{column}") AS VARCHAR(500)) AS "MaxVal"
-               FROM "{schema}"."{table}"
+                   SUM(CASE WHEN {EscapeIdentifier(column)} IS NULL THEN 1 ELSE 0 END) AS "NullCount",
+                   COUNT(DISTINCT {EscapeIdentifier(column)}) AS "DistinctCount",
+                   CAST(MIN({EscapeIdentifier(column)}) AS VARCHAR(500)) AS "MinVal",
+                   CAST(MAX({EscapeIdentifier(column)}) AS VARCHAR(500)) AS "MaxVal"
+               FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)}
                """
             : $"""
                SELECT
-                   SUM(CASE WHEN "{column}" IS NULL THEN 1 ELSE 0 END) AS "NullCount",
-                   COUNT(DISTINCT "{column}") AS "DistinctCount",
+                   SUM(CASE WHEN {EscapeIdentifier(column)} IS NULL THEN 1 ELSE 0 END) AS "NullCount",
+                   COUNT(DISTINCT {EscapeIdentifier(column)}) AS "DistinctCount",
                    NULL AS "MinVal",
                    NULL AS "MaxVal"
-               FROM "{schema}"."{table}"
+               FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)}
                """;
 
     public string BuildNullCountSql(string schema, string table, string column) =>
-        $"SELECT COUNT(*) FROM \"{schema}\".\"{table}\" WHERE \"{column}\" IS NULL";
+        $"SELECT COUNT(*) FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)} WHERE {EscapeIdentifier(column)} IS NULL";
 }

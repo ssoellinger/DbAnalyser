@@ -10,5 +10,7 @@ interface Window {
       warn: (...args: unknown[]) => void;
       error: (...args: unknown[]) => void;
     };
+    encrypt: (plaintext: string) => Promise<string | null>;
+    decrypt: (cipherBase64: string) => Promise<string | null>;
   };
 }

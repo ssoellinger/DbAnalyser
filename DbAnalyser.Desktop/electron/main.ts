@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -101,6 +101,8 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
     },
   });
 
@@ -124,6 +126,17 @@ ipcMain.on('log-message', (_event, level: string, ...args: unknown[]) => {
     case 'warn': log.warn(message); break;
     default: log.info(message); break;
   }
+});
+
+// IPC handlers for encrypting/decrypting credentials via OS credential store
+ipcMain.handle('safe-storage-encrypt', (_event, plaintext: string) => {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  return safeStorage.encryptString(plaintext).toString('base64');
+});
+
+ipcMain.handle('safe-storage-decrypt', (_event, cipherBase64: string) => {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  return safeStorage.decryptString(Buffer.from(cipherBase64, 'base64'));
 });
 
 app.whenReady().then(async () => {

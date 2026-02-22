@@ -3,11 +3,15 @@ import type { HubConnection } from '@microsoft/signalr';
 import type { AnalysisResult, AnalysisProgress, AnalyzerName, AnalyzerStatus } from '../api/types';
 import { api, createSignalRConnection, onProgress } from '../api/client';
 
-interface ConnectionHistoryEntry {
-  connectionString: string;
-  databaseName: string;
+export interface ConnectionHistoryEntry {
+  server: string;
+  port: string;
+  database: string;
+  authMode: 'windows' | 'sql';
+  providerType: string;
   timestamp: string;
-  providerType?: string;
+  encryptedUsername?: string;
+  encryptedPassword?: string;
 }
 
 const ALL_ANALYZERS: AnalyzerName[] = ['schema', 'profiling', 'relationships', 'quality', 'usage', 'indexing'];
@@ -69,7 +73,7 @@ interface AppState {
   disconnect: () => void;
   toggleSidebar: () => void;
   toggleSearch: () => void;
-  addToHistory: (connectionString: string, databaseName: string, providerType?: string) => void;
+  addToHistory: (fields: { server: string; port: string; database: string; authMode: 'windows' | 'sql'; username: string; password: string }, providerType: string) => Promise<void>;
   loadHistory: () => void;
 }
 
@@ -241,15 +245,30 @@ export const useStore = create<AppState>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
 
-  addToHistory: (connectionString, databaseName, providerType) => {
+  addToHistory: async (fields, providerType) => {
+    // Encrypt credentials via Electron's safeStorage (OS credential store)
+    let encryptedUsername: string | undefined;
+    let encryptedPassword: string | undefined;
+    if (fields.username) {
+      encryptedUsername = (await window.electronAPI?.encrypt(fields.username)) ?? undefined;
+    }
+    if (fields.password) {
+      encryptedPassword = (await window.electronAPI?.encrypt(fields.password)) ?? undefined;
+    }
+
     const entry: ConnectionHistoryEntry = {
-      connectionString,
-      databaseName,
-      timestamp: new Date().toISOString(),
+      server: fields.server,
+      port: fields.port,
+      database: fields.database,
+      authMode: fields.authMode,
       providerType,
+      timestamp: new Date().toISOString(),
+      encryptedUsername,
+      encryptedPassword,
     };
+    const dedupeKey = `${entry.server}|${entry.database}|${entry.providerType}`;
     const history = [entry, ...get().connectionHistory.filter(
-      (h) => h.connectionString !== connectionString
+      (h) => `${h.server}|${h.database}|${h.providerType}` !== dedupeKey
     )].slice(0, 10);
     set({ connectionHistory: history });
     try {
@@ -260,7 +279,15 @@ export const useStore = create<AppState>((set, get) => ({
   loadHistory: () => {
     try {
       const raw = localStorage.getItem('dbanalyser-history');
-      if (raw) set({ connectionHistory: JSON.parse(raw) });
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>[];
+        // Migration: discard old-format entries that stored connectionString
+        const migrated = parsed.filter((h) => !('connectionString' in h)) as unknown as ConnectionHistoryEntry[];
+        if (migrated.length !== parsed.length) {
+          localStorage.setItem('dbanalyser-history', JSON.stringify(migrated));
+        }
+        set({ connectionHistory: migrated });
+      }
     } catch { /* ignore */ }
   },
 }));

@@ -21,9 +21,9 @@ public static class AnalysisEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to connect");
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.BadRequest(new { error = "Connection failed. Check your connection string and credentials." });
             }
-        });
+        }).RequireRateLimiting("connect");
 
         group.MapPost("/analysis/start", async (StartAnalysisRequest request, AnalysisSessionService sessionService, ILogger<AnalysisSessionService> logger, CancellationToken ct) =>
         {
@@ -41,7 +41,7 @@ public static class AnalysisEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Analysis failed for session {SessionId}", request.SessionId);
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.BadRequest(new { error = "Analysis failed. Please try again." });
             }
         });
 
@@ -68,7 +68,7 @@ public static class AnalysisEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Analyzer {Analyzer} failed for session {SessionId}", analyzer, sessionId);
-                return Results.BadRequest(new { error = ex.Message });
+                return Results.BadRequest(new { error = "Analysis failed. Please try again." });
             }
         });
 

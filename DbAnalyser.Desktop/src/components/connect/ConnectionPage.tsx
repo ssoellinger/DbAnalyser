@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../api/client';
 import { ConnectionForm, DEFAULT_FIELDS, parseConnectionString, buildConnectionString } from './ConnectionForm';
 import { ConnectionHistory } from './ConnectionHistory';
 import type { ConnectionFields } from './ConnectionForm';
+import type { ConnectionHistoryEntry } from '../../hooks/useStore';
 
 const PROVIDER_LABELS: Record<string, string> = {
   sqlserver: 'SQL Server',
@@ -27,28 +28,31 @@ export function ConnectionPage() {
       .catch(() => { /* API not ready yet — keep default */ });
   }, []);
 
-  const store = useStore();
-
-  const handleSelectHistory = (connectionString: string, historyProviderType?: string) => {
-    const pt = historyProviderType ?? 'sqlserver';
-    setFields(parseConnectionString(connectionString, pt));
-    setRawConnectionString(connectionString);
-    setRawMode(false);
-    if (historyProviderType) setProviderType(historyProviderType);
-  };
-
-  const handleConnectHistory = useCallback(async (connectionString: string, historyProviderType?: string) => {
-    const pt = historyProviderType ?? 'sqlserver';
-    store.setConnecting(true);
-    try {
-      const { sessionId, databaseName, isServerMode, serverName } = await api.connect(connectionString, pt);
-      await store.initSignalR();
-      store.setConnected(sessionId, databaseName, isServerMode, serverName);
-      store.addToHistory(connectionString, databaseName ?? serverName ?? 'Server', pt);
-    } catch (err) {
-      store.setConnectionError(err instanceof Error ? err.message : 'Connection failed');
+  const handleSelectHistory = async (entry: ConnectionHistoryEntry) => {
+    // Decrypt credentials from OS credential store
+    let username = '';
+    let password = '';
+    if (entry.encryptedUsername) {
+      username = (await window.electronAPI?.decrypt(entry.encryptedUsername)) ?? '';
     }
-  }, [store]);
+    if (entry.encryptedPassword) {
+      password = (await window.electronAPI?.decrypt(entry.encryptedPassword)) ?? '';
+    }
+
+    const restoredFields: ConnectionFields = {
+      ...DEFAULT_FIELDS,
+      server: entry.server,
+      port: entry.port,
+      database: entry.database,
+      authMode: entry.authMode,
+      username,
+      password,
+    };
+    setFields(restoredFields);
+    setRawConnectionString(buildConnectionString(restoredFields, entry.providerType));
+    setRawMode(false);
+    setProviderType(entry.providerType);
+  };
 
   const handleToggleMode = () => {
     if (rawMode) {
@@ -114,7 +118,6 @@ export function ConnectionPage() {
 
         <ConnectionHistory
           onSelect={handleSelectHistory}
-          onConnect={handleConnectHistory}
         />
       </div>
 

@@ -339,8 +339,8 @@ public class SqlServerCatalogQueries : ICatalogQueries
                     WHERE step_id = 0
                     GROUP BY job_id
                 ) jh ON j.job_id = jh.job_id
-                WHERE js.database_name = '{databaseName}'
-                   OR js.command LIKE '%{databaseName}%'
+                WHERE js.database_name = '{databaseName.Replace("'", "''")}'
+                   OR js.command LIKE '%{databaseName.Replace("'", "''").Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]")}%'
                 ORDER BY j.name, js.step_id
                 """, ct);
 
@@ -431,28 +431,31 @@ public class SqlServerCatalogQueries : ICatalogQueries
         )).ToList();
     }
 
+    private static string EscapeIdentifier(string identifier) =>
+        "[" + identifier.Replace("]", "]]") + "]";
+
     public string BuildCountSql(string schema, string table) =>
-        $"SELECT COUNT(*) FROM [{schema}].[{table}]";
+        $"SELECT COUNT(*) FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)}";
 
     public string BuildColumnProfileSql(string schema, string table, string column, bool canMinMax) =>
         canMinMax
             ? $"""
                SELECT
-                   SUM(CASE WHEN [{column}] IS NULL THEN 1 ELSE 0 END) AS NullCount,
-                   COUNT(DISTINCT [{column}]) AS DistinctCount,
-                   CAST(MIN([{column}]) AS NVARCHAR(500)) AS MinVal,
-                   CAST(MAX([{column}]) AS NVARCHAR(500)) AS MaxVal
-               FROM [{schema}].[{table}]
+                   SUM(CASE WHEN {EscapeIdentifier(column)} IS NULL THEN 1 ELSE 0 END) AS NullCount,
+                   COUNT(DISTINCT {EscapeIdentifier(column)}) AS DistinctCount,
+                   CAST(MIN({EscapeIdentifier(column)}) AS NVARCHAR(500)) AS MinVal,
+                   CAST(MAX({EscapeIdentifier(column)}) AS NVARCHAR(500)) AS MaxVal
+               FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)}
                """
             : $"""
                SELECT
-                   SUM(CASE WHEN [{column}] IS NULL THEN 1 ELSE 0 END) AS NullCount,
-                   COUNT(DISTINCT [{column}]) AS DistinctCount,
+                   SUM(CASE WHEN {EscapeIdentifier(column)} IS NULL THEN 1 ELSE 0 END) AS NullCount,
+                   COUNT(DISTINCT {EscapeIdentifier(column)}) AS DistinctCount,
                    NULL AS MinVal,
                    NULL AS MaxVal
-               FROM [{schema}].[{table}]
+               FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)}
                """;
 
     public string BuildNullCountSql(string schema, string table, string column) =>
-        $"SELECT COUNT(*) FROM [{schema}].[{table}] WHERE [{column}] IS NULL";
+        $"SELECT COUNT(*) FROM {EscapeIdentifier(schema)}.{EscapeIdentifier(table)} WHERE {EscapeIdentifier(column)} IS NULL";
 }

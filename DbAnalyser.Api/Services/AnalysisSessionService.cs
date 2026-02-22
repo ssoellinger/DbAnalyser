@@ -17,6 +17,9 @@ public class AnalysisSessionService : IAsyncDisposable
     private readonly ILogger<AnalysisSessionService> _logger;
     private readonly ProviderRegistry _registry;
     private readonly ConcurrentDictionary<string, SessionState> _sessions = new();
+    private readonly Timer _cleanupTimer;
+    private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromMinutes(30);
 
     public AnalysisSessionService(
         IServiceProvider serviceProvider,
@@ -28,6 +31,25 @@ public class AnalysisSessionService : IAsyncDisposable
         _hubContext = hubContext;
         _logger = logger;
         _registry = registry;
+        _cleanupTimer = new Timer(_ => CleanupIdleSessions(), null, CleanupInterval, CleanupInterval);
+    }
+
+    private void CleanupIdleSessions()
+    {
+        var cutoff = DateTime.UtcNow - SessionIdleTimeout;
+        foreach (var (id, session) in _sessions)
+        {
+            if (session.LastActivityUtc < cutoff && _sessions.TryRemove(id, out var removed))
+            {
+                _logger.LogInformation("Cleaning up idle session {SessionId} (last activity: {LastActivity})",
+                    id, removed.LastActivityUtc);
+                removed.Provider.DisposeAsync().AsTask().ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                        _logger.LogWarning(t.Exception, "Error disposing idle session {SessionId}", id);
+                });
+            }
+        }
     }
 
     public async Task<ConnectResult> ConnectAsync(string connectionString, string providerType = "sqlserver", CancellationToken ct = default)
@@ -67,6 +89,7 @@ public class AnalysisSessionService : IAsyncDisposable
         if (!_sessions.TryGetValue(sessionId, out var session))
             throw new InvalidOperationException($"Session '{sessionId}' not found. Connect first.");
 
+        session.LastActivityUtc = DateTime.UtcNow;
         var analyzerNames = analyzers ?? ["schema", "profiling", "relationships", "quality", "usage"];
 
         _logger.LogInformation("Running analysis for session {SessionId}, analyzers: [{Analyzers}]",
@@ -187,6 +210,7 @@ public class AnalysisSessionService : IAsyncDisposable
         if (!_sessions.TryGetValue(sessionId, out var session))
             throw new InvalidOperationException($"Session '{sessionId}' not found. Connect first.");
 
+        session.LastActivityUtc = DateTime.UtcNow;
         analyzerName = analyzerName.ToLowerInvariant();
         if (!AnalyzerDependencies.ContainsKey(analyzerName))
             throw new ArgumentException($"Unknown analyzer: '{analyzerName}'");
@@ -391,7 +415,9 @@ public class AnalysisSessionService : IAsyncDisposable
 
     public AnalysisResult? GetResult(string sessionId)
     {
-        return _sessions.TryGetValue(sessionId, out var session) ? session.LastResult : null;
+        if (!_sessions.TryGetValue(sessionId, out var session)) return null;
+        session.LastActivityUtc = DateTime.UtcNow;
+        return session.LastResult;
     }
 
     public async Task DisconnectAsync(string sessionId)
@@ -476,6 +502,7 @@ public class AnalysisSessionService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _cleanupTimer.DisposeAsync();
         foreach (var session in _sessions.Values)
         {
             await session.Provider.DisposeAsync();
@@ -491,6 +518,7 @@ public class AnalysisSessionService : IAsyncDisposable
         public SemaphoreSlim Lock { get; } = new(1, 1);
         public bool IsServerMode { get; init; }
         public string ConnectionString { get; init; } = string.Empty;
+        public DateTime LastActivityUtc { get; set; } = DateTime.UtcNow;
     }
 }
 

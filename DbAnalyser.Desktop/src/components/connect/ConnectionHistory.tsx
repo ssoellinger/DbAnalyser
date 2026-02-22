@@ -1,8 +1,8 @@
 import { useStore } from '../../hooks/useStore';
+import type { ConnectionHistoryEntry } from '../../hooks/useStore';
 
 interface ConnectionHistoryProps {
-  onSelect: (connectionString: string, providerType?: string) => void;
-  onConnect: (connectionString: string, providerType?: string) => void;
+  onSelect: (entry: ConnectionHistoryEntry) => void;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -11,7 +11,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   oracle: 'Oracle',
 };
 
-export function ConnectionHistory({ onSelect, onConnect }: ConnectionHistoryProps) {
+export function ConnectionHistory({ onSelect }: ConnectionHistoryProps) {
   const history = useStore((s) => s.connectionHistory);
 
   if (history.length === 0) return null;
@@ -23,21 +23,23 @@ export function ConnectionHistory({ onSelect, onConnect }: ConnectionHistoryProp
         {history.map((entry, i) => (
           <button
             key={i}
-            onClick={() => onSelect(entry.connectionString, entry.providerType)}
-            onDoubleClick={() => onConnect(entry.connectionString, entry.providerType)}
+            onClick={() => onSelect(entry)}
             className="w-full text-left px-3 py-2 rounded text-xs hover:bg-bg-hover transition-colors group"
           >
             <span className="text-text-primary group-hover:text-accent transition-colors">
-              {entry.databaseName}
+              {entry.server} / {entry.database || '(server mode)'}
             </span>
             {entry.providerType && entry.providerType !== 'sqlserver' && (
               <span className="ml-2 text-text-muted">
                 ({PROVIDER_LABELS[entry.providerType] ?? entry.providerType})
               </span>
             )}
-            <span className="block text-text-muted truncate mt-0.5">
-              {entry.connectionString.substring(0, 60)}...
-            </span>
+            {entry.authMode === 'windows' && (
+              <span className="ml-2 text-text-muted">(Windows Auth)</span>
+            )}
+            {entry.encryptedUsername && (
+              <span className="ml-2 text-text-muted">(saved credentials)</span>
+            )}
           </button>
         ))}
       </div>

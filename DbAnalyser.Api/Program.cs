@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using DbAnalyser.Analyzers;
 using DbAnalyser.Api.Endpoints;
 using DbAnalyser.Api.Hubs;
@@ -7,6 +8,7 @@ using DbAnalyser.Api.Services;
 using DbAnalyser.Providers;
 using DbAnalyser.Providers.PostgreSql;
 using DbAnalyser.Providers.SqlServer;
+using Microsoft.AspNetCore.RateLimiting;
 using Serilog;
 
 Log.Logger = new LoggerConfiguration()
@@ -55,10 +57,29 @@ try
         options.AddDefaultPolicy(policy =>
         {
             policy.WithOrigins("http://localhost:5173")
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
+                  .WithHeaders("Content-Type", "Authorization")
+                  .WithMethods("GET", "POST")
                   .AllowCredentials();
         });
+    });
+
+    // Rate limiting
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.AddFixedWindowLimiter("connect", opt =>
+        {
+            opt.PermitLimit = 30;
+            opt.Window = TimeSpan.FromMinutes(1);
+            opt.QueueLimit = 0;
+        });
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+            RateLimitPartition.GetFixedWindowLimiter("global", _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
     });
 
     // Provider bundles
@@ -79,6 +100,17 @@ try
 
     var app = builder.Build();
 
+    // Security headers
+    app.Use(async (context, next) =>
+    {
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+        context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+        await next();
+    });
+
+    app.UseRateLimiter();
     app.UseCors();
 
     app.MapHub<AnalysisHub>("/hubs/analysis");
