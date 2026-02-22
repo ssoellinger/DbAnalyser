@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -137,6 +137,30 @@ ipcMain.handle('safe-storage-encrypt', (_event, plaintext: string) => {
 ipcMain.handle('safe-storage-decrypt', (_event, cipherBase64: string) => {
   if (!safeStorage.isEncryptionAvailable()) return null;
   return safeStorage.decryptString(Buffer.from(cipherBase64, 'base64'));
+});
+
+// IPC handler: Save .dba file
+ipcMain.handle('dialog-save-file', async (_event, jsonContent: string, defaultName: string) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Save Analysis',
+    defaultPath: defaultName,
+    filters: [{ name: 'DbAnalyser Files', extensions: ['dba'] }],
+  });
+  if (canceled || !filePath) return null;
+  fs.writeFileSync(filePath, jsonContent, 'utf-8');
+  return filePath;
+});
+
+// IPC handler: Open .dba file
+ipcMain.handle('dialog-open-file', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Open Analysis',
+    filters: [{ name: 'DbAnalyser Files', extensions: ['dba'] }],
+    properties: ['openFile'],
+  });
+  if (canceled || filePaths.length === 0) return null;
+  const content = fs.readFileSync(filePaths[0], 'utf-8');
+  return { filePath: filePaths[0], content };
 });
 
 app.whenReady().then(async () => {

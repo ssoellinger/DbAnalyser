@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { HubConnection } from '@microsoft/signalr';
-import type { AnalysisResult, AnalysisProgress, AnalyzerName, AnalyzerStatus } from '../api/types';
+import type { AnalysisResult, AnalysisProgress, AnalyzerName, AnalyzerStatus, DbaFile } from '../api/types';
 import { api, createSignalRConnection, onProgress } from '../api/client';
 
 export interface ConnectionHistoryEntry {
@@ -52,6 +52,10 @@ interface AppState {
   signalRConnection: HubConnection | null;
   signalRConnectionId: string | null;
 
+  // File session
+  isFileSession: boolean;
+  loadedFilePath: string | null;
+
   // UI
   sidebarCollapsed: boolean;
   searchOpen: boolean;
@@ -70,6 +74,7 @@ interface AppState {
   mergeResult: (incoming: AnalysisResult) => void;
   runAnalyzer: (name: AnalyzerName, force?: boolean, database?: string) => Promise<void>;
   cancelAnalyzer: (name: AnalyzerName) => void;
+  loadFromFile: (data: DbaFile, filePath: string) => void;
   disconnect: () => void;
   toggleSidebar: () => void;
   toggleSearch: () => void;
@@ -92,6 +97,8 @@ export const useStore = create<AppState>((set, get) => ({
   analyzerAbortControllers: {},
   signalRConnection: null,
   signalRConnectionId: null,
+  isFileSession: false,
+  loadedFilePath: null,
   sidebarCollapsed: false,
   searchOpen: false,
   connectionHistory: [],
@@ -169,8 +176,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   runAnalyzer: async (name, force, database) => {
-    const { sessionId, signalRConnectionId } = get();
-    if (!sessionId) return;
+    const { sessionId, signalRConnectionId, isFileSession } = get();
+    if (!sessionId || isFileSession) return;
 
     // Abort any previous in-flight request for this analyzer
     const prev = get().analyzerAbortControllers[name];
@@ -218,6 +225,35 @@ export const useStore = create<AppState>((set, get) => ({
     if (controller) controller.abort();
   },
 
+  loadFromFile: (data, filePath) => {
+    // Abort any in-flight work
+    const controllers = get().analyzerAbortControllers;
+    Object.values(controllers).forEach((c) => c?.abort());
+    const connection = get().signalRConnection;
+    if (connection) {
+      connection.stop().catch(() => { /* ignore */ });
+    }
+
+    set({
+      sessionId: 'file-session',
+      databaseName: data.metadata.databaseName,
+      isServerMode: data.metadata.isServerMode,
+      serverName: data.metadata.serverName,
+      isConnecting: false,
+      connectionError: null,
+      result: data.result,
+      isAnalyzing: false,
+      progress: null,
+      analyzerStatus: data.metadata.analyzerStatus,
+      analyzerErrors: {},
+      analyzerAbortControllers: {},
+      signalRConnection: null,
+      signalRConnectionId: null,
+      isFileSession: true,
+      loadedFilePath: filePath,
+    });
+  },
+
   disconnect: () => {
     // Abort all in-flight analyzers
     const controllers = get().analyzerAbortControllers;
@@ -236,6 +272,8 @@ export const useStore = create<AppState>((set, get) => ({
       progress: null,
       signalRConnection: null,
       signalRConnectionId: null,
+      isFileSession: false,
+      loadedFilePath: null,
       analyzerStatus: { schema: 'idle', profiling: 'idle', relationships: 'idle', quality: 'idle', usage: 'idle', indexing: 'idle' },
       analyzerErrors: {},
       analyzerAbortControllers: {},

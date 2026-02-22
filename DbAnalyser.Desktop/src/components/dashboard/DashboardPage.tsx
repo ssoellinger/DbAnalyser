@@ -44,14 +44,15 @@ export function DashboardPage() {
   // Primary: always load schema
   const { status: schemaStatus } = useAnalyzer('schema');
 
-  // Auto-trigger relationships after schema loads
+  // Auto-trigger relationships after schema loads (skip in file sessions)
   const runAnalyzer = useStore((s) => s.runAnalyzer);
   const relsStatus = useStore((s) => s.analyzerStatus.relationships);
+  const isFileSession = useStore((s) => s.isFileSession);
   useEffect(() => {
-    if (schemaStatus === 'loaded' && relsStatus === 'idle') {
+    if (schemaStatus === 'loaded' && relsStatus === 'idle' && !isFileSession) {
       runAnalyzer('relationships');
     }
-  }, [schemaStatus, relsStatus, runAnalyzer]);
+  }, [schemaStatus, relsStatus, runAnalyzer, isFileSession]);
 
   const result = useStore((s) => s.result);
 

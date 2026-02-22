@@ -14,12 +14,13 @@ export function useAnalyzer(name: AnalyzerName, autoLoad = true): {
   const progress = useStore((s) => s.analyzerStatus[name] === 'loading' ? s.progress : null);
   const runAnalyzer = useStore((s) => s.runAnalyzer);
   const cancelAnalyzer = useStore((s) => s.cancelAnalyzer);
+  const isFileSession = useStore((s) => s.isFileSession);
 
   useEffect(() => {
-    if (autoLoad && status === 'idle') {
+    if (autoLoad && status === 'idle' && !isFileSession) {
       runAnalyzer(name);
     }
-  }, [autoLoad, status, name, runAnalyzer]);
+  }, [autoLoad, status, name, runAnalyzer, isFileSession]);
 
   const refresh = useCallback(() => {
     runAnalyzer(name, true);

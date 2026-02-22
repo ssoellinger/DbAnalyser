@@ -12,5 +12,7 @@ interface Window {
     };
     encrypt: (plaintext: string) => Promise<string | null>;
     decrypt: (cipherBase64: string) => Promise<string | null>;
+    saveFile: (jsonContent: string, defaultName: string) => Promise<string | null>;
+    openFile: () => Promise<{ filePath: string; content: string } | null>;
   };
 }

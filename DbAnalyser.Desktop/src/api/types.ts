@@ -313,6 +313,21 @@ export interface IndexInventoryItem {
   databaseName?: string;
 }
 
+// ── Save / Open (.dba) ─────────────────────────────────────────────────────
+
+export interface DbaFile {
+  version: 1;
+  savedAt: string;
+  appVersion: string;
+  metadata: {
+    serverName: string | null;
+    databaseName: string | null;
+    isServerMode: boolean;
+    analyzerStatus: Record<AnalyzerName, AnalyzerStatus>;
+  };
+  result: AnalysisResult;
+}
+
 // ── Analyzer Names ──────────────────────────────────────────────────────────
 
 export type AnalyzerName = 'schema' | 'profiling' | 'relationships' | 'quality' | 'usage' | 'indexing';

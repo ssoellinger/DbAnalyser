@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AnalyzerStatus, AnalysisProgress } from '../../api/types';
+import { useStore } from '../../hooks/useStore';
 
 interface AnalyzerLoaderProps {
   status: AnalyzerStatus;
@@ -12,6 +13,16 @@ interface AnalyzerLoaderProps {
 }
 
 export function AnalyzerLoader({ status, error, onRefresh, onCancel, analyzerName, progress, children }: AnalyzerLoaderProps) {
+  const isFileSession = useStore((s) => s.isFileSession);
+
+  if (isFileSession && status === 'idle') {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-sm text-text-secondary">No {analyzerName} data in saved file</p>
+      </div>
+    );
+  }
+
   if (status === 'loading' || status === 'idle') {
     return (
       <div className="flex items-center justify-center py-20">

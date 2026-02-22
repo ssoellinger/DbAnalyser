@@ -11,4 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('safe-storage-encrypt', plaintext),
   decrypt: (cipherBase64: string): Promise<string | null> =>
     ipcRenderer.invoke('safe-storage-decrypt', cipherBase64),
+  saveFile: (jsonContent: string, defaultName: string): Promise<string | null> =>
+    ipcRenderer.invoke('dialog-save-file', jsonContent, defaultName),
+  openFile: (): Promise<{ filePath: string; content: string } | null> =>
+    ipcRenderer.invoke('dialog-open-file'),
 });

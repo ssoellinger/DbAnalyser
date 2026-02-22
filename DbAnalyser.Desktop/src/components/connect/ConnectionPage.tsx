@@ -5,6 +5,7 @@ import { ConnectionForm, DEFAULT_FIELDS, parseConnectionString, buildConnectionS
 import { ConnectionHistory } from './ConnectionHistory';
 import type { ConnectionFields } from './ConnectionForm';
 import type { ConnectionHistoryEntry } from '../../hooks/useStore';
+import type { DbaFile } from '../../api/types';
 
 const PROVIDER_LABELS: Record<string, string> = {
   sqlserver: 'SQL Server',
@@ -14,11 +15,13 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 export function ConnectionPage() {
   const loadHistory = useStore((s) => s.loadHistory);
+  const loadFromFile = useStore((s) => s.loadFromFile);
   const [fields, setFields] = useState<ConnectionFields>(DEFAULT_FIELDS);
   const [rawMode, setRawMode] = useState(false);
   const [rawConnectionString, setRawConnectionString] = useState('');
   const [providerType, setProviderType] = useState('sqlserver');
   const [availableProviders, setAvailableProviders] = useState<string[]>(['sqlserver']);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -52,6 +55,22 @@ export function ConnectionPage() {
     setRawConnectionString(buildConnectionString(restoredFields, entry.providerType));
     setRawMode(false);
     setProviderType(entry.providerType);
+  };
+
+  const handleOpenFile = async () => {
+    setFileError(null);
+    const result = await window.electronAPI?.openFile();
+    if (!result) return; // cancelled
+    try {
+      const data = JSON.parse(result.content) as DbaFile;
+      if (data.version !== 1 || !data.result) {
+        setFileError('Invalid or unsupported .dba file format.');
+        return;
+      }
+      loadFromFile(data, result.filePath);
+    } catch {
+      setFileError('Could not read file. Make sure it is a valid .dba file.');
+    }
   };
 
   const handleToggleMode = () => {
@@ -119,6 +138,23 @@ export function ConnectionPage() {
         <ConnectionHistory
           onSelect={handleSelectHistory}
         />
+
+        <div className="flex items-center gap-3 my-2">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs text-text-muted">or</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
+        <button
+          onClick={handleOpenFile}
+          className="w-full py-2.5 rounded border border-border text-sm text-text-secondary hover:text-text-primary hover:border-accent/50 transition-colors"
+        >
+          Open Saved Analysis
+        </button>
+
+        {fileError && (
+          <p className="text-xs text-severity-error text-center">{fileError}</p>
+        )}
       </div>
 
       <p className="text-xs text-text-muted mt-8">
