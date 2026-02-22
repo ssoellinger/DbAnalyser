@@ -1,6 +1,6 @@
 {
   "name": "dbanalyser-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "DbAnalyser Desktop - Database analysis and visualization tool",
   "author": "SiSoe",
   "main": ".vite/build/main.js",
