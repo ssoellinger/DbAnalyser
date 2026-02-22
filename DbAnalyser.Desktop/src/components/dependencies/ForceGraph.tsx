@@ -117,6 +117,14 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 1.2;
 
+// Module-level cache for settled node positions so revisiting the page is instant
+interface CachedLayout {
+  positions: Map<string, { x: number; y: number }>;
+  view: { scale: number; panX: number; panY: number };
+}
+let layoutCache: CachedLayout | null = null;
+let layoutCacheKey = '';
+
 export function ForceGraph({ nodes, edges }: ForceGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -205,9 +213,6 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
 
   // Initialize simulation nodes whenever input changes
   useEffect(() => {
-    // Reset zoom/pan when data changes
-    viewRef.current = { scale: 1, panX: 0, panY: 0 };
-
     const container = containerRef.current;
     if (!container || nodes.length === 0) return;
 
@@ -221,13 +226,18 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     const repulsion = 800 * scaleFactor;
     const edgeRestLength = 120 * scaleFactor;
 
+    // Check if we have cached positions for this exact node set
+    const cacheKey = nodes.map((n) => n.id).sort().join('|');
+    const hasCache = layoutCache !== null && layoutCacheKey === cacheKey;
+
     const simNodes: SimNode[] = nodes.map((n, i) => {
+      const cached = hasCache ? layoutCache!.positions.get(n.id) : undefined;
       const angle = (2 * Math.PI * i) / N;
       const r = Math.min(width, height) * 0.35 * scaleFactor;
       return {
         ...n,
-        x: width / 2 + r * Math.cos(angle),
-        y: height / 2 + r * Math.sin(angle),
+        x: cached?.x ?? (width / 2 + r * Math.cos(angle)),
+        y: cached?.y ?? (height / 2 + r * Math.sin(angle)),
         vx: 0,
         vy: 0,
         radius: 6 + (n.score / maxScore) * 20,
@@ -235,7 +245,14 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     });
     simNodesRef.current = simNodes;
 
-    let tickCount = 0;
+    // Restore cached viewport or reset
+    if (hasCache) {
+      viewRef.current = { ...layoutCache!.view };
+    } else {
+      viewRef.current = { scale: 1, panX: 0, panY: 0 };
+    }
+
+    let tickCount = hasCache ? 999 : 0; // Skip auto-fit if restoring from cache
     const autoFitAt = 150;
 
     // Force simulation tick
@@ -440,6 +457,11 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
 
     return () => {
       cancelAnimationFrame(animRef.current);
+      // Cache settled positions and viewport for instant restore on revisit
+      const positions = new Map<string, { x: number; y: number }>();
+      simNodes.forEach((n) => positions.set(n.id, { x: n.x, y: n.y }));
+      layoutCache = { positions, view: { ...viewRef.current } };
+      layoutCacheKey = cacheKey;
     };
   }, [nodes, edges, hasDatabases, applyViewTransform, fitToView]);
 

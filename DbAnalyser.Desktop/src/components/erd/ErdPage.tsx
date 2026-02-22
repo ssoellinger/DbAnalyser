@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -12,6 +12,7 @@ import {
   type EdgeProps,
   BaseEdge,
   getBezierPath,
+  type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useStore } from '../../hooks/useStore';
@@ -115,6 +116,15 @@ function CrowsFootEdge(props: EdgeProps) {
 const nodeTypes = { tableNode: TableNode, compactNode: CompactNode };
 const edgeTypes = { crowsfoot: CrowsFootEdge };
 
+// ── Layout cache for instant restore on revisit ─────────────────────────────
+
+interface ErdCachedLayout {
+  positions: Map<string, { x: number; y: number }>;
+  viewport: Viewport | null;
+}
+let erdLayoutCache: ErdCachedLayout | null = null;
+let erdLayoutCacheKey = '';
+
 // ── ERD Graph ───────────────────────────────────────────────────────────────
 
 function ErdGraphInner() {
@@ -170,7 +180,7 @@ function ErdGraphInner() {
     return dbName ? activeDatabases.has(dbName) : true;
   }, [isServerMode, activeDatabases]);
 
-  const { initialNodes, initialEdges } = useMemo(() => {
+  const { initialNodes, initialEdges, cacheKey } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
 
@@ -346,16 +356,61 @@ function ErdGraphInner() {
       nodeWidth: 240,
       nodeHeight: 250,
     });
-    return { initialNodes: laid.nodes, initialEdges: laid.edges };
+
+    // Check cache — restore positions if same node set
+    const cacheKey = nodes.map((n) => n.id).sort().join('|');
+    if (erdLayoutCache && erdLayoutCacheKey === cacheKey) {
+      const cached = erdLayoutCache;
+      laid.nodes.forEach((n) => {
+        const pos = cached.positions.get(n.id);
+        if (pos) n.position = pos;
+      });
+    }
+
+    return { initialNodes: laid.nodes, initialEdges: laid.edges, cacheKey };
   }, [schema, rels, activeTypes, getColor, dbFilter]);
+
+  // Check cache match at render time so we know whether to fitView or restore
+  const hasCache = erdLayoutCache !== null && erdLayoutCacheKey === cacheKey;
+  const cachedViewport = hasCache ? erdLayoutCache!.viewport : null;
+  const cacheKeyRef = useRef(cacheKey);
+  cacheKeyRef.current = cacheKey;
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const viewportRef = useRef<Viewport | null>(null);
 
-  useMemo(() => {
+  useEffect(() => {
     setNodes(initialNodes);
     setEdges(initialEdges);
   }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  // Restore cached viewport or fitView after ReactFlow fully initializes
+  const handleInit = useCallback((instance: any) => {
+    if (cachedViewport) {
+      // Delay so ReactFlow finishes its own init layout before we override
+      setTimeout(() => instance.setViewport(cachedViewport), 0);
+    } else {
+      setTimeout(() => instance.fitView({ padding: 0.05 }), 0);
+    }
+  }, [cachedViewport]);
+
+  // Track viewport changes so we always have current viewport on unmount
+  const handleViewportChange = useCallback((vp: Viewport) => {
+    viewportRef.current = vp;
+  }, []);
+
+  // Save positions and viewport on unmount
+  useEffect(() => {
+    return () => {
+      const positions = new Map<string, { x: number; y: number }>();
+      nodesRef.current.forEach((n) => positions.set(n.id, { ...n.position }));
+      erdLayoutCache = { positions, viewport: viewportRef.current };
+      erdLayoutCacheKey = cacheKeyRef.current;
+    };
+  }, []);
 
   const handleAutoLayout = useCallback(() => {
     const laid = getLayoutedElements(nodes, edges, {
@@ -414,8 +469,9 @@ function ErdGraphInner() {
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.05 }}
+          onInit={handleInit}
+          onViewportChange={handleViewportChange}
+          fitView={false}
           minZoom={0.05}
           maxZoom={2}
         >
