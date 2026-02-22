@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
+import { getDatabaseColor } from '../dashboard/DashboardPage';
 
 export interface GraphNode {
   id: string;
@@ -9,12 +10,14 @@ export interface GraphNode {
   depOn: number;
   impact: number;
   score: number;
+  database?: string;
 }
 
 export interface GraphEdge {
   source: number;
   target: number;
   type: string;       // "fk" | "view" | "implicit"
+  crossDatabase?: boolean;
 }
 
 interface ForceGraphProps {
@@ -53,27 +56,85 @@ function getNodeFill(n: { type: string; refBy: number; score: number }, maxScore
   return OBJECT_TYPE_COLORS[key] ?? '#666';
 }
 
-function getEdgeStroke(type: string): string {
+function getEdgeStroke(type: string, crossDatabase?: boolean): string {
+  if (crossDatabase) return '#ff6b6b';
   if (type === 'view') return '#4ecca3';
   if (type === 'implicit') return '#78909c';
   return '#4fc3f7';
 }
 
-function getEdgeDash(type: string): string | undefined {
+function getEdgeDash(type: string, crossDatabase?: boolean): string | undefined {
+  if (crossDatabase) return '8,4';
   if (type === 'view') return '6,3';
   if (type === 'implicit') return '2,4';
   return undefined;
 }
+
+function getEdgeWidth(type: string, crossDatabase?: boolean, isHovered?: boolean): number {
+  if (isHovered) return crossDatabase ? 3.5 : 2.5;
+  return crossDatabase ? 3 : 1.5;
+}
+
+// Graham scan convex hull
+function convexHull(points: { x: number; y: number }[]): { x: number; y: number }[] {
+  if (points.length < 3) return points;
+  const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+
+  const cross = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  const lower: { x: number; y: number }[] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+      lower.pop();
+    lower.push(p);
+  }
+
+  const upper: { x: number; y: number }[] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+      upper.pop();
+    upper.push(p);
+  }
+
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+// Pad hull outward from centroid
+function padHull(hull: { x: number; y: number }[], cx: number, cy: number, padding: number): { x: number; y: number }[] {
+  return hull.map((p) => {
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    return { x: p.x + (dx / dist) * padding, y: p.y + (dy / dist) * padding };
+  });
+}
+
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 5;
+const ZOOM_STEP = 1.2;
 
 export function ForceGraph({ nodes, edges }: ForceGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simNodesRef = useRef<SimNode[]>([]);
   const animRef = useRef<number>(0);
-  const dragRef = useRef<{ nodeIndex: number | null; offset: { x: number; y: number } }>({
+  const dragRef = useRef<{
+    nodeIndex: number | null;
+    offset: { x: number; y: number };
+    isPan: boolean;
+    panStart: { x: number; y: number };
+  }>({
     nodeIndex: null,
     offset: { x: 0, y: 0 },
+    isPan: false,
+    panStart: { x: 0, y: 0 },
   });
+  const viewRef = useRef({ scale: 1, panX: 0, panY: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [tooltip, setTooltip] = useState<{
     visible: boolean;
@@ -90,8 +151,63 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     return types;
   }, [nodes]);
 
+  // Determine if multi-database mode is active
+  const databases = useMemo(() => {
+    const dbs = new Set(nodes.map((n) => n.database).filter(Boolean) as string[]);
+    return dbs.size > 1 ? [...dbs] : [];
+  }, [nodes]);
+  const hasDatabases = databases.length > 0;
+  const hasCrossDbEdges = useMemo(() => edges.some((e) => e.crossDatabase), [edges]);
+
+  // Convert screen-relative coords to world coords (accounting for zoom/pan)
+  const screenToWorld = useCallback((sx: number, sy: number) => {
+    const v = viewRef.current;
+    return { x: (sx - v.panX) / v.scale, y: (sy - v.panY) / v.scale };
+  }, []);
+
+  // Apply the current viewport transform to the SVG <g> wrapper
+  const applyViewTransform = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const vp = svg.querySelector<SVGGElement>('.fg-viewport');
+    if (!vp) return;
+    const v = viewRef.current;
+    vp.setAttribute('transform', `translate(${v.panX},${v.panY}) scale(${v.scale})`);
+  }, []);
+
+  // Fit all nodes into view
+  const fitToView = useCallback(() => {
+    const container = containerRef.current;
+    const simNodes = simNodesRef.current;
+    if (!container || simNodes.length === 0) return;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    simNodes.forEach((n) => {
+      minX = Math.min(minX, n.x - n.radius);
+      minY = Math.min(minY, n.y - n.radius);
+      maxX = Math.max(maxX, n.x + n.radius);
+      maxY = Math.max(maxY, n.y + n.radius);
+    });
+    const padding = 60;
+    const bw = maxX - minX + padding * 2;
+    const bh = maxY - minY + padding * 2;
+    const scale = Math.max(0.3, Math.min(w / bw, h / bh, 2));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    viewRef.current = {
+      scale,
+      panX: w / 2 - cx * scale,
+      panY: h / 2 - cy * scale,
+    };
+    applyViewTransform();
+  }, [applyViewTransform]);
+
   // Initialize simulation nodes whenever input changes
   useEffect(() => {
+    // Reset zoom/pan when data changes
+    viewRef.current = { scale: 1, panX: 0, panY: 0 };
+
     const container = containerRef.current;
     if (!container || nodes.length === 0) return;
 
@@ -99,9 +215,15 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     const height = container.clientHeight;
     const maxScore = Math.max(...nodes.map((n) => n.score), 1);
 
+    // Scale simulation space with node count so larger datasets spread out
+    const N = nodes.length;
+    const scaleFactor = Math.max(1, Math.sqrt(N / 30));
+    const repulsion = 800 * scaleFactor;
+    const edgeRestLength = 120 * scaleFactor;
+
     const simNodes: SimNode[] = nodes.map((n, i) => {
-      const angle = (2 * Math.PI * i) / nodes.length;
-      const r = Math.min(width, height) * 0.35;
+      const angle = (2 * Math.PI * i) / N;
+      const r = Math.min(width, height) * 0.35 * scaleFactor;
       return {
         ...n,
         x: width / 2 + r * Math.cos(angle),
@@ -113,20 +235,23 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     });
     simNodesRef.current = simNodes;
 
+    let tickCount = 0;
+    const autoFitAt = 150;
+
     // Force simulation tick
     const tick = () => {
-      const N = simNodes.length;
+      const nodeCount = simNodes.length;
       const w = container.clientWidth;
       const h = container.clientHeight;
       const dragNodeIdx = dragRef.current.nodeIndex;
 
       // Repulsion (all pairs)
-      for (let i = 0; i < N; i++) {
-        for (let j = i + 1; j < N; j++) {
+      for (let i = 0; i < nodeCount; i++) {
+        for (let j = i + 1; j < nodeCount; j++) {
           const dx = simNodes[i].x - simNodes[j].x;
           const dy = simNodes[i].y - simNodes[j].y;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const force = 800 / (dist * dist);
+          const force = repulsion / (dist * dist);
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
           simNodes[i].vx += fx;
@@ -138,13 +263,13 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
 
       // Attraction (edges)
       edges.forEach((e) => {
-        if (e.source >= N || e.target >= N) return;
+        if (e.source >= nodeCount || e.target >= nodeCount) return;
         const s = simNodes[e.source];
         const t = simNodes[e.target];
         const dx = t.x - s.x;
         const dy = t.y - s.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = (dist - 120) * 0.005;
+        const force = (dist - edgeRestLength) * 0.005;
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         s.vx += fx;
@@ -153,13 +278,38 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
         t.vy -= fy;
       });
 
-      // Center gravity
+      // Database clustering force — same-db nodes attract toward group centroid
+      if (hasDatabases) {
+        const dbGroups = new Map<string, SimNode[]>();
+        simNodes.forEach((n) => {
+          if (!n.database) return;
+          let group = dbGroups.get(n.database);
+          if (!group) { group = []; dbGroups.set(n.database, group); }
+          group.push(n);
+        });
+        dbGroups.forEach((group) => {
+          if (group.length < 2) return;
+          let cx = 0, cy = 0;
+          group.forEach((n) => { cx += n.x; cy += n.y; });
+          cx /= group.length;
+          cy /= group.length;
+          group.forEach((n) => {
+            n.vx += (cx - n.x) * 0.003;
+            n.vy += (cy - n.y) * 0.003;
+          });
+        });
+      }
+
+      // Center gravity — pull toward container center
+      const gravityStrength = 0.001;
+      const centerX = w / 2;
+      const centerY = h / 2;
       simNodes.forEach((n) => {
-        n.vx += (w / 2 - n.x) * 0.001;
-        n.vy += (h / 2 - n.y) * 0.001;
+        n.vx += (centerX - n.x) * gravityStrength;
+        n.vy += (centerY - n.y) * gravityStrength;
       });
 
-      // Apply velocity
+      // Apply velocity — no hard boundary clamping, let the graph grow freely
       simNodes.forEach((n, i) => {
         if (i === dragNodeIdx) {
           n.x = n.fx!;
@@ -172,13 +322,62 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
         n.vy *= 0.85;
         n.x += n.vx;
         n.y += n.vy;
-        n.x = Math.max(n.radius, Math.min(w - n.radius, n.x));
-        n.y = Math.max(n.radius, Math.min(h - n.radius, n.y));
       });
+
+      // Auto-fit once after initial settling
+      tickCount++;
+      if (tickCount === autoFitAt) {
+        fitToView();
+      }
 
       // Update SVG elements directly for performance
       const svg = svgRef.current;
       if (!svg) return;
+
+      // Update database hulls
+      if (hasDatabases) {
+        const dbGroups = new Map<string, SimNode[]>();
+        simNodes.forEach((n) => {
+          if (!n.database) return;
+          let group = dbGroups.get(n.database);
+          if (!group) { group = []; dbGroups.set(n.database, group); }
+          group.push(n);
+        });
+        dbGroups.forEach((group, db) => {
+          const hullPath = svg.querySelector<SVGPathElement>(`[data-hull="${db}"]`);
+          const hullLabel = svg.querySelector<SVGTextElement>(`[data-hull-label="${db}"]`);
+          if (!hullPath) return;
+          // Compute centroid
+          let cx = 0, cy = 0;
+          group.forEach((n) => { cx += n.x; cy += n.y; });
+          cx /= group.length;
+          cy /= group.length;
+          // Compute convex hull and pad it
+          const points = group.map((n) => ({ x: n.x, y: n.y }));
+          if (points.length < 3) {
+            // For 1-2 nodes, draw a circle/ellipse-ish path around them
+            const pad = 40;
+            const d = points.length === 1
+              ? `M ${cx - pad} ${cy} A ${pad} ${pad} 0 1 1 ${cx + pad} ${cy} A ${pad} ${pad} 0 1 1 ${cx - pad} ${cy} Z`
+              : (() => {
+                const dx = points[1].x - points[0].x;
+                const dy = points[1].y - points[0].y;
+                const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                const nx = -dy / len * pad, ny = dx / len * pad;
+                return `M ${points[0].x + nx} ${points[0].y + ny} L ${points[1].x + nx} ${points[1].y + ny} A ${pad} ${pad} 0 0 1 ${points[1].x - nx} ${points[1].y - ny} L ${points[0].x - nx} ${points[0].y - ny} A ${pad} ${pad} 0 0 1 ${points[0].x + nx} ${points[0].y + ny} Z`;
+              })();
+            hullPath.setAttribute('d', d);
+          } else {
+            const hull = padHull(convexHull(points), cx, cy, 30);
+            const d = hull.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
+            hullPath.setAttribute('d', d);
+          }
+          if (hullLabel) {
+            hullLabel.setAttribute('x', String(cx));
+            hullLabel.setAttribute('y', String(cy));
+          }
+        });
+      }
 
       // Update edges
       const edgeLines = svg.querySelectorAll<SVGLineElement>('.fg-edge');
@@ -231,6 +430,9 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
         el.setAttribute('y', String(n.y + n.radius + 14));
       });
 
+      // Update viewport transform
+      applyViewTransform();
+
       animRef.current = requestAnimationFrame(tick);
     };
 
@@ -239,30 +441,39 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     return () => {
       cancelAnimationFrame(animRef.current);
     };
-  }, [nodes, edges]);
+  }, [nodes, edges, hasDatabases, applyViewTransform, fitToView]);
 
-  // Mouse handlers for drag
+  // Mouse handlers for drag and pan
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       const svg = svgRef.current;
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const { x: mx, y: my } = screenToWorld(sx, sy);
 
       const simNodes = simNodesRef.current;
+      let hitNode = false;
       for (let i = 0; i < simNodes.length; i++) {
         const n = simNodes[i];
         if (Math.hypot(mx - n.x, my - n.y) < n.radius + 5) {
-          dragRef.current = { nodeIndex: i, offset: { x: mx - n.x, y: my - n.y } };
+          dragRef.current = { nodeIndex: i, offset: { x: mx - n.x, y: my - n.y }, isPan: false, panStart: { x: 0, y: 0 } };
           simNodes[i].fx = n.x;
           simNodes[i].fy = n.y;
           svg.style.cursor = 'grabbing';
+          hitNode = true;
           break;
         }
       }
+      // Pan on background drag
+      if (!hitNode) {
+        dragRef.current = { nodeIndex: null, offset: { x: 0, y: 0 }, isPan: true, panStart: { x: sx, y: sy } };
+
+        svg.style.cursor = 'move';
+      }
     },
-    [],
+    [screenToWorld],
   );
 
   const handleMouseMove = useCallback(
@@ -270,8 +481,22 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
       const svg = svgRef.current;
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      // Panning
+      if (dragRef.current.isPan) {
+        const v = viewRef.current;
+        const dx = sx - dragRef.current.panStart.x;
+        const dy = sy - dragRef.current.panStart.y;
+        v.panX += dx;
+        v.panY += dy;
+        dragRef.current.panStart = { x: sx, y: sy };
+        applyViewTransform();
+        return;
+      }
+
+      const { x: mx, y: my } = screenToWorld(sx, sy);
       const simNodes = simNodesRef.current;
 
       if (dragRef.current.nodeIndex !== null) {
@@ -301,7 +526,7 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
         svg.style.cursor = 'default';
       }
     },
-    [tooltip.visible],
+    [tooltip.visible, screenToWorld, applyViewTransform],
   );
 
   const handleMouseUp = useCallback(() => {
@@ -313,7 +538,7 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
       delete simNodes[idx].fx;
       delete simNodes[idx].fy;
     }
-    dragRef.current = { nodeIndex: null, offset: { x: 0, y: 0 } };
+    dragRef.current = { nodeIndex: null, offset: { x: 0, y: 0 }, isPan: false, panStart: { x: 0, y: 0 } };
     if (svgRef.current) svgRef.current.style.cursor = 'default';
   }, []);
 
@@ -322,6 +547,74 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
     setTooltip((t) => (t.visible ? { ...t, visible: false, node: null } : t));
     setHoveredNode(null);
   }, [handleMouseUp]);
+
+  // Wheel zoom (centered on mouse position)
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<SVGSVGElement>) => {
+      e.preventDefault();
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const v = viewRef.current;
+      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      const newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.scale * factor));
+      // Zoom toward mouse position
+      v.panX = sx - (sx - v.panX) * (newScale / v.scale);
+      v.panY = sy - (sy - v.panY) * (newScale / v.scale);
+      v.scale = newScale;
+      applyViewTransform();
+    },
+    [applyViewTransform],
+  );
+
+  // Zoom button handlers
+  const handleZoomIn = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const cx = container.clientWidth / 2;
+    const cy = container.clientHeight / 2;
+    const v = viewRef.current;
+    const newScale = Math.min(MAX_ZOOM, v.scale * ZOOM_STEP);
+    v.panX = cx - (cx - v.panX) * (newScale / v.scale);
+    v.panY = cy - (cy - v.panY) * (newScale / v.scale);
+    v.scale = newScale;
+    applyViewTransform();
+  }, [applyViewTransform]);
+
+  const handleZoomOut = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const cx = container.clientWidth / 2;
+    const cy = container.clientHeight / 2;
+    const v = viewRef.current;
+    const newScale = Math.max(MIN_ZOOM, v.scale / ZOOM_STEP);
+    v.panX = cx - (cx - v.panX) * (newScale / v.scale);
+    v.panY = cy - (cy - v.panY) * (newScale / v.scale);
+    v.scale = newScale;
+    applyViewTransform();
+  }, [applyViewTransform]);
+
+  const handleZoomReset = fitToView;
+
+  // Fullscreen toggle
+  const handleFullscreen = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      container.requestFullscreen();
+    }
+  }, []);
+
+  // Track fullscreen state changes
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
 
   const maxScore = Math.max(...nodes.map((n) => n.score), 1);
 
@@ -348,7 +641,7 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
   }, [presentTypes]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full">
+    <div ref={containerRef} className={`relative w-full h-full ${isFullscreen ? 'bg-bg-secondary' : ''}`}>
       <svg
         ref={svgRef}
         className="w-full h-full"
@@ -356,6 +649,7 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
+        onWheel={handleWheel}
       >
         <defs>
           <marker
@@ -369,7 +663,53 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
           >
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#4fc3f7" />
           </marker>
+          <marker
+            id="fg-arrow-crossdb"
+            viewBox="0 0 10 10"
+            refX="10"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#ff6b6b" />
+          </marker>
         </defs>
+
+        <g className="fg-viewport">
+        {/* Database hulls (behind edges) */}
+        {hasDatabases && (
+          <g className="fg-hulls">
+            {databases.map((db) => {
+              const color = getDatabaseColor(db);
+              return (
+                <g key={db}>
+                  <path
+                    data-hull={db}
+                    fill={color}
+                    fillOpacity={0.1}
+                    stroke={color}
+                    strokeOpacity={0.3}
+                    strokeWidth={1.5}
+                    d=""
+                  />
+                  <text
+                    data-hull-label={db}
+                    fill={color}
+                    fillOpacity={0.6}
+                    fontSize={12}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    pointerEvents="none"
+                  >
+                    {db}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        )}
 
         {/* Edges */}
         <g>
@@ -380,11 +720,11 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
               <line
                 key={i}
                 className="fg-edge"
-                stroke={getEdgeStroke(e.type)}
-                strokeOpacity={isHovered ? 1 : 0.4}
-                strokeWidth={isHovered ? 2.5 : 1.5}
-                strokeDasharray={getEdgeDash(e.type)}
-                markerEnd="url(#fg-arrow)"
+                stroke={getEdgeStroke(e.type, e.crossDatabase)}
+                strokeOpacity={isHovered ? 1 : e.crossDatabase ? 0.7 : 0.4}
+                strokeWidth={getEdgeWidth(e.type, e.crossDatabase, isHovered)}
+                strokeDasharray={getEdgeDash(e.type, e.crossDatabase)}
+                markerEnd={e.crossDatabase ? 'url(#fg-arrow-crossdb)' : 'url(#fg-arrow)'}
               />
             );
           })}
@@ -457,7 +797,63 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
             );
           })}
         </g>
+        </g>{/* /fg-viewport */}
       </svg>
+
+      {/* Zoom & fullscreen controls */}
+      <div className="absolute top-2 right-2 flex flex-col gap-1">
+        <button
+          onClick={handleZoomIn}
+          className="w-8 h-8 flex items-center justify-center rounded bg-bg-primary/80 border border-border text-text-muted hover:text-text-primary hover:bg-bg-primary transition-colors"
+          title="Zoom in"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="8" y1="3" x2="8" y2="13" />
+            <line x1="3" y1="8" x2="13" y2="8" />
+          </svg>
+        </button>
+        <button
+          onClick={handleZoomOut}
+          className="w-8 h-8 flex items-center justify-center rounded bg-bg-primary/80 border border-border text-text-muted hover:text-text-primary hover:bg-bg-primary transition-colors"
+          title="Zoom out"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="8" x2="13" y2="8" />
+          </svg>
+        </button>
+        <button
+          onClick={handleZoomReset}
+          className="w-8 h-8 flex items-center justify-center rounded bg-bg-primary/80 border border-border text-text-muted hover:text-text-primary hover:bg-bg-primary transition-colors"
+          title="Fit to view"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="2" y="2" width="12" height="12" rx="1" strokeDasharray="3,2" />
+            <polyline points="5,7 5,5 7,5" />
+            <polyline points="11,9 11,11 9,11" />
+          </svg>
+        </button>
+        <button
+          onClick={handleFullscreen}
+          className="w-8 h-8 flex items-center justify-center rounded bg-bg-primary/80 border border-border text-text-muted hover:text-text-primary hover:bg-bg-primary transition-colors"
+          title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        >
+          {isFullscreen ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <polyline points="6,2 6,6 2,6" />
+              <polyline points="10,2 10,6 14,6" />
+              <polyline points="6,14 6,10 2,10" />
+              <polyline points="10,14 10,10 14,10" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <polyline points="2,6 2,2 6,2" />
+              <polyline points="14,6 14,2 10,2" />
+              <polyline points="2,10 2,14 6,14" />
+              <polyline points="14,10 14,14 10,14" />
+            </svg>
+          )}
+        </button>
+      </div>
 
       {/* Tooltip */}
       {tooltip.visible && tooltip.node && (
@@ -475,6 +871,12 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
           <strong>{tooltip.node.id}</strong>
           <br />
           Type: {tooltip.node.type}
+          {tooltip.node.database && (
+            <>
+              <br />
+              Database: {tooltip.node.database}
+            </>
+          )}
           <br />
           Referenced by: {tooltip.node.refBy}
           <br />
@@ -487,13 +889,38 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-2 left-2 flex items-center gap-4 text-xs text-text-muted bg-bg-primary/80 rounded px-3 py-1.5 border border-border">
+      <div className="absolute bottom-2 left-2 flex flex-wrap items-center gap-4 text-xs text-text-muted bg-bg-primary/80 rounded px-3 py-1.5 border border-border">
         <span>Drag nodes to rearrange. Hover for details. Node size = importance.</span>
         {legendItems.map((item) => (
           <span key={item.label} className="flex items-center gap-1">
             <span style={{ color: item.color }}>{item.symbol}</span> {item.label}
           </span>
         ))}
+        {hasDatabases && (
+          <>
+            <span className="w-px h-3 bg-border" />
+            {databases.map((db) => (
+              <span key={db} className="flex items-center gap-1">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: getDatabaseColor(db) }}
+                />
+                {db}
+              </span>
+            ))}
+          </>
+        )}
+        {hasCrossDbEdges && (
+          <>
+            <span className="w-px h-3 bg-border" />
+            <span className="flex items-center gap-1">
+              <svg width="18" height="8" className="inline-block">
+                <line x1="0" y1="4" x2="18" y2="4" stroke="#ff6b6b" strokeWidth="2" strokeDasharray="4,2" />
+              </svg>
+              Cross-DB
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

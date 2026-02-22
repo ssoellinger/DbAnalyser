@@ -67,10 +67,17 @@ function DependencyGraphInner() {
         depOn: d.dependsOn.length,
         impact: d.transitiveImpact.length,
         score: d.importanceScore,
+        database: d.databaseName,
       };
     });
 
     const gEdges: GraphEdge[] = [];
+
+    const isCrossDb = (si: number, ti: number): boolean => {
+      const sDb = gNodes[si].database;
+      const tDb = gNodes[ti].database;
+      return !!sDb && !!tDb && sDb !== tDb;
+    };
 
     // FK edges
     if (activeEdges.has('fk')) {
@@ -84,7 +91,7 @@ function DependencyGraphInner() {
         const si = nodeMap.get(from);
         const ti = nodeMap.get(to);
         if (si !== undefined && ti !== undefined) {
-          gEdges.push({ source: si, target: ti, type: 'fk' });
+          gEdges.push({ source: si, target: ti, type: 'fk', crossDatabase: isCrossDb(si, ti) });
         }
       });
     }
@@ -98,7 +105,7 @@ function DependencyGraphInner() {
         const si = nodeMap.get(from);
         const ti = nodeMap.get(to);
         if (si !== undefined && ti !== undefined) {
-          gEdges.push({ source: si, target: ti, type: 'view' });
+          gEdges.push({ source: si, target: ti, type: 'view', crossDatabase: isCrossDb(si, ti) });
         }
       });
 
@@ -116,7 +123,7 @@ function DependencyGraphInner() {
           const si = nodeMap.get(from);
           const ti = nodeMap.get(to);
           if (si !== undefined && ti !== undefined) {
-            gEdges.push({ source: si, target: ti, type: 'implicit' });
+            gEdges.push({ source: si, target: ti, type: 'implicit', crossDatabase: isCrossDb(si, ti) });
           }
         });
     }
