@@ -21,7 +21,7 @@ function getApiPath(): string {
   if (isDev) {
     // app.getAppPath() = DbAnalyser.Desktop root; API is a sibling project
     const appRoot = app.getAppPath();
-    return path.resolve(appRoot, '..', 'DbAnalyser.Api', 'bin', 'Debug', 'net8.0', 'DbAnalyser.Api.exe');
+    return path.resolve(appRoot, '..', 'DbAnalyser.Api', 'bin', 'Debug', 'net10.0', 'DbAnalyser.Api.exe');
   }
   return path.join(process.resourcesPath, 'api', 'DbAnalyser.Api.exe');
 }

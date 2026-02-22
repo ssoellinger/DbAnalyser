@@ -8,23 +8,26 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 
-var connectionStringOption = new Option<string?>(
-    aliases: ["--connection-string", "-cs"],
-    description: "SQL Server connection string");
+// SqlServer bundle for catalog/performance queries
+var sqlServerBundle = new SqlServerBundle();
 
-var formatOption = new Option<OutputFormat>(
-    aliases: ["--format", "-f"],
-    getDefaultValue: () => OutputFormat.Console,
-    description: "Output format: Console, Html, or Json");
+var connectionStringOption = new Option<string?>("--connection-string");
+connectionStringOption.Aliases.Add("-cs");
+connectionStringOption.Description = "SQL Server connection string";
 
-var outputOption = new Option<string?>(
-    aliases: ["--output", "-o"],
-    description: "Output file path (for Html/Json formats)");
+var formatOption = new Option<OutputFormat>("--format");
+formatOption.Aliases.Add("-f");
+formatOption.Description = "Output format: Console, Html, or Json";
+formatOption.DefaultValueFactory = _ => OutputFormat.Console;
 
-var analyzersOption = new Option<string[]>(
-    aliases: ["--analyzers", "-a"],
-    getDefaultValue: () => ["schema", "profiling", "relationships", "quality"],
-    description: "Analyzers to run: schema, profiling, relationships, quality");
+var outputOption = new Option<string?>("--output");
+outputOption.Aliases.Add("-o");
+outputOption.Description = "Output file path (for Html/Json formats)";
+
+var analyzersOption = new Option<string[]>("--analyzers");
+analyzersOption.Aliases.Add("-a");
+analyzersOption.Description = "Analyzers to run: schema, profiling, relationships, quality";
+analyzersOption.DefaultValueFactory = _ => new[] { "schema", "profiling", "relationships", "quality" };
 
 var rootCommand = new RootCommand("DbAnalyser - Database structure and quality analyzer")
 {
@@ -34,8 +37,13 @@ var rootCommand = new RootCommand("DbAnalyser - Database structure and quality a
     analyzersOption
 };
 
-rootCommand.SetHandler(async (string? connStr, OutputFormat format, string? output, string[] analyzers) =>
+rootCommand.SetAction(async (parseResult, ct) =>
 {
+    var connStr = parseResult.GetValue(connectionStringOption);
+    var format = parseResult.GetValue(formatOption);
+    var output = parseResult.GetValue(outputOption);
+    var analyzers = parseResult.GetValue(analyzersOption) ?? [];
+
     // Load config from appsettings.json as fallback
     var config = new ConfigurationBuilder()
         .SetBasePath(AppContext.BaseDirectory)
@@ -84,7 +92,15 @@ rootCommand.SetHandler(async (string? connStr, OutputFormat format, string? outp
                 AnsiConsole.MarkupLine($"[green]Connected to:[/] {Markup.Escape(provider.DatabaseName)}");
 
                 ctx.Status("Running analysis...");
-                var result = await orchestrator.RunAsync(provider, options);
+                var context = new AnalysisContext
+                {
+                    Provider = provider,
+                    CatalogQueries = sqlServerBundle.CatalogQueries,
+                    PerformanceQueries = sqlServerBundle.PerformanceQueries,
+                    ServerQueries = sqlServerBundle.ServerQueries,
+                    ProviderType = sqlServerBundle.ProviderType,
+                };
+                var result = await orchestrator.RunAsync(context, options);
 
                 ctx.Status("Generating report...");
                 var reporter = reporters.FirstOrDefault(r => r.Format == format)
@@ -102,7 +118,6 @@ rootCommand.SetHandler(async (string? connStr, OutputFormat format, string? outp
     {
         await provider.DisposeAsync();
     }
+});
 
-}, connectionStringOption, formatOption, outputOption, analyzersOption);
-
-return await rootCommand.InvokeAsync(args);
+return await rootCommand.Parse(args).InvokeAsync();
