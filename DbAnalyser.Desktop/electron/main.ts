@@ -13,6 +13,7 @@ log.transports.file.resolvePathFn = () =>
 
 let apiProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
+let aiAbortController: AbortController | null = null;
 
 const API_PORT = 5174;
 
@@ -161,6 +162,207 @@ ipcMain.handle('dialog-open-file', async () => {
   if (canceled || filePaths.length === 0) return null;
   const content = fs.readFileSync(filePaths[0], 'utf-8');
   return { filePath: filePaths[0], content };
+});
+
+// ── AI Config persistence ──────────────────────────────────────────────────
+
+const AI_CONFIG_FILE = 'ai-config.json';
+const AI_KEY_STORAGE_KEY = 'ai-api-key';
+
+function getAiConfigPath(): string {
+  return path.join(app.getPath('userData'), AI_CONFIG_FILE);
+}
+
+ipcMain.handle('ai-get-config', () => {
+  try {
+    const configPath = getAiConfigPath();
+    if (!fs.existsSync(configPath)) return null;
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    // Decrypt API key if stored
+    if (raw._encryptedKey && safeStorage.isEncryptionAvailable()) {
+      try {
+        raw.apiKey = safeStorage.decryptString(Buffer.from(raw._encryptedKey, 'base64'));
+      } catch {
+        raw.apiKey = '';
+      }
+    }
+    delete raw._encryptedKey;
+    return raw;
+  } catch (e) {
+    log.error('Failed to read AI config:', e);
+    return null;
+  }
+});
+
+ipcMain.handle('ai-save-config', (_event, config: { type: string; baseUrl: string; model: string; apiKey: string }) => {
+  try {
+    const toWrite: Record<string, unknown> = {
+      type: config.type,
+      baseUrl: config.baseUrl,
+      model: config.model,
+    };
+    // Encrypt API key separately
+    if (config.apiKey && safeStorage.isEncryptionAvailable()) {
+      toWrite._encryptedKey = safeStorage.encryptString(config.apiKey).toString('base64');
+    }
+    fs.writeFileSync(getAiConfigPath(), JSON.stringify(toWrite, null, 2), 'utf-8');
+  } catch (e) {
+    log.error('Failed to save AI config:', e);
+  }
+});
+
+// ── AI Chat streaming ──────────────────────────────────────────────────────
+
+function sendAiChunk(chunk: { text?: string; done?: boolean; error?: string }) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('ai-chunk', chunk);
+  }
+}
+
+async function streamAnthropicChat(
+  baseUrl: string, model: string, apiKey: string,
+  systemPrompt: string, messages: { role: string; content: string }[],
+  signal: AbortSignal
+) {
+  const res = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages,
+      stream: true,
+    }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Anthropic API error ${res.status}: ${body}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr) continue;
+      try {
+        const event = JSON.parse(jsonStr);
+        if (event.type === 'content_block_delta' && event.delta?.text) {
+          sendAiChunk({ text: event.delta.text });
+        }
+      } catch { /* skip malformed JSON */ }
+    }
+  }
+}
+
+async function streamOpenAiChat(
+  baseUrl: string, model: string, apiKey: string,
+  systemPrompt: string, messages: { role: string; content: string }[],
+  signal: AbortSignal
+) {
+  const allMessages = [
+    { role: 'system', content: systemPrompt },
+    ...messages,
+  ];
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  // Normalize base URL — strip trailing /v1 if present, we add it ourselves
+  const base = baseUrl.replace(/\/v1\/?$/, '');
+  const res = await fetch(`${base}/v1/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model, messages: allMessages, stream: true }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenAI-compatible API error ${res.status}: ${body}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const jsonStr = line.slice(6).trim();
+      if (jsonStr === '[DONE]') continue;
+      if (!jsonStr) continue;
+      try {
+        const event = JSON.parse(jsonStr);
+        const content = event.choices?.[0]?.delta?.content;
+        if (content) sendAiChunk({ text: content });
+      } catch { /* skip malformed JSON */ }
+    }
+  }
+}
+
+ipcMain.handle('ai-chat', async (
+  _event,
+  config: { type: string; baseUrl: string; model: string; apiKey: string },
+  systemPrompt: string,
+  messages: { role: string; content: string }[]
+) => {
+  // Abort any previous request
+  if (aiAbortController) {
+    aiAbortController.abort();
+  }
+  aiAbortController = new AbortController();
+  const { signal } = aiAbortController;
+
+  try {
+    if (config.type === 'anthropic') {
+      await streamAnthropicChat(config.baseUrl, config.model, config.apiKey, systemPrompt, messages, signal);
+    } else {
+      await streamOpenAiChat(config.baseUrl, config.model, config.apiKey, systemPrompt, messages, signal);
+    }
+    sendAiChunk({ done: true });
+  } catch (e: unknown) {
+    if ((e as Error).name === 'AbortError') {
+      sendAiChunk({ done: true });
+    } else {
+      const msg = e instanceof Error ? e.message : String(e);
+      log.error('AI chat error:', msg);
+      sendAiChunk({ error: msg });
+    }
+  } finally {
+    aiAbortController = null;
+  }
+});
+
+ipcMain.handle('ai-stop', () => {
+  if (aiAbortController) {
+    aiAbortController.abort();
+    aiAbortController = null;
+  }
 });
 
 app.whenReady().then(async () => {

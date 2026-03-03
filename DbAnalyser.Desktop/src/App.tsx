@@ -12,6 +12,7 @@ import { RelationshipsPage } from './components/relationships/RelationshipsPage'
 import { QualityPage } from './components/quality/QualityPage';
 import { IndexingPage } from './components/indexing/IndexingPage';
 import { UsagePage } from './components/usage/UsagePage';
+import { AiPage } from './components/ai/AiPage';
 
 export default function App() {
   const sessionId = useStore((s) => s.sessionId);
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/quality" element={<QualityPage />} />
         <Route path="/indexing" element={<IndexingPage />} />
         <Route path="/usage" element={<UsagePage />} />
+        <Route path="/ai" element={<AiPage />} />
       </Routes>
     </AppShell>
   );

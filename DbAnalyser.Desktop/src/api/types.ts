@@ -351,6 +351,20 @@ export interface AnalysisProgress {
   percentage: number;
 }
 
+// ── AI ───────────────────────────────────────────────────────────────────────
+
+export interface AiProviderConfig {
+  type: 'anthropic' | 'openai';
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export interface AiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 // ── Object type colors (matching HTML report) ───────────────────────────────
 
 export const OBJECT_TYPE_COLORS: Record<string, string> = {

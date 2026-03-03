@@ -15,4 +15,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('dialog-save-file', jsonContent, defaultName),
   openFile: (): Promise<{ filePath: string; content: string } | null> =>
     ipcRenderer.invoke('dialog-open-file'),
+  aiChat: (config: unknown, systemPrompt: string, messages: unknown) =>
+    ipcRenderer.invoke('ai-chat', config, systemPrompt, messages),
+  aiStop: () => ipcRenderer.invoke('ai-stop'),
+  onAiChunk: (callback: (chunk: { text?: string; done?: boolean; error?: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, chunk: { text?: string; done?: boolean; error?: string }) =>
+      callback(chunk);
+    ipcRenderer.on('ai-chunk', handler);
+    return () => { ipcRenderer.removeListener('ai-chunk', handler); };
+  },
+  aiGetConfig: () => ipcRenderer.invoke('ai-get-config'),
+  aiSaveConfig: (config: unknown) => ipcRenderer.invoke('ai-save-config', config),
 });
