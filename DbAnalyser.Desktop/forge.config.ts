@@ -1,12 +1,16 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
+import { MakerDMG } from '@electron-forge/maker-dmg';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    extraResource: ['./resources/api', './resources/icon.ico'],
+    extraResource: [
+      './resources/api',
+      ...(process.platform === 'win32' ? ['./resources/icon.ico'] : ['./resources/icon.png']),
+    ],
     name: 'DbAnalyser',
     executableName: 'DbAnalyser',
     icon: './resources/icon',
@@ -15,7 +19,11 @@ const config: ForgeConfig = {
     new MakerSquirrel({
       name: 'DbAnalyser',
     }),
-    new MakerZIP({}, ['win32']),
+    new MakerZIP({}, ['win32', 'darwin']),
+    new MakerDMG({
+      name: 'DbAnalyser',
+      icon: './resources/icon.png',
+    }),
   ],
   plugins: [
     new VitePlugin({

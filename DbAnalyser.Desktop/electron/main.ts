@@ -19,12 +19,13 @@ const API_PORT = 5174;
 
 function getApiPath(): string {
   const isDev = !app.isPackaged;
+  const exeName = process.platform === 'win32' ? 'DbAnalyser.Api.exe' : 'DbAnalyser.Api';
   if (isDev) {
     // app.getAppPath() = DbAnalyser.Desktop root; API is a sibling project
     const appRoot = app.getAppPath();
-    return path.resolve(appRoot, '..', 'DbAnalyser.Api', 'bin', 'Debug', 'net10.0', 'DbAnalyser.Api.exe');
+    return path.resolve(appRoot, '..', 'DbAnalyser.Api', 'bin', 'Debug', 'net10.0', exeName);
   }
-  return path.join(process.resourcesPath, 'api', 'DbAnalyser.Api.exe');
+  return path.join(process.resourcesPath, 'api', exeName);
 }
 
 function waitForPort(port: number, timeout = 15000): Promise<void> {
@@ -86,9 +87,10 @@ async function startApi(): Promise<void> {
 }
 
 function createWindow(): void {
+  const iconExt = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
   const iconPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'icon.ico')
-    : path.join(app.getAppPath(), 'resources', 'icon.ico');
+    ? path.join(process.resourcesPath, iconExt)
+    : path.join(app.getAppPath(), 'resources', iconExt);
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -375,12 +377,21 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  // On macOS, apps typically stay running until explicitly quit
+  if (process.platform === 'darwin') return;
   log.info('All windows closed, shutting down');
   if (apiProcess) {
     apiProcess.kill();
     apiProcess = null;
   }
   app.quit();
+});
+
+app.on('activate', () => {
+  // On macOS, re-create window when dock icon is clicked
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
 
 app.on('before-quit', () => {
