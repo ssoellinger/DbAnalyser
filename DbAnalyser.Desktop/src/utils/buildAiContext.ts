@@ -1,6 +1,6 @@
 import type { AnalysisResult, AnalyzerName, AnalyzerStatus } from '../api/types';
 
-const MAX_CONTEXT_CHARS = 12_000;
+const MAX_CONTEXT_CHARS = 8_000;
 
 interface BuildContextOptions {
   result: AnalysisResult;
@@ -8,61 +8,46 @@ interface BuildContextOptions {
   analyzerStatus: Record<AnalyzerName, AnalyzerStatus>;
 }
 
+/** Strip common schema prefixes like dbo. */
+function strip(name: string): string {
+  return name.replace(/^dbo\./, '');
+}
+
 export function buildAiContext({ result, serverName, analyzerStatus }: BuildContextOptions): string {
   const sections: string[] = [];
 
-  // Header
-  const mode = result.isServerMode ? `Server: ${serverName}` : `Database: ${result.databaseName}`;
+  const mode = result.isServerMode ? `Server: ${serverName}` : `DB: ${result.databaseName}`;
   sections.push(
-    `You are an expert database analyst. The user has analyzed a SQL Server database and you have access to the results below.\n` +
-    `Answer questions about the database structure, quality, relationships, and usage. Be concise and actionable.\n\n` +
-    `--- DATABASE INFO ---\n` +
-    `${mode}\n` +
-    `Analyzed at: ${result.analyzedAt}\n` +
+    `You are an expert database analyst. Answer questions about database structure, quality, relationships, and usage. Be concise and actionable.\n` +
+    `Only answer database/SQL/data-related questions. Politely decline unrelated questions.\n\n` +
+    `[INFO] ${mode} | Analyzed: ${result.analyzedAt}` +
     (result.isServerMode && result.databases.length > 0
-      ? `Databases: ${result.databases.join(', ')}\n`
+      ? ` | DBs: ${result.databases.join(',')}`
       : '')
   );
 
   let totalLen = sections[0].length;
 
-  // Quality issues (high priority — these are what users care about most)
   if (result.qualityIssues && result.qualityIssues.length > 0) {
-    const qSection = formatQualityIssues(result.qualityIssues);
-    if (totalLen + qSection.length < MAX_CONTEXT_CHARS) {
-      sections.push(qSection);
-      totalLen += qSection.length;
-    }
+    const s = formatQualityIssues(result.qualityIssues);
+    if (totalLen + s.length < MAX_CONTEXT_CHARS) { sections.push(s); totalLen += s.length; }
   }
 
-  // Relationships
   if (result.relationships) {
-    const rSection = formatRelationships(result.relationships);
-    if (totalLen + rSection.length < MAX_CONTEXT_CHARS) {
-      sections.push(rSection);
-      totalLen += rSection.length;
-    }
+    const s = formatRelationships(result.relationships);
+    if (totalLen + s.length < MAX_CONTEXT_CHARS) { sections.push(s); totalLen += s.length; }
   }
 
-  // Index recommendations
   if (result.indexRecommendations && result.indexRecommendations.length > 0) {
-    const iSection = formatIndexRecommendations(result.indexRecommendations);
-    if (totalLen + iSection.length < MAX_CONTEXT_CHARS) {
-      sections.push(iSection);
-      totalLen += iSection.length;
-    }
+    const s = formatIndexRecommendations(result.indexRecommendations);
+    if (totalLen + s.length < MAX_CONTEXT_CHARS) { sections.push(s); totalLen += s.length; }
   }
 
-  // Usage analysis
   if (result.usageAnalysis) {
-    const uSection = formatUsage(result.usageAnalysis);
-    if (totalLen + uSection.length < MAX_CONTEXT_CHARS) {
-      sections.push(uSection);
-      totalLen += uSection.length;
-    }
+    const s = formatUsage(result.usageAnalysis);
+    if (totalLen + s.length < MAX_CONTEXT_CHARS) { sections.push(s); totalLen += s.length; }
   }
 
-  // Schema (fills remaining space)
   if (result.schema) {
     const remaining = MAX_CONTEXT_CHARS - totalLen;
     if (remaining > 200) {
@@ -70,12 +55,11 @@ export function buildAiContext({ result, serverName, analyzerStatus }: BuildCont
     }
   }
 
-  // Analyzer status note
   const notRun = (Object.entries(analyzerStatus) as [AnalyzerName, AnalyzerStatus][])
     .filter(([, s]) => s === 'idle')
     .map(([name]) => name);
   if (notRun.length > 0) {
-    sections.push(`\nNote: The following analyzers have NOT been run yet: ${notRun.join(', ')}. Some information may be unavailable.`);
+    sections.push(`[NOTE] Not run: ${notRun.join(',')}`);
   }
 
   return sections.join('\n');
@@ -83,44 +67,42 @@ export function buildAiContext({ result, serverName, analyzerStatus }: BuildCont
 
 function formatQualityIssues(issues: AnalysisResult['qualityIssues']): string {
   if (!issues || issues.length === 0) return '';
-  const lines = ['--- QUALITY ISSUES ---'];
   const errors = issues.filter(i => i.severity === 'error');
   const warnings = issues.filter(i => i.severity === 'warning');
   const infos = issues.filter(i => i.severity === 'info');
 
-  lines.push(`Total: ${issues.length} (${errors.length} errors, ${warnings.length} warnings, ${infos.length} info)`);
+  const lines = [`[QUALITY] ${errors.length}E ${warnings.length}W ${infos.length}I (${issues.length} total)`];
 
-  // Show errors first, then warnings (limit each group)
-  for (const issue of [...errors, ...warnings].slice(0, 30)) {
-    lines.push(`[${issue.severity.toUpperCase()}] ${issue.objectName}: ${issue.description}`);
-    if (issue.recommendation) lines.push(`  -> ${issue.recommendation}`);
+  for (const issue of [...errors, ...warnings].slice(0, 15)) {
+    const sev = issue.severity === 'error' ? 'E' : 'W';
+    lines.push(`${sev}|${strip(issue.objectName)}|${issue.description}`);
   }
-  if (errors.length + warnings.length > 30) {
-    lines.push(`... and ${errors.length + warnings.length - 30} more`);
+  if (errors.length + warnings.length > 15) {
+    lines.push(`+${errors.length + warnings.length - 15} more`);
   }
   return lines.join('\n');
 }
 
 function formatRelationships(rel: NonNullable<AnalysisResult['relationships']>): string {
-  const lines = ['--- RELATIONSHIPS ---'];
+  const lines: string[] = [];
 
   if (rel.explicitRelationships.length > 0) {
-    lines.push(`Foreign Keys (${rel.explicitRelationships.length}):`);
-    for (const fk of rel.explicitRelationships.slice(0, 40)) {
-      lines.push(`  ${fk.fromTable}.${fk.fromColumn} -> ${fk.toTable}.${fk.toColumn}`);
+    lines.push(`[FK] ${rel.explicitRelationships.length} total`);
+    for (const fk of rel.explicitRelationships.slice(0, 25)) {
+      lines.push(`${strip(fk.fromTable)}.${fk.fromColumn}>${strip(fk.toTable)}.${fk.toColumn}`);
     }
-    if (rel.explicitRelationships.length > 40) {
-      lines.push(`  ... and ${rel.explicitRelationships.length - 40} more`);
+    if (rel.explicitRelationships.length > 25) {
+      lines.push(`+${rel.explicitRelationships.length - 25} more`);
     }
   }
 
   if (rel.implicitRelationships.length > 0) {
-    lines.push(`Implicit Relationships (${rel.implicitRelationships.length}):`);
-    for (const ir of rel.implicitRelationships.slice(0, 20)) {
-      lines.push(`  ${ir.fromTable}.${ir.fromColumn} -> ${ir.toTable}.${ir.toColumn} (confidence: ${ir.confidence}%, reason: ${ir.reason})`);
+    lines.push(`[IMPL] ${rel.implicitRelationships.length} total`);
+    for (const ir of rel.implicitRelationships.slice(0, 15)) {
+      lines.push(`${strip(ir.fromTable)}.${ir.fromColumn}>${strip(ir.toTable)}.${ir.toColumn}|${ir.confidence}%|${ir.reason}`);
     }
-    if (rel.implicitRelationships.length > 20) {
-      lines.push(`  ... and ${rel.implicitRelationships.length - 20} more`);
+    if (rel.implicitRelationships.length > 15) {
+      lines.push(`+${rel.implicitRelationships.length - 15} more`);
     }
   }
 
@@ -128,52 +110,49 @@ function formatRelationships(rel: NonNullable<AnalysisResult['relationships']>):
 }
 
 function formatIndexRecommendations(recs: NonNullable<AnalysisResult['indexRecommendations']>): string {
-  const lines = ['--- INDEX RECOMMENDATIONS ---'];
-  lines.push(`Total: ${recs.length}`);
-  for (const r of recs.slice(0, 20)) {
-    lines.push(`[${r.severity?.toUpperCase() ?? r.category}] ${r.tableName}: ${r.description}`);
-    if (r.recommendation) lines.push(`  -> ${r.recommendation}`);
+  const lines = [`[IDX] ${recs.length} total`];
+  for (const r of recs.slice(0, 15)) {
+    const sev = r.severity?.toUpperCase() ?? r.category;
+    lines.push(`${sev}|${strip(r.tableName)}|${r.description}`);
   }
-  if (recs.length > 20) lines.push(`... and ${recs.length - 20} more`);
+  if (recs.length > 15) lines.push(`+${recs.length - 15} more`);
   return lines.join('\n');
 }
 
 function formatUsage(usage: NonNullable<AnalysisResult['usageAnalysis']>): string {
-  const lines = ['--- USAGE ANALYSIS ---'];
+  const lines: string[] = ['[USAGE]'];
   if (usage.serverUptimeDays != null) {
-    lines.push(`Server uptime: ${usage.serverUptimeDays} days`);
+    lines[0] += ` uptime:${usage.serverUptimeDays}d`;
   }
   const unused = usage.objects.filter(o => o.usageLevel === 'unused');
   const low = usage.objects.filter(o => o.usageLevel === 'low');
 
   if (unused.length > 0) {
-    lines.push(`Unused objects (${unused.length}): ${unused.slice(0, 15).map(o => o.objectName).join(', ')}${unused.length > 15 ? '...' : ''}`);
+    lines.push(`Unused(${unused.length}):${unused.slice(0, 15).map(o => strip(o.objectName)).join(',')}${unused.length > 15 ? '...' : ''}`);
   }
   if (low.length > 0) {
-    lines.push(`Low-usage objects (${low.length}): ${low.slice(0, 15).map(o => o.objectName).join(', ')}${low.length > 15 ? '...' : ''}`);
+    lines.push(`Low(${low.length}):${low.slice(0, 15).map(o => strip(o.objectName)).join(',')}${low.length > 15 ? '...' : ''}`);
   }
   return lines.join('\n');
 }
 
 function formatSchema(schema: NonNullable<AnalysisResult['schema']>, maxLen: number): string {
-  const lines = ['--- SCHEMA ---'];
-  lines.push(`Tables: ${schema.tables.length}, Views: ${schema.views.length}, Procedures: ${schema.storedProcedures.length}, Functions: ${schema.functions.length}`);
+  const lines = [`[SCHEMA] T:${schema.tables.length} V:${schema.views.length} SP:${schema.storedProcedures.length} F:${schema.functions.length}`];
 
-  let currentLen = lines.join('\n').length;
+  let currentLen = lines[0].length;
 
   for (const table of schema.tables) {
-    const pks = table.columns.filter(c => c.isPrimaryKey).map(c => c.name);
-    const colSummary = table.columns.map(c => {
-      let s = `${c.name} ${c.dataType}`;
-      if (c.isPrimaryKey) s += ' PK';
-      if (!c.isNullable) s += ' NOT NULL';
+    const cols = table.columns.map(c => {
+      let s = `${c.name}:${c.dataType}`;
+      if (c.isPrimaryKey) s += ':PK';
+      if (!c.isNullable) s += ':NN';
       return s;
-    }).join(', ');
+    }).join(',');
 
-    const line = `${table.fullName} (${pks.length > 0 ? 'PK: ' + pks.join(', ') + ' | ' : ''}${colSummary})`;
+    const line = `${strip(table.fullName)}(${cols})`;
 
     if (currentLen + line.length + 2 > maxLen) {
-      lines.push(`... and ${schema.tables.length - lines.length + 2} more tables (truncated)`);
+      lines.push(`+${schema.tables.length - lines.length + 1} more tables`);
       break;
     }
     lines.push(line);

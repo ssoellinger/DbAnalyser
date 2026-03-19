@@ -4,6 +4,14 @@ import { buildAiContext } from '../../utils/buildAiContext';
 import { AiSettings } from './AiSettings';
 import type { AiProviderConfig, AiMessage } from '../../api/types';
 
+type ContextMode = 'single' | 'last10' | 'unlimited';
+
+const CONTEXT_MODES: { value: ContextMode; label: string; title: string }[] = [
+  { value: 'single', label: '1', title: 'Single message — no conversation history' },
+  { value: 'last10', label: '10', title: 'Last 10 messages' },
+  { value: 'unlimited', label: '∞', title: 'Unlimited — full conversation history' },
+];
+
 const QUICK_PROMPTS = [
   { label: 'Summarize', prompt: 'Give me a concise summary of this database \u2014 what is it used for, how is it structured, and what are its key entities?' },
   { label: 'Issues', prompt: 'What are the most critical issues with this database? Prioritize by impact and give actionable recommendations.' },
@@ -23,6 +31,7 @@ export function AiPage() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [contextMode, setContextMode] = useState<ContextMode>('last10');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -84,8 +93,16 @@ export function AiPage() {
     streamingTextRef.current = '';
 
     const systemPrompt = buildAiContext({ result, serverName, analyzerStatus });
-    window.electronAPI!.aiChat(config, systemPrompt, newMessages);
-  }, [config, result, streaming, messages, serverName, analyzerStatus]);
+
+    let messagesToSend = newMessages;
+    if (contextMode === 'single') {
+      messagesToSend = [userMsg];
+    } else if (contextMode === 'last10') {
+      messagesToSend = newMessages.slice(-10);
+    }
+
+    window.electronAPI!.aiChat(config, systemPrompt, messagesToSend);
+  }, [config, result, streaming, messages, serverName, analyzerStatus, contextMode]);
 
   function handleStop() {
     window.electronAPI?.aiStop();
@@ -160,6 +177,23 @@ export function AiPage() {
           <span className="text-xs text-text-muted">({config.model})</span>
         </div>
         <div className="flex items-center gap-2">
+          {/* Context mode toggle */}
+          <div className="flex items-center border border-border rounded overflow-hidden">
+            {CONTEXT_MODES.map((mode) => (
+              <button
+                key={mode.value}
+                onClick={() => setContextMode(mode.value)}
+                title={mode.title}
+                className={`px-2 py-1 text-[11px] font-medium transition-colors ${
+                  contextMode === mode.value
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-muted hover:text-text-primary'
+                }`}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
           {messages.length > 0 && (
             <button
               onClick={handleClear}
