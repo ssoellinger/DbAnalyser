@@ -38,12 +38,41 @@ interface ReferenceResult {
   matchLines: { lineNum: number; text: string }[];
 }
 
+/* ── Breadcrumb ───────────────────────────────────────────────────────── */
+
+function Breadcrumb({ objectType, fullName, databaseName }: { objectType: string; fullName: string; databaseName?: string | null }) {
+  const parts: { label: string; muted?: boolean }[] = [];
+  if (databaseName) parts.push({ label: databaseName, muted: true });
+  const nameParts = fullName.split('.');
+  if (nameParts.length > 1) parts.push({ label: nameParts[0], muted: true });
+  parts.push({ label: objectType + 's', muted: true });
+  parts.push({ label: nameParts[nameParts.length - 1] });
+
+  return (
+    <div className="flex items-center gap-1 text-[11px]">
+      {parts.map((p, i) => (
+        <span key={i} className="flex items-center gap-1">
+          {i > 0 && <span className="text-text-muted">/</span>}
+          <span className={p.muted ? 'text-text-muted' : 'text-text-primary'}>{p.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/* ── Main Content ─────────────────────────────────────────────────────── */
+
 function CodeContent() {
   const result = useStore((s) => s.result);
+  const databaseName = useStore((s) => s.databaseName);
   const tabs = useCodeStore((s) => s.tabs);
   const activeTabId = useCodeStore((s) => s.activeTabId);
+  const splitTabId = useCodeStore((s) => s.splitTabId);
   const openTab = useCodeStore((s) => s.openTab);
   const saveScrollPos = useCodeStore((s) => s.saveScrollPos);
+  const clearGoToLine = useCodeStore((s) => s.clearGoToLine);
+  const toggleSplit = useCodeStore((s) => s.toggleSplit);
+  const closeSplit = useCodeStore((s) => s.closeSplit);
   const [explorerWidth, setExplorerWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
   const [refsOpen, setRefsOpen] = useState(false);
@@ -53,6 +82,11 @@ function CodeContent() {
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
     [tabs, activeTabId]
+  );
+
+  const splitTab = useMemo(
+    () => (splitTabId ? tabs.find((t) => t.id === splitTabId) ?? null : null),
+    [tabs, splitTabId]
   );
 
   // Build identifier map for click-through
@@ -90,6 +124,17 @@ function CodeContent() {
     [activeTabId, saveScrollPos]
   );
 
+  const handleSplitScrollChange = useCallback(
+    (pos: number) => {
+      if (splitTabId) saveScrollPos(splitTabId, pos);
+    },
+    [splitTabId, saveScrollPos]
+  );
+
+  const handleGoToLineDone = useCallback(() => {
+    if (activeTabId) clearGoToLine(activeTabId);
+  }, [activeTabId, clearGoToLine]);
+
   // Find all references for the active tab's object
   const handleFindRefs = useCallback(() => {
     if (!activeTab) return;
@@ -101,7 +146,6 @@ function CodeContent() {
     if (!refsTarget || !result?.schema) return [];
     const schema = result.schema;
     const target = refsTarget.toLowerCase();
-    // Also match unqualified name
     const shortName = refsTarget.split('.').pop()?.toLowerCase() ?? target;
 
     const allObjects: { objectType: string; fullName: string; label: string; definition: string }[] = [];
@@ -116,12 +160,10 @@ function CodeContent() {
 
     const results: ReferenceResult[] = [];
     for (const obj of allObjects) {
-      // Don't list the object referencing itself
       if (obj.fullName.toLowerCase() === target) continue;
       if (!obj.definition) continue;
 
       const defLower = obj.definition.toLowerCase();
-      // Check for the full name or short name as a word boundary match
       if (!defLower.includes(target) && !defLower.includes(shortName)) continue;
 
       const lines = obj.definition.split('\n');
@@ -130,7 +172,7 @@ function CodeContent() {
         const lineLower = lines[i].toLowerCase();
         if (lineLower.includes(target) || lineLower.includes(shortName)) {
           matchLines.push({ lineNum: i + 1, text: lines[i] });
-          if (matchLines.length >= 3) break; // show first 3 per object
+          if (matchLines.length >= 3) break;
         }
       }
 
@@ -214,33 +256,68 @@ function CodeContent() {
       <div className="flex-1 flex flex-col min-w-0">
         <CodeTabBar />
 
-        {/* Toolbar */}
+        {/* Toolbar with breadcrumb */}
         {activeTab && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg-secondary text-[11px]">
-            <span className="text-text-muted">{activeTab.fullName}</span>
-            <span className="text-text-muted">·</span>
-            <span className="text-text-muted">{activeTab.objectType}</span>
-            <button
-              onClick={handleFindRefs}
-              className="ml-auto text-text-secondary hover:text-accent transition-colors"
-              title="Find all references to this object"
-            >
-              Find References
-            </button>
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg-secondary">
+            <Breadcrumb objectType={activeTab.objectType} fullName={activeTab.fullName} databaseName={databaseName} />
+            <div className="ml-auto flex items-center gap-3 text-[11px]">
+              <button
+                onClick={() => toggleSplit(activeTab.id)}
+                className={`text-text-secondary hover:text-accent transition-colors ${splitTabId === activeTab.id ? 'text-accent' : ''}`}
+                title={splitTabId ? 'Close split view' : 'Split editor right'}
+              >
+                {splitTabId ? '◧ Unsplit' : '◫ Split'}
+              </button>
+              <button
+                onClick={handleFindRefs}
+                className="text-text-secondary hover:text-accent transition-colors"
+                title="Find all references to this object"
+              >
+                Find References
+              </button>
+            </div>
           </div>
         )}
 
         {activeTab ? (
           <div className="flex-1 min-h-0 flex flex-col">
-            <div className="flex-1 min-h-0">
-              <CodeEditor
-                key={activeTab.id}
-                code={activeTab.definition}
-                scrollPos={activeTab.scrollPos}
-                onScrollChange={handleScrollChange}
-                resolveIdentifier={resolveId}
-                onNavigate={handleNavigate}
-              />
+            {/* Editor(s) */}
+            <div className="flex-1 min-h-0 flex">
+              <div className={splitTab ? 'flex-1 min-w-0 border-r border-border' : 'flex-1 min-w-0'}>
+                <CodeEditor
+                  key={activeTab.id}
+                  code={activeTab.definition}
+                  scrollPos={activeTab.scrollPos}
+                  goToLine={activeTab.goToLine}
+                  onGoToLineDone={handleGoToLineDone}
+                  onScrollChange={handleScrollChange}
+                  resolveIdentifier={resolveId}
+                  onNavigate={handleNavigate}
+                />
+              </div>
+              {splitTab && (
+                <div className="flex-1 min-w-0 flex flex-col">
+                  <div className="flex items-center gap-2 px-3 py-1 border-b border-border bg-bg-secondary text-[11px]">
+                    <Breadcrumb objectType={splitTab.objectType} fullName={splitTab.fullName} databaseName={databaseName} />
+                    <button
+                      onClick={closeSplit}
+                      className="ml-auto text-text-muted hover:text-text-primary transition-colors"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <CodeEditor
+                      key={`split-${splitTab.id}`}
+                      code={splitTab.definition}
+                      scrollPos={splitTab.scrollPos}
+                      onScrollChange={handleSplitScrollChange}
+                      resolveIdentifier={resolveId}
+                      onNavigate={handleNavigate}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* References panel */}

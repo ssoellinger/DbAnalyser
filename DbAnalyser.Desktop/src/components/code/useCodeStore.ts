@@ -7,13 +7,15 @@ export interface CodeTab {
   label: string;        // short display name
   definition: string;   // SQL code
   scrollPos?: number;   // saved scroll position
+  goToLine?: number;    // line to scroll to after opening
 }
 
 interface CodeState {
   tabs: CodeTab[];
   activeTabId: string | null;
   explorerFilter: string;
-  explorerCollapsed: Record<string, boolean>; // collapsed groups
+  explorerCollapsed: Record<string, boolean>;
+  splitTabId: string | null; // secondary editor in split view
 
   openTab: (tab: Omit<CodeTab, 'id'>) => void;
   closeTab: (id: string) => void;
@@ -23,6 +25,9 @@ interface CodeState {
   setExplorerFilter: (filter: string) => void;
   toggleExplorerGroup: (group: string) => void;
   saveScrollPos: (id: string, pos: number) => void;
+  clearGoToLine: (id: string) => void;
+  toggleSplit: (id: string) => void;
+  closeSplit: () => void;
 }
 
 function makeTabId(type: string, fullName: string) {
@@ -34,13 +39,22 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   activeTabId: null,
   explorerFilter: '',
   explorerCollapsed: {},
+  splitTabId: null,
 
   openTab: (tab) => {
     const id = makeTabId(tab.objectType, tab.fullName);
     const { tabs } = get();
     const existing = tabs.find((t) => t.id === id);
     if (existing) {
-      set({ activeTabId: id });
+      // Update goToLine if provided
+      if (tab.goToLine) {
+        set({
+          tabs: tabs.map((t) => (t.id === id ? { ...t, goToLine: tab.goToLine } : t)),
+          activeTabId: id,
+        });
+      } else {
+        set({ activeTabId: id });
+      }
       return;
     }
     set({
@@ -50,7 +64,7 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   },
 
   closeTab: (id) => {
-    const { tabs, activeTabId } = get();
+    const { tabs, activeTabId, splitTabId } = get();
     const idx = tabs.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const newTabs = tabs.filter((t) => t.id !== id);
@@ -64,18 +78,23 @@ export const useCodeStore = create<CodeState>((set, get) => ({
         newActive = newTabs[idx].id;
       }
     }
-    set({ tabs: newTabs, activeTabId: newActive });
+    set({
+      tabs: newTabs,
+      activeTabId: newActive,
+      splitTabId: splitTabId === id ? null : splitTabId,
+    });
   },
 
   setActiveTab: (id) => set({ activeTabId: id }),
 
-  closeAllTabs: () => set({ tabs: [], activeTabId: null }),
+  closeAllTabs: () => set({ tabs: [], activeTabId: null, splitTabId: null }),
 
   closeOtherTabs: (id) => {
     const { tabs } = get();
     set({
       tabs: tabs.filter((t) => t.id === id),
       activeTabId: id,
+      splitTabId: null,
     });
   },
 
@@ -97,4 +116,18 @@ export const useCodeStore = create<CodeState>((set, get) => ({
       tabs: tabs.map((t) => (t.id === id ? { ...t, scrollPos: pos } : t)),
     });
   },
+
+  clearGoToLine: (id) => {
+    const { tabs } = get();
+    set({
+      tabs: tabs.map((t) => (t.id === id ? { ...t, goToLine: undefined } : t)),
+    });
+  },
+
+  toggleSplit: (id) => {
+    const { splitTabId } = get();
+    set({ splitTabId: splitTabId === id ? null : id });
+  },
+
+  closeSplit: () => set({ splitTabId: null }),
 }));

@@ -23,6 +23,7 @@ export interface GraphEdge {
 interface ForceGraphProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  onNodeDoubleClick?: (node: GraphNode) => void;
 }
 
 interface SimNode extends GraphNode {
@@ -125,7 +126,7 @@ interface CachedLayout {
 let layoutCache: CachedLayout | null = null;
 let layoutCacheKey = '';
 
-export function ForceGraph({ nodes, edges }: ForceGraphProps) {
+export function ForceGraph({ nodes, edges, onNodeDoubleClick }: ForceGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simNodesRef = useRef<SimNode[]>([]);
@@ -672,6 +673,21 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onWheel={handleWheel}
+        onDoubleClick={(e) => {
+          if (!onNodeDoubleClick) return;
+          const rect = svgRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const sx = e.clientX - rect.left;
+          const sy = e.clientY - rect.top;
+          const { x: mx, y: my } = screenToWorld(sx, sy);
+          const simNodes = simNodesRef.current;
+          for (const n of simNodes) {
+            if (Math.hypot(mx - n.x, my - n.y) < n.radius + 5) {
+              onNodeDoubleClick(n);
+              break;
+            }
+          }
+        }}
       >
         <defs>
           <marker
@@ -912,7 +928,7 @@ export function ForceGraph({ nodes, edges }: ForceGraphProps) {
 
       {/* Legend */}
       <div className="absolute bottom-2 left-2 flex flex-wrap items-center gap-4 text-xs text-text-muted bg-bg-primary/80 rounded px-3 py-1.5 border border-border">
-        <span>Drag nodes to rearrange. Hover for details. Node size = importance.</span>
+        <span>Drag nodes to rearrange. Hover for details. Double-click to open in Code. Node size = importance.</span>
         {legendItems.map((item) => (
           <span key={item.label} className="flex items-center gap-1">
             <span style={{ color: item.color }}>{item.symbol}</span> {item.label}

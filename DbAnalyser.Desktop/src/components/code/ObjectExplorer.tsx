@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
+import type { UsageLevel } from '../../api/types';
 import { useCodeStore } from './useCodeStore';
 import { generateTableDdl } from './tableDdlGenerator';
 
@@ -10,6 +11,7 @@ interface ObjectItem {
   label: string;
   definition: string;
   lastModified?: string | null;
+  usageLevel?: UsageLevel;
 }
 
 const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers'];
@@ -22,6 +24,20 @@ const GROUP_ICONS: Record<string, string> = {
   Triggers: '⚡',
 };
 
+const USAGE_COLORS: Record<UsageLevel, string> = {
+  active: '#4ecca3',
+  low: '#f0a500',
+  unused: '#e94560',
+  unknown: '',
+};
+
+const USAGE_LABELS: Record<UsageLevel, string> = {
+  active: 'Active',
+  low: 'Low usage',
+  unused: 'Unused',
+  unknown: '',
+};
+
 export function ObjectExplorer() {
   const result = useStore((s) => s.result);
   const filter = useCodeStore((s) => s.explorerFilter);
@@ -29,6 +45,12 @@ export function ObjectExplorer() {
   const collapsed = useCodeStore((s) => s.explorerCollapsed);
   const toggleGroup = useCodeStore((s) => s.toggleExplorerGroup);
   const openTab = useCodeStore((s) => s.openTab);
+
+  // Build usage lookup
+  const usageMap = useMemo(() => {
+    if (!result?.usageAnalysis?.objects) return new Map<string, UsageLevel>();
+    return new Map(result.usageAnalysis.objects.map((o) => [o.objectName, o.usageLevel]));
+  }, [result?.usageAnalysis]);
 
   const groups = useMemo(() => {
     if (!result?.schema) return {};
@@ -39,6 +61,7 @@ export function ObjectExplorer() {
         fullName: t.fullName,
         label: t.tableName,
         definition: generateTableDdl(t),
+        usageLevel: usageMap.get(t.fullName),
       })),
       Views: schema.views.map((v) => ({
         objectType: 'View',
@@ -46,6 +69,7 @@ export function ObjectExplorer() {
         label: v.viewName,
         definition: v.definition ?? '',
         lastModified: null,
+        usageLevel: usageMap.get(v.fullName),
       })),
       Procedures: schema.storedProcedures.map((p) => ({
         objectType: 'Procedure',
@@ -53,6 +77,7 @@ export function ObjectExplorer() {
         label: p.procedureName,
         definition: p.definition ?? '',
         lastModified: p.lastModified,
+        usageLevel: usageMap.get(p.fullName),
       })),
       Functions: schema.functions.map((f) => ({
         objectType: 'Function',
@@ -60,16 +85,18 @@ export function ObjectExplorer() {
         label: f.functionName,
         definition: f.definition ?? '',
         lastModified: f.lastModified,
+        usageLevel: usageMap.get(f.fullName),
       })),
       Triggers: schema.triggers.map((t) => ({
         objectType: 'Trigger',
         fullName: t.fullName,
         label: t.triggerName,
         definition: t.definition ?? '',
+        usageLevel: usageMap.get(t.fullName),
       })),
     };
     return items;
-  }, [result]);
+  }, [result, usageMap]);
 
   const filteredGroups = useMemo(() => {
     if (!filter.trim()) return groups;
@@ -86,6 +113,8 @@ export function ObjectExplorer() {
     () => Object.values(groups).reduce((sum, items) => sum + items.length, 0),
     [groups]
   );
+
+  const hasUsageData = usageMap.size > 0;
 
   return (
     <div className="flex flex-col h-full bg-bg-secondary border-r border-border">
@@ -125,32 +154,46 @@ export function ObjectExplorer() {
 
               {!isCollapsed && (
                 <div>
-                  {items.map((item) => (
-                    <button
-                      key={item.fullName}
-                      onClick={() =>
-                        openTab({
-                          objectType: item.objectType,
-                          fullName: item.fullName,
-                          label: item.label,
-                          definition: item.definition,
-                        })
-                      }
-                      className="w-full flex items-center gap-2 pl-8 pr-3 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors group"
-                      title={item.fullName}
-                    >
-                      <span
-                        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: color }}
-                      />
-                      <span className="truncate">{item.label}</span>
-                      {item.fullName.includes('.') && (
-                        <span className="text-[10px] text-text-muted ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                          {item.fullName.split('.')[0]}
+                  {items.map((item) => {
+                    const usageColor = item.usageLevel ? USAGE_COLORS[item.usageLevel] : '';
+                    const usageLabel = item.usageLevel ? USAGE_LABELS[item.usageLevel] : '';
+
+                    return (
+                      <button
+                        key={item.fullName}
+                        onClick={() =>
+                          openTab({
+                            objectType: item.objectType,
+                            fullName: item.fullName,
+                            label: item.label,
+                            definition: item.definition,
+                          })
+                        }
+                        className="w-full flex items-center gap-2 pl-8 pr-3 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors group"
+                        title={usageLabel ? `${item.fullName} (${usageLabel})` : item.fullName}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: color }}
+                        />
+                        <span className="truncate">{item.label}</span>
+                        <span className="ml-auto flex items-center gap-1">
+                          {hasUsageData && usageColor && (
+                            <span
+                              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: usageColor }}
+                              title={usageLabel}
+                            />
+                          )}
+                          {item.fullName.includes('.') && (
+                            <span className="text-[10px] text-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+                              {item.fullName.split('.')[0]}
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -163,6 +206,15 @@ export function ObjectExplorer() {
           </p>
         )}
       </div>
+
+      {/* Usage legend */}
+      {hasUsageData && (
+        <div className="px-3 py-2 border-t border-border flex items-center gap-3 text-[10px] text-text-muted">
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#4ecca3' }} /> Active</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#f0a500' }} /> Low</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#e94560' }} /> Unused</span>
+        </div>
+      )}
     </div>
   );
 }

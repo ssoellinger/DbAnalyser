@@ -3,7 +3,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 import { sql, MSSQL } from '@codemirror/lang-sql';
 import { foldGutter, bracketMatching } from '@codemirror/language';
-import { search, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
+import { search, highlightSelectionMatches } from '@codemirror/search';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from './codemirrorTheme';
 import { clickthroughExtension } from './codemirrorClickthrough';
@@ -12,12 +12,22 @@ import type { ResolvedObject } from './sqlIdentifierResolver';
 interface CodeEditorProps {
   code: string;
   scrollPos?: number;
+  goToLine?: number;
   onScrollChange?: (pos: number) => void;
+  onGoToLineDone?: () => void;
   resolveIdentifier?: (text: string) => ResolvedObject | null;
   onNavigate?: (obj: ResolvedObject) => void;
 }
 
-export function CodeEditor({ code, scrollPos, onScrollChange, resolveIdentifier, onNavigate }: CodeEditorProps) {
+export function CodeEditor({
+  code,
+  scrollPos,
+  goToLine,
+  onScrollChange,
+  onGoToLineDone,
+  resolveIdentifier,
+  onNavigate,
+}: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const codeRef = useRef(code);
@@ -64,8 +74,8 @@ export function CodeEditor({ code, scrollPos, onScrollChange, resolveIdentifier,
 
     viewRef.current = view;
 
-    // Restore scroll position
-    if (scrollPos) {
+    // Restore scroll position (only if no goToLine)
+    if (!goToLine && scrollPos) {
       requestAnimationFrame(() => {
         view.scrollDOM.scrollTop = scrollPos;
       });
@@ -83,6 +93,24 @@ export function CodeEditor({ code, scrollPos, onScrollChange, resolveIdentifier,
       viewRef.current = null;
     };
   }, [extensions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle goToLine
+  useEffect(() => {
+    if (!goToLine || !viewRef.current) return;
+    const view = viewRef.current;
+    const doc = view.state.doc;
+    if (goToLine > doc.lines) return;
+
+    const line = doc.line(goToLine);
+    requestAnimationFrame(() => {
+      view.dispatch({
+        selection: { anchor: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+      });
+    });
+
+    onGoToLineDone?.();
+  }, [goToLine, onGoToLineDone]);
 
   // Update doc when code changes
   useEffect(() => {

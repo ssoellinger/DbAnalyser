@@ -138,12 +138,13 @@ function CodeSearchContent() {
     });
   }
 
-  function openInCode(item: SearchResult) {
+  function openInCode(item: SearchResult, lineNum?: number) {
     openTab({
       objectType: item.objectType,
       fullName: item.fullName,
       label: item.label,
       definition: item.definition,
+      goToLine: lineNum,
     });
     navigate('/code');
   }
@@ -269,7 +270,7 @@ function CodeSearchContent() {
                   <div
                     key={i}
                     className="flex items-start gap-3 px-4 py-1 hover:bg-bg-hover/30 transition-colors cursor-pointer"
-                    onClick={() => openInCode(item)}
+                    onClick={() => openInCode(item, ml.lineNum)}
                   >
                     <span className="text-[10px] text-text-muted w-8 text-right flex-shrink-0 pt-0.5 font-mono">
                       {ml.lineNum}
