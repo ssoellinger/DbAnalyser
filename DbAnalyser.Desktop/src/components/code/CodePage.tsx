@@ -256,18 +256,33 @@ function CodeContent() {
       <div className="flex-1 flex flex-col min-w-0">
         <CodeTabBar />
 
-        {/* Toolbar with breadcrumb */}
+        {/* Toolbar with breadcrumb(s) */}
         {activeTab && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg-secondary">
             <Breadcrumb objectType={activeTab.objectType} fullName={activeTab.fullName} databaseName={databaseName} />
+            {splitTab && (
+              <>
+                <span className="text-text-muted text-[11px]">|</span>
+                <Breadcrumb objectType={splitTab.objectType} fullName={splitTab.fullName} databaseName={databaseName} />
+                <button
+                  onClick={closeSplit}
+                  className="text-text-muted hover:text-text-primary text-xs transition-colors"
+                  title="Close split"
+                >
+                  &times;
+                </button>
+              </>
+            )}
             <div className="ml-auto flex items-center gap-3 text-[11px]">
-              <button
-                onClick={() => toggleSplit(activeTab.id)}
-                className={`text-text-secondary hover:text-accent transition-colors ${splitTabId === activeTab.id ? 'text-accent' : ''}`}
-                title={splitTabId ? 'Close split view' : 'Split editor right'}
-              >
-                {splitTabId ? '◧ Unsplit' : '◫ Split'}
-              </button>
+              {tabs.length >= 2 && (
+                <button
+                  onClick={() => toggleSplit(activeTab.id)}
+                  className={`text-text-secondary hover:text-accent transition-colors ${splitTab ? 'text-accent' : ''}`}
+                  title={splitTab ? 'Close split view' : 'Split editor right'}
+                >
+                  {splitTab ? '◧ Unsplit' : '◫ Split'}
+                </button>
+              )}
               <button
                 onClick={handleFindRefs}
                 className="text-text-secondary hover:text-accent transition-colors"
@@ -296,26 +311,15 @@ function CodeContent() {
                 />
               </div>
               {splitTab && (
-                <div className="flex-1 min-w-0 flex flex-col">
-                  <div className="flex items-center gap-2 px-3 py-1 border-b border-border bg-bg-secondary text-[11px]">
-                    <Breadcrumb objectType={splitTab.objectType} fullName={splitTab.fullName} databaseName={databaseName} />
-                    <button
-                      onClick={closeSplit}
-                      className="ml-auto text-text-muted hover:text-text-primary transition-colors"
-                    >
-                      &times;
-                    </button>
-                  </div>
-                  <div className="flex-1 min-h-0">
-                    <CodeEditor
-                      key={`split-${splitTab.id}`}
-                      code={splitTab.definition}
-                      scrollPos={splitTab.scrollPos}
-                      onScrollChange={handleSplitScrollChange}
-                      resolveIdentifier={resolveId}
-                      onNavigate={handleNavigate}
-                    />
-                  </div>
+                <div className="flex-1 min-w-0">
+                  <CodeEditor
+                    key={`split-${splitTab.id}`}
+                    code={splitTab.definition}
+                    scrollPos={splitTab.scrollPos}
+                    onScrollChange={handleSplitScrollChange}
+                    resolveIdentifier={resolveId}
+                    onNavigate={handleNavigate}
+                  />
                 </div>
               )}
             </div>

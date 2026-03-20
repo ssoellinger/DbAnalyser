@@ -133,8 +133,20 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   },
 
   toggleSplit: (id) => {
-    const { splitTabId } = get();
-    set({ splitTabId: splitTabId === id ? null : id });
+    const { splitTabId, tabs, activeTabId } = get();
+    if (splitTabId) {
+      // Close split
+      set({ splitTabId: null });
+    } else {
+      // Open split with the previous tab (the one before active), or the next one
+      const activeIdx = tabs.findIndex((t) => t.id === activeTabId);
+      const otherTab = activeIdx > 0
+        ? tabs[activeIdx - 1]
+        : tabs.find((t) => t.id !== activeTabId);
+      if (otherTab) {
+        set({ splitTabId: otherTab.id });
+      }
+    }
   },
 
   closeSplit: () => set({ splitTabId: null }),
