@@ -21,8 +21,9 @@ const repoRoot = path.resolve(desktopRoot, '..');
 const apiOutputDir = path.join(desktopRoot, 'resources', 'api');
 
 // Determine target platform
+const platformIdx = process.argv.indexOf('--platform');
 const platformArg = process.argv.find(a => a.startsWith('--platform='))?.split('=')[1]
-  ?? process.argv[process.argv.indexOf('--platform') + 1];
+  ?? (platformIdx !== -1 ? process.argv[platformIdx + 1] : undefined);
 
 function detectRid() {
   const plat = os.platform();
