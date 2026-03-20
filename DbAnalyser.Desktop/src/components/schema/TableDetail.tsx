@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { DataTable } from '../shared/DataTable';
+import { OpenInCodeButton } from '../code/OpenInCodeButton';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { TableInfo, ColumnInfo, IndexInfo, ForeignKeyInfo } from '../../api/types';
 
@@ -90,7 +91,10 @@ export function TableDetail({ table }: { table: TableInfo }) {
 
   return (
     <div className="space-y-6">
-      <h3 className="text-base font-semibold text-text-primary">{table.fullName}</h3>
+      <div className="flex items-center gap-3">
+        <h3 className="text-base font-semibold text-text-primary">{table.fullName}</h3>
+        <OpenInCodeButton fullName={table.fullName} objectType="Table" label={table.tableName} variant="button" />
+      </div>
 
       <div>
         <h4 className="text-sm font-medium text-text-secondary mb-2">

@@ -3,6 +3,7 @@ import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
 import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
+import { OpenInCodeButton } from '../code/OpenInCodeButton';
 import { TableDetail } from './TableDetail';
 import {
   useReactTable,
@@ -76,7 +77,10 @@ function ViewDetail({ view }: { view: ViewInfo }) {
 
   return (
     <div className="space-y-6">
-      <h3 className="text-base font-semibold text-text-primary">{view.fullName}</h3>
+      <div className="flex items-center gap-3">
+        <h3 className="text-base font-semibold text-text-primary">{view.fullName}</h3>
+        <OpenInCodeButton fullName={view.fullName} objectType="View" label={view.viewName} definition={view.definition} variant="button" />
+      </div>
 
       {view.columns.length > 0 && (
         <div>
@@ -374,6 +378,13 @@ function SchemaTabContent({
             return v ? new Date(v).toLocaleDateString() : '—';
           },
         },
+        {
+          header: '',
+          id: 'actions',
+          cell: ({ row }) => (
+            <OpenInCodeButton fullName={row.original.fullName} objectType="Procedure" label={row.original.procedureName} definition={row.original.definition} />
+          ),
+        },
       ];
       return (
         <ExpandableDataTable
@@ -419,6 +430,13 @@ function SchemaTabContent({
             return v ? new Date(v).toLocaleDateString() : '—';
           },
         },
+        {
+          header: '',
+          id: 'actions',
+          cell: ({ row }) => (
+            <OpenInCodeButton fullName={row.original.fullName} objectType="Function" label={row.original.functionName} definition={row.original.definition} />
+          ),
+        },
       ];
       return (
         <ExpandableDataTable
@@ -451,6 +469,13 @@ function SchemaTabContent({
         { header: 'Type', accessorKey: 'triggerType' },
         { header: 'Events', accessorKey: 'triggerEvents' },
         { header: 'Enabled', accessorKey: 'isEnabled', cell: ({ getValue }) => getValue() ? 'Yes' : 'No' },
+        {
+          header: '',
+          id: 'actions',
+          cell: ({ row }) => (
+            <OpenInCodeButton fullName={row.original.fullName} objectType="Trigger" label={row.original.triggerName} definition={row.original.definition} />
+          ),
+        },
       ];
       return (
         <ExpandableDataTable

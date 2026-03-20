@@ -8,6 +8,7 @@ import { CodeEditor } from './CodeEditor';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
 import { generateTableDdl } from './tableDdlGenerator';
+import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
 
 export function CodePage() {
@@ -27,6 +28,16 @@ export function CodePage() {
   );
 }
 
+/* ── Reference result type ────────────────────────────────────────────── */
+
+interface ReferenceResult {
+  objectType: string;
+  fullName: string;
+  label: string;
+  definition: string;
+  matchLines: { lineNum: number; text: string }[];
+}
+
 function CodeContent() {
   const result = useStore((s) => s.result);
   const tabs = useCodeStore((s) => s.tabs);
@@ -35,6 +46,9 @@ function CodeContent() {
   const saveScrollPos = useCodeStore((s) => s.saveScrollPos);
   const [explorerWidth, setExplorerWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
+  const [refsOpen, setRefsOpen] = useState(false);
+  const [refsTarget, setRefsTarget] = useState<string | null>(null);
+  const [refsHeight, setRefsHeight] = useState(200);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
@@ -55,7 +69,6 @@ function CodeContent() {
   const handleNavigate = useCallback(
     (obj: ResolvedObject) => {
       let definition = obj.definition;
-      // For tables, generate DDL from current schema data
       if (obj.objectType === 'Table' && result?.schema) {
         const table = result.schema.tables.find((t) => t.fullName === obj.fullName);
         if (table) definition = generateTableDdl(table);
@@ -77,8 +90,61 @@ function CodeContent() {
     [activeTabId, saveScrollPos]
   );
 
-  // Resizable panel handler
-  const handleMouseDown = useCallback(
+  // Find all references for the active tab's object
+  const handleFindRefs = useCallback(() => {
+    if (!activeTab) return;
+    setRefsTarget(activeTab.fullName);
+    setRefsOpen(true);
+  }, [activeTab]);
+
+  const references = useMemo<ReferenceResult[]>(() => {
+    if (!refsTarget || !result?.schema) return [];
+    const schema = result.schema;
+    const target = refsTarget.toLowerCase();
+    // Also match unqualified name
+    const shortName = refsTarget.split('.').pop()?.toLowerCase() ?? target;
+
+    const allObjects: { objectType: string; fullName: string; label: string; definition: string }[] = [];
+    for (const v of schema.views)
+      allObjects.push({ objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
+    for (const p of schema.storedProcedures)
+      allObjects.push({ objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
+    for (const f of schema.functions)
+      allObjects.push({ objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
+    for (const t of schema.triggers)
+      allObjects.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
+
+    const results: ReferenceResult[] = [];
+    for (const obj of allObjects) {
+      // Don't list the object referencing itself
+      if (obj.fullName.toLowerCase() === target) continue;
+      if (!obj.definition) continue;
+
+      const defLower = obj.definition.toLowerCase();
+      // Check for the full name or short name as a word boundary match
+      if (!defLower.includes(target) && !defLower.includes(shortName)) continue;
+
+      const lines = obj.definition.split('\n');
+      const matchLines: { lineNum: number; text: string }[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        const lineLower = lines[i].toLowerCase();
+        if (lineLower.includes(target) || lineLower.includes(shortName)) {
+          matchLines.push({ lineNum: i + 1, text: lines[i] });
+          if (matchLines.length >= 3) break; // show first 3 per object
+        }
+      }
+
+      if (matchLines.length > 0) {
+        results.push({ ...obj, matchLines });
+      }
+    }
+
+    results.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    return results;
+  }, [refsTarget, result?.schema]);
+
+  // Resizable panel handlers
+  const handleExplorerResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       setIsResizing(true);
@@ -100,6 +166,35 @@ function CodeContent() {
     [explorerWidth]
   );
 
+  const handleRefsResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startHeight = refsHeight;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const newHeight = Math.max(100, Math.min(500, startHeight - (ev.clientY - startY)));
+        setRefsHeight(newHeight);
+      };
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    },
+    [refsHeight]
+  );
+
+  function openReference(ref: ReferenceResult) {
+    openTab({
+      objectType: ref.objectType,
+      fullName: ref.fullName,
+      label: ref.label,
+      definition: ref.definition,
+    });
+  }
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Object Explorer */}
@@ -109,7 +204,7 @@ function CodeContent() {
 
       {/* Resize handle */}
       <div
-        onMouseDown={handleMouseDown}
+        onMouseDown={handleExplorerResize}
         className={`w-1 cursor-col-resize hover:bg-accent/30 transition-colors flex-shrink-0 ${
           isResizing ? 'bg-accent/30' : ''
         }`}
@@ -119,16 +214,104 @@ function CodeContent() {
       <div className="flex-1 flex flex-col min-w-0">
         <CodeTabBar />
 
+        {/* Toolbar */}
+        {activeTab && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg-secondary text-[11px]">
+            <span className="text-text-muted">{activeTab.fullName}</span>
+            <span className="text-text-muted">·</span>
+            <span className="text-text-muted">{activeTab.objectType}</span>
+            <button
+              onClick={handleFindRefs}
+              className="ml-auto text-text-secondary hover:text-accent transition-colors"
+              title="Find all references to this object"
+            >
+              Find References
+            </button>
+          </div>
+        )}
+
         {activeTab ? (
-          <div className="flex-1 min-h-0">
-            <CodeEditor
-              key={activeTab.id}
-              code={activeTab.definition}
-              scrollPos={activeTab.scrollPos}
-              onScrollChange={handleScrollChange}
-              resolveIdentifier={resolveId}
-              onNavigate={handleNavigate}
-            />
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0">
+              <CodeEditor
+                key={activeTab.id}
+                code={activeTab.definition}
+                scrollPos={activeTab.scrollPos}
+                onScrollChange={handleScrollChange}
+                resolveIdentifier={resolveId}
+                onNavigate={handleNavigate}
+              />
+            </div>
+
+            {/* References panel */}
+            {refsOpen && (
+              <>
+                <div
+                  onMouseDown={handleRefsResize}
+                  className="h-1 cursor-row-resize hover:bg-accent/30 transition-colors flex-shrink-0"
+                />
+                <div
+                  style={{ height: refsHeight }}
+                  className="flex-shrink-0 border-t border-border bg-bg-secondary overflow-hidden flex flex-col"
+                >
+                  <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg-card">
+                    <span className="text-[11px] font-medium text-text-primary">
+                      References to {refsTarget}
+                    </span>
+                    <span className="text-[10px] text-text-muted">
+                      {references.length} object{references.length !== 1 ? 's' : ''}
+                    </span>
+                    <button
+                      onClick={() => setRefsOpen(false)}
+                      className="ml-auto text-text-muted hover:text-text-primary text-sm transition-colors"
+                    >
+                      &times;
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto">
+                    {references.length === 0 ? (
+                      <p className="px-3 py-4 text-xs text-text-muted text-center">
+                        No references found
+                      </p>
+                    ) : (
+                      references.map((ref) => {
+                        const color = OBJECT_TYPE_COLORS[ref.objectType] ?? '#666';
+                        return (
+                          <div key={ref.fullName} className="border-b border-border/30">
+                            <button
+                              onClick={() => openReference(ref)}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors"
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: color }}
+                              />
+                              <span className="font-medium text-text-primary">{ref.fullName}</span>
+                              <span className="text-[10px] text-text-muted">{ref.objectType}</span>
+                            </button>
+                            {ref.matchLines.map((ml, i) => (
+                              <button
+                                key={i}
+                                onClick={() => openReference(ref)}
+                                className="w-full flex items-start gap-2 pl-7 pr-3 py-0.5 text-[11px] hover:bg-bg-hover/50 transition-colors"
+                              >
+                                <span className="text-text-muted w-6 text-right flex-shrink-0 font-mono">
+                                  {ml.lineNum}
+                                </span>
+                                <span className="font-mono text-text-secondary truncate">
+                                  {ml.text.trim()}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-text-muted text-sm">

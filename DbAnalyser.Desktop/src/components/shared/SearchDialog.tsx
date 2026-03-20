@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, type JSX } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import { DataTable } from './DataTable';
+import { OpenInCodeButton } from '../code/OpenInCodeButton';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ColumnInfo, IndexInfo, ForeignKeyInfo, TableInfo, ViewInfo } from '../../api/types';
 
@@ -382,9 +383,12 @@ function DetailPanel({ item, result, onBack }: {
         />
         <span className="text-sm font-semibold text-text-primary">{item.name}</span>
         <span className="text-xs text-text-muted">{item.type}</span>
-        {profile && (
-          <span className="text-xs text-text-muted ml-auto">{profile.rowCount.toLocaleString()} rows</span>
-        )}
+        <span className="ml-auto flex items-center gap-3">
+          {profile && (
+            <span className="text-xs text-text-muted">{profile.rowCount.toLocaleString()} rows</span>
+          )}
+          <OpenInCodeButton fullName={item.name} objectType={item.type} definition={item.definition} variant="button" />
+        </span>
       </div>
 
       {/* Content */}

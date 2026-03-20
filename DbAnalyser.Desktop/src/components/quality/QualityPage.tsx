@@ -3,6 +3,7 @@ import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { DataTable } from '../shared/DataTable';
 import { AnalyzerLoader, RefreshButton } from '../shared/AnalyzerLoader';
+import { OpenInCodeButton } from '../code/OpenInCodeButton';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { QualityIssue, IssueSeverity } from '../../api/types';
 
@@ -23,7 +24,18 @@ export function QualityPage() {
   );
 }
 
+function resolveObjectType(objectName: string, schema: import('../../api/types').DatabaseSchema | null): string | null {
+  if (!schema) return null;
+  if (schema.tables.some((t) => t.fullName === objectName)) return 'Table';
+  if (schema.views.some((v) => v.fullName === objectName)) return 'View';
+  if (schema.storedProcedures.some((p) => p.fullName === objectName)) return 'Procedure';
+  if (schema.functions.some((f) => f.fullName === objectName)) return 'Function';
+  if (schema.triggers.some((t) => t.fullName === objectName)) return 'Trigger';
+  return null;
+}
+
 function QualityContent({ issues, refresh, loading }: { issues: QualityIssue[]; refresh: () => void; loading: boolean }) {
+  const schema = useStore((s) => s.result?.schema ?? null);
   const grouped = useMemo(() => {
     const groups: Record<IssueSeverity, QualityIssue[]> = {
       error: [],
@@ -61,7 +73,21 @@ function QualityContent({ issues, refresh, loading }: { issues: QualityIssue[]; 
       },
     },
     { header: 'Category', accessorKey: 'category' },
-    { header: 'Object', accessorKey: 'objectName' },
+    {
+      header: 'Object',
+      accessorKey: 'objectName',
+      cell: ({ getValue }) => {
+        const name = getValue() as string;
+        const type = resolveObjectType(name, schema);
+        if (!type) return name;
+        return (
+          <span className="flex items-center gap-2">
+            <span>{name}</span>
+            <OpenInCodeButton fullName={name} objectType={type} variant="icon" className="text-[11px]" />
+          </span>
+        );
+      },
+    },
     { header: 'Description', accessorKey: 'description' },
     {
       header: 'Recommendation',
