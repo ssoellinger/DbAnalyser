@@ -33,6 +33,29 @@ export function CodeSearchPage() {
   );
 }
 
+const HISTORY_KEY = 'dbanalyser-code-search-history';
+const MAX_HISTORY = 20;
+
+function loadHistory(): { query: string; isRegex: boolean; isCaseSensitive: boolean }[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveToHistory(entry: { query: string; isRegex: boolean; isCaseSensitive: boolean }) {
+  const history = loadHistory().filter((h) => h.query !== entry.query);
+  history.unshift(entry);
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+}
+
+function clearHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+}
+
 function CodeSearchContent() {
   const result = useStore((s) => s.result);
   const openTab = useCodeStore((s) => s.openTab);
@@ -42,11 +65,49 @@ function CodeSearchContent() {
   const [isCaseSensitive, setIsCaseSensitive] = useState(false);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [regexError, setRegexError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState(loadHistory);
   const inputRef = useRef<HTMLInputElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Close history dropdown on outside click
+  useEffect(() => {
+    if (!showHistory) return;
+    const handler = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showHistory]);
+
+  // Save to history when search produces results (debounced on query change)
+  useEffect(() => {
+    if (!query.trim() || regexError) return;
+    const timer = setTimeout(() => {
+      saveToHistory({ query, isRegex, isCaseSensitive });
+      setHistory(loadHistory());
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [query, isRegex, isCaseSensitive, regexError]);
+
+  function applyHistoryItem(item: { query: string; isRegex: boolean; isCaseSensitive: boolean }) {
+    setQuery(item.query);
+    setIsRegex(item.isRegex);
+    setIsCaseSensitive(item.isCaseSensitive);
+    setShowHistory(false);
+    inputRef.current?.focus();
+  }
+
+  function handleClearHistory() {
+    clearHistory();
+    setHistory([]);
+  }
 
   // Build all searchable objects
   const allObjects = useMemo(() => {
@@ -196,23 +257,74 @@ function CodeSearchContent() {
       {/* Search header */}
       <div className="p-4 border-b border-border space-y-3">
         <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-xl">
+          <div className="relative flex-1 max-w-xl" ref={historyRef}>
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => { if (!query && history.length > 0) setShowHistory(true); }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' && !query && history.length > 0) {
+                  setShowHistory(true);
+                }
+              }}
               placeholder={isRegex ? 'Search with regex pattern...' : 'Search across all SQL definitions...'}
-              className={`w-full px-4 py-2.5 bg-bg-card border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 ${
+              className={`w-full px-4 py-2.5 pr-16 bg-bg-card border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 ${
                 regexError ? 'border-severity-error' : 'border-border'
               }`}
             />
-            {query && (
-              <button
-                onClick={() => setQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary text-sm"
-              >
-                &times;
-              </button>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {history.length > 0 && (
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="text-text-muted hover:text-text-primary text-xs transition-colors"
+                  title="Search history"
+                >
+                  &#9776;
+                </button>
+              )}
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  className="text-text-muted hover:text-text-primary text-sm"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+
+            {/* History dropdown */}
+            {showHistory && history.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-bg-card border border-border rounded-lg shadow-2xl z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
+                  <span className="text-[10px] text-text-muted uppercase tracking-wider">Recent searches</span>
+                  <button
+                    onClick={handleClearHistory}
+                    className="text-[10px] text-text-muted hover:text-text-primary transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  {history.map((item, i) => (
+                    <button
+                      key={i}
+                      onClick={() => applyHistoryItem(item)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+                    >
+                      <span className="font-mono truncate flex-1 text-left">{item.query}</span>
+                      <span className="flex items-center gap-1 flex-shrink-0">
+                        {item.isRegex && (
+                          <span className="text-[9px] px-1 rounded bg-accent/15 text-accent">.*</span>
+                        )}
+                        {item.isCaseSensitive && (
+                          <span className="text-[9px] px-1 rounded bg-accent/15 text-accent">Aa</span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
@@ -290,8 +402,9 @@ function CodeSearchContent() {
               <div className="text-2xl">&#128270;</div>
               <p>Search across all stored procedures, functions, views, and triggers</p>
               <p className="text-[11px]">
-                Toggle <span className="font-mono bg-bg-card px-1 rounded">.*</span> for regex
-                and <span className="font-mono bg-bg-card px-1 rounded">Aa</span> for case-sensitive search
+                Toggle <span className="font-mono bg-bg-card px-1 rounded">.*</span> for regex,{' '}
+                <span className="font-mono bg-bg-card px-1 rounded">Aa</span> for case-sensitive.
+                {history.length > 0 && ' Recent searches shown on focus.'}
               </p>
             </div>
           </div>
