@@ -10,11 +10,14 @@ export interface CodeTab {
   goToLine?: number;    // line to scroll to after opening
 }
 
+export type ExplorerSort = 'name' | 'modified';
+
 interface CodeState {
   tabs: CodeTab[];
   activeTabId: string | null;
   explorerFilter: string;
   explorerCollapsed: Record<string, boolean>;
+  explorerSort: ExplorerSort;
   splitTabId: string | null; // secondary editor in split view
 
   openTab: (tab: Omit<CodeTab, 'id'>) => void;
@@ -24,10 +27,12 @@ interface CodeState {
   closeOtherTabs: (id: string) => void;
   setExplorerFilter: (filter: string) => void;
   toggleExplorerGroup: (group: string) => void;
+  setExplorerSort: (sort: ExplorerSort) => void;
   saveScrollPos: (id: string, pos: number) => void;
   clearGoToLine: (id: string) => void;
   toggleSplit: (id: string) => void;
   closeSplit: () => void;
+  moveTab: (fromIndex: number, toIndex: number) => void;
 }
 
 function makeTabId(type: string, fullName: string) {
@@ -39,6 +44,7 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   activeTabId: null,
   explorerFilter: '',
   explorerCollapsed: {},
+  explorerSort: 'name' as ExplorerSort,
   splitTabId: null,
 
   openTab: (tab) => {
@@ -100,6 +106,8 @@ export const useCodeStore = create<CodeState>((set, get) => ({
 
   setExplorerFilter: (filter) => set({ explorerFilter: filter }),
 
+  setExplorerSort: (sort) => set({ explorerSort: sort }),
+
   toggleExplorerGroup: (group) => {
     const { explorerCollapsed } = get();
     set({
@@ -130,4 +138,15 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   },
 
   closeSplit: () => set({ splitTabId: null }),
+
+  moveTab: (fromIndex, toIndex) => {
+    const { tabs } = get();
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || fromIndex >= tabs.length) return;
+    if (toIndex < 0 || toIndex >= tabs.length) return;
+    const newTabs = [...tabs];
+    const [moved] = newTabs.splice(fromIndex, 1);
+    newTabs.splice(toIndex, 0, moved);
+    set({ tabs: newTabs });
+  },
 }));
