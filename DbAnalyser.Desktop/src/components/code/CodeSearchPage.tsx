@@ -101,7 +101,8 @@ function CodeSearchContent() {
     setIsRegex(item.isRegex);
     setIsCaseSensitive(item.isCaseSensitive);
     setShowHistory(false);
-    inputRef.current?.focus();
+    // Delay focus so onFocus sees the updated query and doesn't reopen history
+    setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   function handleClearHistory() {

@@ -183,7 +183,7 @@ export function SearchDialog() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/60" onClick={() => { if (!detail && !expanded) toggleSearch(); }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/60" onClick={() => toggleSearch()}>
       <div
         className={`w-full bg-bg-card border border-border rounded-lg shadow-2xl overflow-hidden transition-all ${
           detail ? 'max-w-4xl' : expanded ? 'max-w-4xl' : 'max-w-lg'
@@ -196,6 +196,7 @@ export function SearchDialog() {
             item={detail}
             result={result}
             onBack={() => setDetail(null)}
+            onClose={toggleSearch}
           />
         ) : (
           <>
@@ -226,6 +227,13 @@ export function SearchDialog() {
                   Code
                 </button>
                 <span className="text-[9px] text-text-muted ml-1">Tab</span>
+                <button
+                  onClick={toggleSearch}
+                  className="ml-2 text-text-muted hover:text-text-primary text-sm transition-colors"
+                  title="Close (Esc)"
+                >
+                  &times;
+                </button>
               </div>
             </div>
 
@@ -304,10 +312,11 @@ export function SearchDialog() {
 
 /* ── Detail Panel ──────────────────────────────────────────────────────── */
 
-function DetailPanel({ item, result, onBack }: {
+function DetailPanel({ item, result, onBack, onClose }: {
   item: SearchItem;
   result: import('../../api/types').AnalysisResult | null;
   onBack: () => void;
+  onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -387,7 +396,16 @@ function DetailPanel({ item, result, onBack }: {
           {profile && (
             <span className="text-xs text-text-muted">{profile.rowCount.toLocaleString()} rows</span>
           )}
-          <OpenInCodeButton fullName={item.name} objectType={item.type} definition={item.definition} variant="button" />
+          <span onClick={onClose}>
+            <OpenInCodeButton fullName={item.name} objectType={item.type} definition={item.definition} variant="button" />
+          </span>
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text-primary text-sm transition-colors"
+            title="Close search"
+          >
+            &times;
+          </button>
         </span>
       </div>
 

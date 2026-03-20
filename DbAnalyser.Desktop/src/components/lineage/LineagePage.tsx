@@ -30,12 +30,13 @@ function LineageGraphInner() {
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(true);
 
   const suggestions = useMemo(() => {
-    if (!query.trim()) return [];
+    if (!dropdownOpen || !query.trim()) return [];
     const q = query.toLowerCase();
     return allObjects.filter((o) => o.name.toLowerCase().includes(q)).slice(0, 10);
-  }, [allObjects, query]);
+  }, [allObjects, query, dropdownOpen]);
 
   const typeMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -176,7 +177,7 @@ function LineageGraphInner() {
       <div className="relative max-w-md">
         <input
           value={query}
-          onChange={(e) => { setQuery(e.target.value); }}
+          onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true); }}
           placeholder="Search for an object..."
           className="w-full bg-bg-card border border-border rounded px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
         />
@@ -188,6 +189,7 @@ function LineageGraphInner() {
                 onClick={() => {
                   setSelected(s.name);
                   setQuery(s.name);
+                  setDropdownOpen(false);
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-hover text-sm transition-colors"
               >
