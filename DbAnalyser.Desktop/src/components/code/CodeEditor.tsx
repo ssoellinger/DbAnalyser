@@ -7,6 +7,7 @@ import { search, highlightSelectionMatches } from '@codemirror/search';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from './codemirrorTheme';
 import { clickthroughExtension } from './codemirrorClickthrough';
+import { sqlFoldService } from './sqlFolding';
 import type { ResolvedObject } from './sqlIdentifierResolver';
 
 interface CodeEditorProps {
@@ -38,7 +39,8 @@ export function CodeEditor({
       lineNumbers(),
       highlightActiveLine(),
       highlightActiveLineGutter(),
-      foldGutter(),
+      foldGutter({ openText: '▾', closedText: '▸' }),
+      sqlFoldService,
       bracketMatching(),
       history(),
       search(),

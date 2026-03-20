@@ -39,6 +39,20 @@ export const dbAnalyserEditorTheme = EditorView.theme({
   },
   '.cm-foldGutter .cm-gutterElement': {
     padding: '0 4px',
+    color: '#666',
+    cursor: 'pointer',
+  },
+  '.cm-foldGutter .cm-gutterElement:hover': {
+    color: '#4fc3f7',
+  },
+  '.cm-foldPlaceholder': {
+    backgroundColor: '#252540',
+    border: '1px solid #2a2a40',
+    color: '#888',
+    borderRadius: '3px',
+    padding: '0 6px',
+    margin: '0 4px',
+    cursor: 'pointer',
   },
   '.cm-selectionMatch': {
     backgroundColor: '#4fc3f720',
