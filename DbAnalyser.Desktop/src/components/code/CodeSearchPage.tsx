@@ -38,7 +38,10 @@ function CodeSearchContent() {
   const openTab = useCodeStore((s) => s.openTab);
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  const [isRegex, setIsRegex] = useState(false);
+  const [isCaseSensitive, setIsCaseSensitive] = useState(false);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+  const [regexError, setRegexError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -70,50 +73,67 @@ function CodeSearchContent() {
     return items;
   }, [result]);
 
+  // Build regex or plain matcher
+  const matcher = useMemo<{ regex: RegExp | null; error: string | null }>(() => {
+    const q = query.trim();
+    if (!q) return { regex: null, error: null };
+
+    if (isRegex) {
+      try {
+        const flags = isCaseSensitive ? 'g' : 'gi';
+        const re = new RegExp(q, flags);
+        return { regex: re, error: null };
+      } catch (e: any) {
+        return { regex: null, error: e.message ?? 'Invalid regex' };
+      }
+    }
+
+    // Plain text: escape for regex use
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const flags = isCaseSensitive ? 'g' : 'gi';
+    return { regex: new RegExp(escaped, flags), error: null };
+  }, [query, isRegex, isCaseSensitive]);
+
+  // Update error state
+  useEffect(() => {
+    setRegexError(matcher.error);
+  }, [matcher.error]);
+
   // Search results
   const results = useMemo<SearchResult[]>(() => {
-    const q = query.trim();
-    if (!q) return [];
-    const qLower = q.toLowerCase();
+    if (!matcher.regex) return [];
+    const re = matcher.regex;
 
     const matched: SearchResult[] = [];
     for (const obj of allObjects) {
       if (typeFilter.size > 0 && !typeFilter.has(obj.objectType)) continue;
       if (!obj.definition) continue;
 
-      const defLower = obj.definition.toLowerCase();
-      if (!defLower.includes(qLower)) continue;
-
       const lines = obj.definition.split('\n');
       const matchLines: { lineNum: number; text: string }[] = [];
       let totalMatches = 0;
 
       for (let i = 0; i < lines.length; i++) {
-        const lineLower = lines[i].toLowerCase();
-        let idx = lineLower.indexOf(qLower);
-        if (idx !== -1) {
+        re.lastIndex = 0;
+        const lineMatches = lines[i].match(new RegExp(re.source, re.flags));
+        if (lineMatches && lineMatches.length > 0) {
           matchLines.push({ lineNum: i + 1, text: lines[i] });
-          // Count all matches in this line
-          while (idx !== -1) {
-            totalMatches++;
-            idx = lineLower.indexOf(qLower, idx + 1);
-          }
+          totalMatches += lineMatches.length;
         }
       }
 
       if (matchLines.length > 0) {
         matched.push({
           ...obj,
-          matchLines: matchLines.slice(0, 5), // show first 5 matching lines
+          matchLines: matchLines.slice(0, 5),
           totalMatches,
         });
       }
     }
 
-    // Sort by total matches descending
     matched.sort((a, b) => b.totalMatches - a.totalMatches);
     return matched;
-  }, [allObjects, query, typeFilter]);
+  }, [allObjects, matcher.regex, typeFilter]);
 
   // Type counts for filter buttons
   const typeCounts = useMemo(() => {
@@ -149,23 +169,23 @@ function CodeSearchContent() {
     navigate('/code');
   }
 
-  function highlightCode(text: string, q: string): JSX.Element {
-    if (!q) return <>{text}</>;
+  function highlightCode(text: string): JSX.Element {
+    if (!matcher.regex) return <>{text}</>;
     const parts: (string | JSX.Element)[] = [];
-    const lower = text.toLowerCase();
-    const qLower = q.toLowerCase();
+    const re = new RegExp(matcher.regex.source, matcher.regex.flags);
     let lastIdx = 0;
-    let idx = lower.indexOf(qLower);
+    let match: RegExpExecArray | null;
     let key = 0;
-    while (idx !== -1) {
-      if (idx > lastIdx) parts.push(text.slice(lastIdx, idx));
+    re.lastIndex = 0;
+    while ((match = re.exec(text)) !== null) {
+      if (match[0].length === 0) { re.lastIndex++; continue; } // prevent infinite loop on zero-length match
+      if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
       parts.push(
         <span key={key++} className="bg-accent/30 text-accent rounded px-0.5">
-          {text.slice(idx, idx + q.length)}
+          {match[0]}
         </span>
       );
-      lastIdx = idx + q.length;
-      idx = lower.indexOf(qLower, lastIdx);
+      lastIdx = match.index + match[0].length;
     }
     if (lastIdx < text.length) parts.push(text.slice(lastIdx));
     return <>{parts}</>;
@@ -181,8 +201,10 @@ function CodeSearchContent() {
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search across all SQL definitions..."
-              className="w-full px-4 py-2.5 bg-bg-card border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+              placeholder={isRegex ? 'Search with regex pattern...' : 'Search across all SQL definitions...'}
+              className={`w-full px-4 py-2.5 bg-bg-card border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 ${
+                regexError ? 'border-severity-error' : 'border-border'
+              }`}
             />
             {query && (
               <button
@@ -193,15 +215,49 @@ function CodeSearchContent() {
               </button>
             )}
           </div>
-          {query && (
+
+          {/* Search mode toggles */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIsRegex(!isRegex)}
+              className={`px-2 py-1.5 rounded text-[11px] font-mono transition-colors border ${
+                isRegex
+                  ? 'bg-accent/15 text-accent border-accent/40'
+                  : 'text-text-muted border-border hover:text-text-secondary hover:border-text-muted'
+              }`}
+              title="Use regular expressions"
+            >
+              .*
+            </button>
+            <button
+              onClick={() => setIsCaseSensitive(!isCaseSensitive)}
+              className={`px-2 py-1.5 rounded text-[11px] font-mono transition-colors border ${
+                isCaseSensitive
+                  ? 'bg-accent/15 text-accent border-accent/40'
+                  : 'text-text-muted border-border hover:text-text-secondary hover:border-text-muted'
+              }`}
+              title="Match case"
+            >
+              Aa
+            </button>
+          </div>
+
+          {query && !regexError && (
             <span className="text-xs text-text-muted">
               {totalMatches} match{totalMatches !== 1 ? 'es' : ''} in {results.length} object{results.length !== 1 ? 's' : ''}
             </span>
           )}
         </div>
 
+        {/* Regex error */}
+        {regexError && (
+          <div className="text-xs text-severity-error">
+            Invalid regex: {regexError}
+          </div>
+        )}
+
         {/* Type filter chips */}
-        {query && Object.keys(typeCounts).length > 0 && (
+        {query && !regexError && Object.keys(typeCounts).length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] text-text-muted uppercase tracking-wider">Filter:</span>
             {Object.entries(typeCounts).map(([type, count]) => {
@@ -233,12 +289,15 @@ function CodeSearchContent() {
             <div className="text-center space-y-2">
               <div className="text-2xl">&#128270;</div>
               <p>Search across all stored procedures, functions, views, and triggers</p>
-              <p className="text-[11px]">Results are grouped by object with matching lines highlighted</p>
+              <p className="text-[11px]">
+                Toggle <span className="font-mono bg-bg-card px-1 rounded">.*</span> for regex
+                and <span className="font-mono bg-bg-card px-1 rounded">Aa</span> for case-sensitive search
+              </p>
             </div>
           </div>
         )}
 
-        {query.trim() && results.length === 0 && (
+        {query.trim() && !regexError && results.length === 0 && (
           <div className="flex items-center justify-center h-48 text-text-muted text-sm">
             No matches found for "{query}"
           </div>
@@ -276,7 +335,7 @@ function CodeSearchContent() {
                       {ml.lineNum}
                     </span>
                     <span className="text-xs font-mono text-text-secondary truncate">
-                      {highlightCode(ml.text.trim(), query)}
+                      {highlightCode(ml.text.trim())}
                     </span>
                   </div>
                 ))}
