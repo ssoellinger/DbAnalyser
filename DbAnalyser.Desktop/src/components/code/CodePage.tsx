@@ -5,11 +5,14 @@ import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { ObjectExplorer } from './ObjectExplorer';
 import { CodeTabBar } from './CodeTabBar';
 import { CodeEditor } from './CodeEditor';
+import { ParameterBar } from './ParameterBar';
+import { DependencyMiniView } from './DependencyMiniView';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
 import { generateTableDdl } from './tableDdlGenerator';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
+import type { TooltipInfo } from './codemirrorTooltip';
 
 export function CodePage() {
   const { status, error, progress, refresh, cancel } = useAnalyzer('schema');
@@ -98,6 +101,40 @@ function CodeContent() {
   const resolveId = useCallback(
     (text: string) => resolveIdentifier(text, identifierMap),
     [identifierMap]
+  );
+
+  // Build tooltip resolver — returns column info for tables/views, peek for procs/funcs
+  const resolveTooltip = useCallback(
+    (text: string): TooltipInfo | null => {
+      const resolved = resolveIdentifier(text, identifierMap);
+      if (!resolved || !result?.schema) return null;
+
+      const schema = result.schema;
+
+      if (resolved.objectType === 'Table') {
+        const table = schema.tables.find((t) => t.fullName === resolved.fullName);
+        if (table) return { objectType: 'Table', fullName: resolved.fullName, columns: table.columns };
+      }
+      if (resolved.objectType === 'View') {
+        const view = schema.views.find((v) => v.fullName === resolved.fullName);
+        if (view) return { objectType: 'View', fullName: resolved.fullName, columns: view.columns, definition: view.definition };
+      }
+      if (resolved.objectType === 'Procedure') {
+        const proc = schema.storedProcedures.find((p) => p.fullName === resolved.fullName);
+        if (proc) return { objectType: 'Procedure', fullName: resolved.fullName, definition: proc.definition };
+      }
+      if (resolved.objectType === 'Function') {
+        const func = schema.functions.find((f) => f.fullName === resolved.fullName);
+        if (func) return { objectType: 'Function', fullName: resolved.fullName, functionType: func.functionType, definition: func.definition };
+      }
+      if (resolved.objectType === 'Trigger') {
+        const trig = schema.triggers.find((t) => t.fullName === resolved.fullName);
+        if (trig) return { objectType: 'Trigger', fullName: resolved.fullName, definition: trig.definition };
+      }
+
+      return null;
+    },
+    [identifierMap, result?.schema]
   );
 
   const handleNavigate = useCallback(
@@ -296,6 +333,10 @@ function CodeContent() {
 
         {activeTab ? (
           <div className="flex-1 min-h-0 flex flex-col">
+            {/* Parameter bar & dependency mini-view */}
+            <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
+            <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
+
             {/* Editor(s) */}
             <div className="flex-1 min-h-0 flex">
               <div className={splitTab ? 'flex-1 min-w-0 border-r border-border' : 'flex-1 min-w-0'}>
@@ -308,6 +349,7 @@ function CodeContent() {
                   onScrollChange={handleScrollChange}
                   resolveIdentifier={resolveId}
                   onNavigate={handleNavigate}
+                  resolveTooltip={resolveTooltip}
                 />
               </div>
               {splitTab && (
@@ -319,6 +361,7 @@ function CodeContent() {
                     onScrollChange={handleSplitScrollChange}
                     resolveIdentifier={resolveId}
                     onNavigate={handleNavigate}
+                    resolveTooltip={resolveTooltip}
                   />
                 </div>
               )}

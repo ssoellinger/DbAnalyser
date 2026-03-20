@@ -8,6 +8,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from './codemirrorTheme';
 import { clickthroughExtension } from './codemirrorClickthrough';
 import { sqlFoldService } from './sqlFolding';
+import { hoverTooltipExtension, type TooltipInfo } from './codemirrorTooltip';
 import type { ResolvedObject } from './sqlIdentifierResolver';
 
 interface CodeEditorProps {
@@ -18,6 +19,7 @@ interface CodeEditorProps {
   onGoToLineDone?: () => void;
   resolveIdentifier?: (text: string) => ResolvedObject | null;
   onNavigate?: (obj: ResolvedObject) => void;
+  resolveTooltip?: (text: string) => TooltipInfo | null;
 }
 
 export function CodeEditor({
@@ -28,6 +30,7 @@ export function CodeEditor({
   onGoToLineDone,
   resolveIdentifier,
   onNavigate,
+  resolveTooltip,
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -57,8 +60,12 @@ export function CodeEditor({
       exts.push(...clickthroughExtension(resolveIdentifier, onNavigate));
     }
 
+    if (resolveTooltip) {
+      exts.push(hoverTooltipExtension(resolveTooltip));
+    }
+
     return exts;
-  }, [resolveIdentifier, onNavigate]);
+  }, [resolveIdentifier, onNavigate, resolveTooltip]);
 
   // Create/recreate editor when extensions change
   useEffect(() => {

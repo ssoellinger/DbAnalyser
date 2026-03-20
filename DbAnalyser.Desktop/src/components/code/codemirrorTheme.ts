@@ -94,6 +94,14 @@ export const dbAnalyserEditorTheme = EditorView.theme({
     border: '1px solid #2a2a40',
     color: '#e0e0e0',
   },
+  '.cm-tooltip .cm-sql-tooltip': {
+    padding: '8px 10px',
+    maxWidth: '450px',
+    maxHeight: '300px',
+    overflowY: 'auto',
+    fontSize: '12px',
+    lineHeight: '1.4',
+  },
   // Click-through styles
   '.cm-clickable-identifier': {
     cursor: 'pointer',
