@@ -84,13 +84,13 @@ export const indentGuidesExtension = [indentGuidePlugin, indentGuideTheme];
 
 /* ── Bracket Pair Colorization ────────────────────────────────────────── */
 
-const BRACKET_COLORS = ['#4fc3f7', '#bb86fc', '#f0a500', '#4ecca3', '#e94560', '#ff7043'];
+const BRACKET_COLORS = ['#ffd700', '#ff5277', '#00e5ff', '#69f0ae', '#ea80fc', '#ffab40'];
 
-const bracketColorTheme = EditorView.baseTheme(
+const bracketColorTheme = EditorView.theme(
   Object.fromEntries(
     BRACKET_COLORS.map((color, i) => [
-      `.cm-bracket-color-${i}`,
-      { color: `${color} !important` },
+      `& .cm-bracket-color-${i}`,
+      { color: `${color} !important`, fontWeight: 'bold' },
     ])
   )
 );
