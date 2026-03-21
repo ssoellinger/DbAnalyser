@@ -16,7 +16,7 @@ interface ObjectItem {
   databaseName?: string;
 }
 
-const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers'];
+const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers', 'Synonyms'];
 
 const GROUP_ICONS: Record<string, string> = {
   Tables: '⊟',
@@ -24,6 +24,7 @@ const GROUP_ICONS: Record<string, string> = {
   Procedures: '⊞',
   Functions: 'ƒ',
   Triggers: '⚡',
+  Synonyms: '↔',
 };
 
 const USAGE_COLORS: Record<UsageLevel, string> = {
@@ -45,6 +46,7 @@ function groupTypeKey(group: string): string {
   if (group === 'Tables') return 'Table';
   if (group === 'Views') return 'View';
   if (group === 'Functions') return 'Function';
+  if (group === 'Synonyms') return 'Synonym';
   return 'Trigger';
 }
 
@@ -130,6 +132,15 @@ export function ObjectExplorer() {
         usageLevel: usageMap.get(t.fullName),
         referencedBy: refCountMap.get(t.fullName) ?? 0,
         databaseName: t.databaseName,
+      })),
+      Synonyms: schema.synonyms.map((s) => ({
+        objectType: 'Synonym',
+        fullName: s.fullName,
+        label: s.synonymName,
+        definition: `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};`,
+        usageLevel: usageMap.get(s.fullName),
+        referencedBy: refCountMap.get(s.fullName) ?? 0,
+        databaseName: s.databaseName,
       })),
     };
     return items;

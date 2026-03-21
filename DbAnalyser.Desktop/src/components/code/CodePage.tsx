@@ -110,6 +110,10 @@ function CodeContent() {
       if (objectType === 'Procedure') return schema.storedProcedures.find((p) => p.fullName === fullName)?.definition ?? '';
       if (objectType === 'Function') return schema.functions.find((f) => f.fullName === fullName)?.definition ?? '';
       if (objectType === 'Trigger') return schema.triggers.find((t) => t.fullName === fullName)?.definition ?? '';
+      if (objectType === 'Synonym') {
+        const s = schema.synonyms.find((s) => s.fullName === fullName);
+        return s ? `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};` : '';
+      }
       return '';
     });
   }); // runs every render but exits early via initializedRef
@@ -497,6 +501,21 @@ function CodeContent() {
                   FK Graph
                 </button>
               )}
+              {activeTab && activeTab.objectType === 'Synonym' && result?.schema && (() => {
+                const syn = result.schema.synonyms.find((s) => s.fullName === activeTab.fullName);
+                if (!syn) return null;
+                const targetObj = identifierMap.get(syn.baseObjectName.toLowerCase());
+                if (!targetObj) return null;
+                return (
+                  <button
+                    onClick={() => handleNavigate(targetObj)}
+                    className="text-text-secondary hover:text-accent transition-colors"
+                    title={`Navigate to ${syn.baseObjectName}`}
+                  >
+                    Go to Target
+                  </button>
+                );
+              })()}
               <div className="relative">
                 <button
                   onClick={() => setShowSettings(!showSettings)}
@@ -539,8 +558,42 @@ function CodeContent() {
 
         {activeTab ? (
           <div className="flex-1 min-h-0 flex flex-col">
-            {/* Parameter bar & dependency mini-view */}
+            {/* Parameter bar, trigger metadata & dependency mini-view */}
             <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
+            {activeTab.objectType === 'Trigger' && result?.schema && (() => {
+              const trig = result.schema.triggers.find((t) => t.fullName === activeTab.fullName);
+              if (!trig) return null;
+              return (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-bg-primary overflow-x-auto scrollbar-none">
+                  <span className="text-[10px] text-text-muted flex-shrink-0">Trigger:</span>
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-card border border-border/50 text-[10px]">
+                    <span className="text-text-muted">Type</span>
+                    <span className="text-accent font-medium">{trig.triggerType}</span>
+                  </span>
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-card border border-border/50 text-[10px]">
+                    <span className="text-text-muted">Events</span>
+                    <span className="text-node-function font-medium">{trig.triggerEvents}</span>
+                  </span>
+                  <button
+                    onClick={() => {
+                      const table = result.schema!.tables.find((t) => t.fullName === trig.parentFullName);
+                      if (table) {
+                        openTab({ objectType: 'Table', fullName: table.fullName, label: table.tableName, definition: generateTableDdl(table) });
+                      }
+                    }}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-card border border-border/50 text-[10px] hover:border-accent/30 transition-colors"
+                  >
+                    <span className="text-text-muted">On</span>
+                    <span className="text-text-primary font-medium">{trig.parentTable}</span>
+                  </button>
+                  {!trig.isEnabled && (
+                    <span className="px-1.5 py-0.5 rounded bg-severity-error/10 text-severity-error text-[10px] font-medium">
+                      DISABLED
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
             <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
             {(activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
               <ExecutionChainPanel fullName={activeTab.fullName} objectType={activeTab.objectType} />

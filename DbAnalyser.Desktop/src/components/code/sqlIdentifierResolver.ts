@@ -97,6 +97,17 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
     addAllVariants(t.fullName, t.schemaName, t.triggerName, t.databaseName, obj);
   }
 
+  // Synonyms — resolve to the synonym itself (shows CREATE SYNONYM DDL)
+  for (const s of schema.synonyms) {
+    const obj: ResolvedObject = {
+      objectType: 'Synonym',
+      fullName: s.fullName,
+      label: s.synonymName,
+      definition: `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};`,
+    };
+    addAllVariants(s.fullName, s.schemaName, s.synonymName, s.databaseName, obj);
+  }
+
   return map;
 }
 

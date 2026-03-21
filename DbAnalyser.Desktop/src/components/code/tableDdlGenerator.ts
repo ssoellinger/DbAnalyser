@@ -45,5 +45,17 @@ export function generateTableDdl(table: TableInfo): string {
     }
   }
 
+  // Indexes (skip primary key — already in CREATE TABLE)
+  const nonPkIndexes = table.indexes.filter((idx) => !idx.isClustered || !idx.isUnique || idx.columns.length !== pkCols.length);
+  if (nonPkIndexes.length > 0) {
+    lines.push('');
+    for (const idx of nonPkIndexes) {
+      const unique = idx.isUnique ? 'UNIQUE ' : '';
+      const clustered = idx.isClustered ? 'CLUSTERED ' : 'NONCLUSTERED ';
+      lines.push(`CREATE ${unique}${clustered}INDEX [${idx.name}]`);
+      lines.push(`    ON [${table.schemaName}].[${table.tableName}] (${idx.columns.map((c) => `[${c}]`).join(', ')});`);
+    }
+  }
+
   return lines.join('\n');
 }
