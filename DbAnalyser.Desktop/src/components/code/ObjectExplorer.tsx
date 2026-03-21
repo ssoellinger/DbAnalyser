@@ -65,45 +65,19 @@ export function ObjectExplorer() {
     return new Map(result.usageAnalysis.objects.map((o) => [o.objectName, o.usageLevel]));
   }, [result?.usageAnalysis]);
 
-  // Build "referenced by" counts — scan all definitions for references to each object
+  // Build "referenced by" counts from API dependency data (pre-computed, fast)
   const refCountMap = useMemo(() => {
-    if (!result?.schema) return new Map<string, number>();
-    const schema = result.schema;
     const counts = new Map<string, number>();
-
-    // Collect all object names we want to count references for
-    const allNames: string[] = [];
-    for (const t of schema.tables) allNames.push(t.fullName);
-    for (const v of schema.views) allNames.push(v.fullName);
-    for (const p of schema.storedProcedures) allNames.push(p.fullName);
-    for (const f of schema.functions) allNames.push(f.fullName);
-    for (const t of schema.triggers) allNames.push(t.fullName);
-
-    // Collect all definitions
-    const allDefs: { fullName: string; definition: string }[] = [];
-    for (const v of schema.views) if (v.definition) allDefs.push({ fullName: v.fullName, definition: v.definition });
-    for (const p of schema.storedProcedures) if (p.definition) allDefs.push({ fullName: p.fullName, definition: p.definition });
-    for (const f of schema.functions) if (f.definition) allDefs.push({ fullName: f.fullName, definition: f.definition });
-    for (const t of schema.triggers) if (t.definition) allDefs.push({ fullName: t.fullName, definition: t.definition });
-
-    for (const name of allNames) {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const shortName = name.split('.').pop() ?? name;
-      const shortEscaped = shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Word boundary match to avoid "User" matching "UserRole"
-      const re = new RegExp(`\\b(?:${escaped}|${shortEscaped})\\b`, 'i');
-      let count = 0;
-      for (const def of allDefs) {
-        if (def.fullName === name) continue;
-        if (re.test(def.definition)) {
-          count++;
+    const deps = result?.relationships?.dependencies;
+    if (deps) {
+      for (const d of deps) {
+        if (d.referencedBy.length > 0) {
+          counts.set(d.fullName, d.referencedBy.length);
         }
       }
-      if (count > 0) counts.set(name, count);
     }
-
     return counts;
-  }, [result?.schema]);
+  }, [result?.relationships?.dependencies]);
 
   const groups = useMemo(() => {
     if (!result?.schema) return {};

@@ -241,33 +241,39 @@ function CodeContent() {
   const references = useMemo<ReferenceResult[]>(() => {
     if (!refsTarget || !result?.schema) return [];
     const schema = result.schema;
-    const target = refsTarget.toLowerCase();
-    const shortName = refsTarget.split('.').pop()?.toLowerCase() ?? target;
+    const deps = result.relationships?.dependencies;
 
-    const allObjects: { objectType: string; fullName: string; label: string; definition: string }[] = [];
+    // Use API dependency data to get accurate referencing objects
+    const referencingNames = new Set<string>();
+    if (deps) {
+      const entry = deps.find((d) => d.fullName === refsTarget);
+      if (entry) {
+        for (const name of entry.referencedBy) referencingNames.add(name);
+      }
+    }
+
+    // Build lookup for object definitions
+    const objMap = new Map<string, { objectType: string; fullName: string; label: string; definition: string }>();
     for (const v of schema.views)
-      allObjects.push({ objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
+      objMap.set(v.fullName, { objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
     for (const p of schema.storedProcedures)
-      allObjects.push({ objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
+      objMap.set(p.fullName, { objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
     for (const f of schema.functions)
-      allObjects.push({ objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
+      objMap.set(f.fullName, { objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
     for (const t of schema.triggers)
-      allObjects.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
+      objMap.set(t.fullName, { objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
 
-    // Word boundary regex to avoid false positives like "User" matching "UserRole"
+    // Find matching lines in each referencing object's definition
+    const shortName = refsTarget.split('.').pop() ?? refsTarget;
     const escapedTarget = refsTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const escapedShort = shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const refRe = new RegExp(`\\b(?:${escapedTarget}|${escapedShort})\\b`, 'gi');
+    const lineRe = new RegExp(`\\b(?:${escapedTarget}|${escapedShort})\\b`, 'i');
 
     const results: ReferenceResult[] = [];
-    for (const obj of allObjects) {
-      if (obj.fullName.toLowerCase() === target) continue;
-      if (!obj.definition) continue;
+    for (const refName of referencingNames) {
+      const obj = objMap.get(refName);
+      if (!obj || !obj.definition) continue;
 
-      refRe.lastIndex = 0;
-      if (!refRe.test(obj.definition)) continue;
-
-      const lineRe = new RegExp(`\\b(?:${escapedTarget}|${escapedShort})\\b`, 'i');
       const lines = obj.definition.split('\n');
       const matchLines: { lineNum: number; text: string }[] = [];
       for (let i = 0; i < lines.length; i++) {
@@ -277,14 +283,12 @@ function CodeContent() {
         }
       }
 
-      if (matchLines.length > 0) {
-        results.push({ ...obj, matchLines });
-      }
+      results.push({ ...obj, matchLines });
     }
 
     results.sort((a, b) => a.fullName.localeCompare(b.fullName));
     return results;
-  }, [refsTarget, result?.schema]);
+  }, [refsTarget, result?.schema, result?.relationships?.dependencies]);
 
   // Resizable panel handlers
   const handleExplorerResize = useCallback(

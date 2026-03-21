@@ -21,57 +21,42 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
   const openTab = useCodeStore((s) => s.openTab);
   const [expanded, setExpanded] = useState(false);
 
-  const { dependsOn, referencedBy } = useMemo(() => {
-    if (!result?.schema) return { dependsOn: [], referencedBy: [] };
+  // Build a lookup for resolving fullName → DepItem
+  const objectLookup = useMemo(() => {
+    if (!result?.schema) return new Map<string, DepItem>();
     const schema = result.schema;
-    const nameLower = fullName.toLowerCase();
-    const shortName = fullName.split('.').pop()?.toLowerCase() ?? nameLower;
-
-    // Collect all objects with definitions
-    const allObjects: DepItem[] = [];
+    const map = new Map<string, DepItem>();
     for (const t of schema.tables)
-      allObjects.push({ fullName: t.fullName, objectType: 'Table', label: t.tableName, definition: generateTableDdl(t) });
+      map.set(t.fullName, { fullName: t.fullName, objectType: 'Table', label: t.tableName, definition: generateTableDdl(t) });
     for (const v of schema.views)
-      allObjects.push({ fullName: v.fullName, objectType: 'View', label: v.viewName, definition: v.definition ?? '' });
+      map.set(v.fullName, { fullName: v.fullName, objectType: 'View', label: v.viewName, definition: v.definition ?? '' });
     for (const p of schema.storedProcedures)
-      allObjects.push({ fullName: p.fullName, objectType: 'Procedure', label: p.procedureName, definition: p.definition ?? '' });
+      map.set(p.fullName, { fullName: p.fullName, objectType: 'Procedure', label: p.procedureName, definition: p.definition ?? '' });
     for (const f of schema.functions)
-      allObjects.push({ fullName: f.fullName, objectType: 'Function', label: f.functionName, definition: f.definition ?? '' });
+      map.set(f.fullName, { fullName: f.fullName, objectType: 'Function', label: f.functionName, definition: f.definition ?? '' });
     for (const t of schema.triggers)
-      allObjects.push({ fullName: t.fullName, objectType: 'Trigger', label: t.triggerName, definition: t.definition ?? '' });
+      map.set(t.fullName, { fullName: t.fullName, objectType: 'Trigger', label: t.triggerName, definition: t.definition ?? '' });
+    return map;
+  }, [result?.schema]);
 
-    // Find the current object's definition
-    const currentObj = allObjects.find((o) => o.fullName === fullName);
-    const currentDef = currentObj?.definition ?? '';
+  // Use API dependency data (pre-computed by the relationships analyzer)
+  const { dependsOn, referencedBy } = useMemo(() => {
+    const deps = result?.relationships?.dependencies;
+    if (!deps) return { dependsOn: [], referencedBy: [] };
 
-    // dependsOn: objects whose names appear in the current object's definition (word boundary match)
-    const dependsOn: DepItem[] = [];
-    for (const obj of allObjects) {
-      if (obj.fullName === fullName) continue;
-      const escaped = obj.fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const objShort = obj.fullName.split('.').pop() ?? obj.fullName;
-      const shortEscaped = objShort.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`\\b(?:${escaped}|${shortEscaped})\\b`, 'i');
-      if (re.test(currentDef)) {
-        dependsOn.push(obj);
-      }
-    }
+    const entry = deps.find((d) => d.fullName === fullName);
+    if (!entry) return { dependsOn: [], referencedBy: [] };
 
-    // referencedBy: objects whose definitions mention the current object (word boundary match)
-    const escapedName = fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const shortEscaped = shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const selfRe = new RegExp(`\\b(?:${escapedName}|${shortEscaped})\\b`, 'i');
-    const referencedBy: DepItem[] = [];
-    for (const obj of allObjects) {
-      if (obj.fullName === fullName) continue;
-      if (!obj.definition) continue;
-      if (selfRe.test(obj.definition)) {
-        referencedBy.push(obj);
-      }
-    }
+    const dependsOn: DepItem[] = entry.dependsOn
+      .map((name) => objectLookup.get(name))
+      .filter((item): item is DepItem => !!item);
+
+    const referencedBy: DepItem[] = entry.referencedBy
+      .map((name) => objectLookup.get(name))
+      .filter((item): item is DepItem => !!item);
 
     return { dependsOn, referencedBy };
-  }, [fullName, result?.schema]);
+  }, [fullName, result?.relationships?.dependencies, objectLookup]);
 
   const total = dependsOn.length + referencedBy.length;
   if (total === 0) return null;
@@ -103,7 +88,6 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
 
       {expanded && (
         <div className="px-3 pb-2 space-y-2">
-          {/* Depends on */}
           {dependsOn.length > 0 && (
             <div>
               <div className="text-[9px] text-text-muted uppercase tracking-wider mb-1">Uses ({dependsOn.length})</div>
@@ -126,7 +110,6 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
             </div>
           )}
 
-          {/* Referenced by */}
           {referencedBy.length > 0 && (
             <div>
               <div className="text-[9px] text-text-muted uppercase tracking-wider mb-1">Used by ({referencedBy.length})</div>
