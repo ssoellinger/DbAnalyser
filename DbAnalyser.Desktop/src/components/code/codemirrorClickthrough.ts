@@ -11,14 +11,16 @@ import type { ResolvedObject } from './sqlIdentifierResolver';
 
 /**
  * Regex to match SQL identifiers in order of specificity:
- * 1. [schema].[name]  — bracketed two-part
- * 2. schema.name      — dotted two-part
- * 3. [name]           — bracketed single
- * 4. Word             — plain identifier (min 2 chars, starts with letter/underscore)
+ * 1. [db].[schema].[name] — bracketed three-part
+ * 2. db.schema.name       — dotted three-part
+ * 3. [schema].[name]      — bracketed two-part
+ * 4. schema.name          — dotted two-part
+ * 5. [name]               — bracketed single
+ * 6. Word                 — plain identifier (min 2 chars, starts with letter/underscore)
  * Plain words will match SQL keywords too, but the resolver filters them out.
  */
 const IDENTIFIER_RE =
-  /(?:\[[\w\s]+\]\.\[[\w\s]+\]|[A-Za-z_][\w]*\.[A-Za-z_][\w]*|\[[\w\s]+\]|[A-Za-z_][\w]+)/g;
+  /(?:\[[\w\s]+\]\.\[[\w\s]+\]\.\[[\w\s]+\]|[A-Za-z_][\w]*\.[A-Za-z_][\w]*\.[A-Za-z_][\w]*|\[[\w\s]+\]\.\[[\w\s]+\]|[A-Za-z_][\w]*\.[A-Za-z_][\w]*|\[[\w\s]+\]|[A-Za-z_][\w]+)/g;
 
 const clickableMark = Decoration.mark({ class: 'cm-clickable-identifier' });
 

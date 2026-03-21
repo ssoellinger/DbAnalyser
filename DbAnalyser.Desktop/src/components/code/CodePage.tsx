@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
@@ -7,15 +7,18 @@ import { CodeTabBar } from './CodeTabBar';
 import { CodeEditor } from './CodeEditor';
 import { ParameterBar } from './ParameterBar';
 import { DependencyMiniView } from './DependencyMiniView';
+import { ExecutionChainPanel } from './ExecutionChainPanel';
 import { OutlinePanel } from './OutlinePanel';
 import { PeekDefinition } from './PeekDefinition';
 import { StatusBar } from './StatusBar';
 import { DiffView } from './DiffView';
+const MiniErd = lazy(() => import('./MiniErd').then((m) => ({ default: m.MiniErd })));
 import { copyAsFormatted } from './copyFormatted';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
 import { generateTableDdl } from './tableDdlGenerator';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
+import type { ColumnInfo } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
 import type { TooltipInfo } from './codemirrorTooltip';
 
@@ -121,6 +124,9 @@ function CodeContent() {
   const [refsHeight, setRefsHeight] = useState(200);
   const [peekObj, setPeekObj] = useState<{ obj: ResolvedObject; coords: { x: number; y: number } } | null>(null);
   const [outlineGoToLine, setOutlineGoToLine] = useState<number | undefined>(undefined);
+  const [colUsageOpen, setColUsageOpen] = useState(false);
+  const [colUsageColumn, setColUsageColumn] = useState<string | null>(null);
+  const [showMiniErd, setShowMiniErd] = useState(false);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
@@ -290,6 +296,64 @@ function CodeContent() {
     return results;
   }, [refsTarget, result?.schema, result?.relationships?.dependencies]);
 
+  // Column list for current table/view (for Column Usage feature)
+  const activeColumns = useMemo<ColumnInfo[]>(() => {
+    if (!activeTab || !result?.schema) return [];
+    const schema = result.schema;
+    if (activeTab.objectType === 'Table') {
+      const table = schema.tables.find((t) => t.fullName === activeTab.fullName);
+      return table?.columns ?? [];
+    }
+    if (activeTab.objectType === 'View') {
+      const view = schema.views.find((v) => v.fullName === activeTab.fullName);
+      return view?.columns ?? [];
+    }
+    return [];
+  }, [activeTab, result?.schema]);
+
+  // Column usage search results
+  const columnUsageResults = useMemo<ReferenceResult[]>(() => {
+    if (!colUsageColumn || !result?.schema) return [];
+    const schema = result.schema;
+    const escaped = colUsageColumn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const colRe = new RegExp(`\\b${escaped}\\b`, 'i');
+
+    const objDefs: { objectType: string; fullName: string; label: string; definition: string }[] = [];
+    for (const v of schema.views)
+      objDefs.push({ objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
+    for (const p of schema.storedProcedures)
+      objDefs.push({ objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
+    for (const f of schema.functions)
+      objDefs.push({ objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
+    for (const t of schema.triggers)
+      objDefs.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
+
+    const results: ReferenceResult[] = [];
+    for (const obj of objDefs) {
+      if (!obj.definition) continue;
+      const lines = obj.definition.split('\n');
+      const matchLines: { lineNum: number; text: string }[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (colRe.test(lines[i])) {
+          matchLines.push({ lineNum: i + 1, text: lines[i] });
+          if (matchLines.length >= 3) break;
+        }
+      }
+      if (matchLines.length > 0) {
+        results.push({ ...obj, matchLines });
+      }
+    }
+    results.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    return results;
+  }, [colUsageColumn, result?.schema]);
+
+  const handleColumnUsage = useCallback(() => {
+    if (activeColumns.length > 0) {
+      setColUsageColumn(activeColumns[0].name);
+      setColUsageOpen(true);
+    }
+  }, [activeColumns]);
+
   // Resizable panel handlers
   const handleExplorerResize = useCallback(
     (e: React.MouseEvent) => {
@@ -415,6 +479,24 @@ function CodeContent() {
               >
                 Find References
               </button>
+              {activeColumns.length > 0 && (
+                <button
+                  onClick={handleColumnUsage}
+                  className={`text-text-secondary hover:text-accent transition-colors ${colUsageOpen ? 'text-accent' : ''}`}
+                  title="Find where a column is used across all objects"
+                >
+                  Column Usage
+                </button>
+              )}
+              {activeTab && (activeTab.objectType === 'Table') && (
+                <button
+                  onClick={() => setShowMiniErd(true)}
+                  className={`text-text-secondary hover:text-accent transition-colors ${showMiniErd ? 'text-accent' : ''}`}
+                  title="Show FK relationship graph for this table"
+                >
+                  FK Graph
+                </button>
+              )}
               <div className="relative">
                 <button
                   onClick={() => setShowSettings(!showSettings)}
@@ -460,6 +542,9 @@ function CodeContent() {
             {/* Parameter bar & dependency mini-view */}
             <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
             <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
+            {(activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
+              <ExecutionChainPanel fullName={activeTab.fullName} objectType={activeTab.objectType} />
+            )}
 
             {/* Diff view or Editor(s) + Outline */}
             {showDiff && splitTab ? (
@@ -518,6 +603,75 @@ function CodeContent() {
 
             {/* Status bar */}
             <StatusBar definition={activeTab.definition} objectType={activeTab.objectType} />
+
+            {/* Column Usage panel */}
+            {colUsageOpen && activeColumns.length > 0 && (
+              <>
+                <div
+                  onMouseDown={handleRefsResize}
+                  className="h-1 cursor-row-resize hover:bg-accent/30 transition-colors flex-shrink-0"
+                />
+                <div
+                  style={{ height: refsHeight }}
+                  className="flex-shrink-0 border-t border-border bg-bg-secondary overflow-hidden flex flex-col"
+                >
+                  <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg-card">
+                    <span className="text-[11px] font-medium text-text-primary">Column Usage</span>
+                    <select
+                      value={colUsageColumn ?? ''}
+                      onChange={(e) => setColUsageColumn(e.target.value)}
+                      className="text-[11px] bg-bg-primary border border-border rounded px-1.5 py-0.5 text-text-primary"
+                    >
+                      {activeColumns.map((col) => (
+                        <option key={col.name} value={col.name}>{col.name}</option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-text-muted">
+                      {columnUsageResults.length} object{columnUsageResults.length !== 1 ? 's' : ''}
+                    </span>
+                    <button
+                      onClick={() => setColUsageOpen(false)}
+                      className="ml-auto text-text-muted hover:text-text-primary text-sm transition-colors"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                    {columnUsageResults.length === 0 ? (
+                      <p className="px-3 py-4 text-xs text-text-muted text-center">
+                        No objects reference this column
+                      </p>
+                    ) : (
+                      columnUsageResults.map((ref) => {
+                        const color = OBJECT_TYPE_COLORS[ref.objectType] ?? '#666';
+                        return (
+                          <div key={ref.fullName} className="border-b border-border/30">
+                            <button
+                              onClick={() => openReference(ref)}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors"
+                            >
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                              <span className="font-medium text-text-primary">{ref.fullName}</span>
+                              <span className="text-[10px] text-text-muted">{ref.objectType}</span>
+                            </button>
+                            {ref.matchLines.map((ml, i) => (
+                              <button
+                                key={i}
+                                onClick={() => openReference(ref)}
+                                className="w-full flex items-start gap-2 pl-7 pr-3 py-0.5 text-[11px] hover:bg-bg-hover/50 transition-colors"
+                              >
+                                <span className="text-text-muted w-6 text-right flex-shrink-0 font-mono">{ml.lineNum}</span>
+                                <span className="font-mono text-text-secondary truncate">{ml.text.trim()}</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* References panel */}
             {refsOpen && (
@@ -610,6 +764,17 @@ function CodeContent() {
           onClose={() => setPeekObj(null)}
           onOpenFull={(obj) => handleNavigate(obj)}
         />
+      )}
+
+      {/* Mini-ERD modal */}
+      {showMiniErd && activeTab && (
+        <Suspense fallback={null}>
+          <MiniErd
+            fullName={activeTab.fullName}
+            onClose={() => setShowMiniErd(false)}
+            onNavigate={handleNavigate}
+          />
+        </Suspense>
       )}
     </div>
   );

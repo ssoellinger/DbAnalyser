@@ -22,6 +22,26 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
     }
   }
 
+  // Helper: register all name variants including 3-part (server mode) and 2-part
+  function addAllVariants(
+    fullName: string,
+    schemaName: string,
+    objectName: string,
+    databaseName: string | undefined,
+    obj: ResolvedObject,
+  ) {
+    add(fullName, obj);
+    add(objectName, obj);
+    add(`[${schemaName}].[${objectName}]`, obj);
+    add(`[${objectName}]`, obj);
+    // Two-part unbracketed (schema.name) — needed when fullName is 3-part (server mode)
+    add(`${schemaName}.${objectName}`, obj);
+    if (databaseName) {
+      // Three-part bracketed variant
+      add(`[${databaseName}].[${schemaName}].[${objectName}]`, obj);
+    }
+  }
+
   // Tables
   for (const t of schema.tables) {
     const obj: ResolvedObject = {
@@ -30,10 +50,7 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       label: t.tableName,
       definition: '', // will be filled with generated DDL on demand
     };
-    add(t.fullName, obj);
-    add(t.tableName, obj);
-    add(`[${t.schemaName}].[${t.tableName}]`, obj);
-    add(`[${t.tableName}]`, obj);
+    addAllVariants(t.fullName, t.schemaName, t.tableName, t.databaseName, obj);
   }
 
   // Views
@@ -44,10 +61,7 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       label: v.viewName,
       definition: v.definition ?? '',
     };
-    add(v.fullName, obj);
-    add(v.viewName, obj);
-    add(`[${v.schemaName}].[${v.viewName}]`, obj);
-    add(`[${v.viewName}]`, obj);
+    addAllVariants(v.fullName, v.schemaName, v.viewName, v.databaseName, obj);
   }
 
   // Stored Procedures
@@ -58,10 +72,7 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       label: p.procedureName,
       definition: p.definition ?? '',
     };
-    add(p.fullName, obj);
-    add(p.procedureName, obj);
-    add(`[${p.schemaName}].[${p.procedureName}]`, obj);
-    add(`[${p.procedureName}]`, obj);
+    addAllVariants(p.fullName, p.schemaName, p.procedureName, p.databaseName, obj);
   }
 
   // Functions
@@ -72,10 +83,7 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       label: f.functionName,
       definition: f.definition ?? '',
     };
-    add(f.fullName, obj);
-    add(f.functionName, obj);
-    add(`[${f.schemaName}].[${f.functionName}]`, obj);
-    add(`[${f.functionName}]`, obj);
+    addAllVariants(f.fullName, f.schemaName, f.functionName, f.databaseName, obj);
   }
 
   // Triggers
@@ -86,10 +94,7 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       label: t.triggerName,
       definition: t.definition ?? '',
     };
-    add(t.fullName, obj);
-    add(t.triggerName, obj);
-    add(`[${t.schemaName}].[${t.triggerName}]`, obj);
-    add(`[${t.triggerName}]`, obj);
+    addAllVariants(t.fullName, t.schemaName, t.triggerName, t.databaseName, obj);
   }
 
   return map;
@@ -114,6 +119,17 @@ export function resolveIdentifier(
   const stripped = cleaned.replace(/\[([^\]]+)\]/g, '$1');
   const found = identifierMap.get(stripped.toLowerCase());
   if (found) return found;
+
+  // For 3-part names (db.schema.name), also try the 2-part (schema.name)
+  const dotParts = stripped.split('.');
+  if (dotParts.length === 3) {
+    const twoPart = `${dotParts[1]}.${dotParts[2]}`;
+    const found2 = identifierMap.get(twoPart.toLowerCase());
+    if (found2) return found2;
+    // Try just the object name
+    const found1 = identifierMap.get(dotParts[2].toLowerCase());
+    if (found1) return found1;
+  }
 
   return null;
 }
