@@ -533,6 +533,7 @@ function CodeContent() {
                       { key: 'parameters' as const, label: 'Parameters', desc: 'Show parameter bar for procs' },
                       { key: 'dmlSummary' as const, label: 'DML Summary', desc: 'Show table operations for procs' },
                       { key: 'dependencies' as const, label: 'Dependencies', desc: 'Show dependency mini-view' },
+                      { key: 'callChain' as const, label: 'Call Chain', desc: 'Show caller/callee tree for procs' },
                       { key: 'indentGuides' as const, label: 'Indent Guides', desc: 'Vertical indent lines' },
                       { key: 'bracketColors' as const, label: 'Bracket Colors', desc: 'Colored nested parentheses' },
                       { key: 'highlightOccurrences' as const, label: 'Highlight Occurrences', desc: 'Highlight matching words' },
@@ -604,12 +605,10 @@ function CodeContent() {
               );
             })()}
             {visualSettings.dependencies && (
-              <>
-                <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
-                {(activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
-                  <ExecutionChainPanel fullName={activeTab.fullName} objectType={activeTab.objectType} />
-                )}
-              </>
+              <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
+            )}
+            {visualSettings.callChain && (activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
+              <ExecutionChainPanel fullName={activeTab.fullName} objectType={activeTab.objectType} />
             )}
 
             {/* Diff view or Editor(s) + Outline */}
