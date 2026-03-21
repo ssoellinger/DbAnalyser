@@ -13,6 +13,7 @@ interface ObjectItem {
   lastModified?: string | null;
   usageLevel?: UsageLevel;
   referencedBy: number;
+  databaseName?: string;
 }
 
 const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers'];
@@ -49,6 +50,7 @@ function groupTypeKey(group: string): string {
 
 export function ObjectExplorer() {
   const result = useStore((s) => s.result);
+  const isServerMode = useStore((s) => s.isServerMode);
   const filter = useCodeStore((s) => s.explorerFilter);
   const setFilter = useCodeStore((s) => s.setExplorerFilter);
   const collapsed = useCodeStore((s) => s.explorerCollapsed);
@@ -114,6 +116,7 @@ export function ObjectExplorer() {
         definition: generateTableDdl(t),
         usageLevel: usageMap.get(t.fullName),
         referencedBy: refCountMap.get(t.fullName) ?? 0,
+        databaseName: t.databaseName,
       })),
       Views: schema.views.map((v) => ({
         objectType: 'View',
@@ -123,6 +126,7 @@ export function ObjectExplorer() {
         lastModified: null,
         usageLevel: usageMap.get(v.fullName),
         referencedBy: refCountMap.get(v.fullName) ?? 0,
+        databaseName: v.databaseName,
       })),
       Procedures: schema.storedProcedures.map((p) => ({
         objectType: 'Procedure',
@@ -132,6 +136,7 @@ export function ObjectExplorer() {
         lastModified: p.lastModified,
         usageLevel: usageMap.get(p.fullName),
         referencedBy: refCountMap.get(p.fullName) ?? 0,
+        databaseName: p.databaseName,
       })),
       Functions: schema.functions.map((f) => ({
         objectType: 'Function',
@@ -141,6 +146,7 @@ export function ObjectExplorer() {
         lastModified: f.lastModified,
         usageLevel: usageMap.get(f.fullName),
         referencedBy: refCountMap.get(f.fullName) ?? 0,
+        databaseName: f.databaseName,
       })),
       Triggers: schema.triggers.map((t) => ({
         objectType: 'Trigger',
@@ -149,6 +155,7 @@ export function ObjectExplorer() {
         definition: t.definition ?? '',
         usageLevel: usageMap.get(t.fullName),
         referencedBy: refCountMap.get(t.fullName) ?? 0,
+        databaseName: t.databaseName,
       })),
     };
     return items;
@@ -186,6 +193,80 @@ export function ObjectExplorer() {
   );
 
   const hasUsageData = usageMap.size > 0;
+
+  // In server mode, group by database first
+  const databases = useMemo(() => {
+    if (!isServerMode) return null;
+    const dbSet = new Set<string>();
+    for (const items of Object.values(filteredGroups)) {
+      for (const item of items) {
+        if (item.databaseName) dbSet.add(item.databaseName);
+      }
+    }
+    return Array.from(dbSet).sort();
+  }, [isServerMode, filteredGroups]);
+
+  function renderObjectItem(item: ObjectItem, indent: number) {
+    const color = OBJECT_TYPE_COLORS[item.objectType] ?? '#666';
+    const usageColor = item.usageLevel ? USAGE_COLORS[item.usageLevel] : '';
+    const usageLabel = item.usageLevel ? USAGE_LABELS[item.usageLevel] : '';
+
+    return (
+      <button
+        key={item.fullName}
+        onClick={() =>
+          openTab({
+            objectType: item.objectType,
+            fullName: item.fullName,
+            label: item.label,
+            definition: item.definition,
+          })
+        }
+        className="w-full flex items-center gap-2 pr-3 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors group"
+        style={{ paddingLeft: indent }}
+        title={usageLabel ? `${item.fullName} (${usageLabel})` : item.fullName}
+      >
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+        <span className="truncate">{item.label}</span>
+        <span className="ml-auto flex items-center gap-1.5">
+          {item.referencedBy > 0 && (
+            <span className="text-[9px] px-1 rounded bg-bg-hover text-text-muted"
+              title={`Referenced by ${item.referencedBy} object${item.referencedBy !== 1 ? 's' : ''}`}
+            >{item.referencedBy}</span>
+          )}
+          {hasUsageData && usageColor && (
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: usageColor }} title={usageLabel} />
+          )}
+          {explorerSort === 'modified' && item.lastModified && (
+            <span className="text-[9px] text-text-muted">
+              {new Date(item.lastModified).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  }
+
+  function renderTypeGroup(collapseKey: string, displayName: string, items: ObjectItem[], indent: number) {
+    const isCollapsedGroup = collapsed[collapseKey];
+    const color = OBJECT_TYPE_COLORS[groupTypeKey(displayName)] ?? '#666';
+
+    return (
+      <div key={collapseKey}>
+        <button
+          onClick={() => toggleGroup(collapseKey)}
+          className="w-full flex items-center gap-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+          style={{ paddingLeft: indent }}
+        >
+          <span className="text-[10px] text-text-muted w-3">{isCollapsedGroup ? '▸' : '▾'}</span>
+          <span style={{ color }}>{GROUP_ICONS[displayName]}</span>
+          <span className="font-medium">{displayName}</span>
+          <span className="ml-auto pr-3 text-[10px] text-text-muted">{items.length}</span>
+        </button>
+        {!isCollapsedGroup && items.map((item) => renderObjectItem(item, indent + 20))}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-bg-secondary border-r border-border">
@@ -226,80 +307,44 @@ export function ObjectExplorer() {
 
       {/* Tree */}
       <div className="flex-1 overflow-y-auto py-1">
-        {GROUP_ORDER.filter((g) => filteredGroups[g]?.length).map((group) => {
-          const items = filteredGroups[group]!;
-          const isCollapsed = collapsed[group];
-          const color = OBJECT_TYPE_COLORS[groupTypeKey(group)] ?? '#666';
+        {databases ? (
+          /* Server mode: Database > Type > Objects */
+          databases.map((db) => {
+            const dbKey = `db:${db}`;
+            const isDbCollapsed = collapsed[dbKey];
+            const dbItemCount = Object.values(filteredGroups).reduce(
+              (sum, items) => sum + items.filter((i) => i.databaseName === db).length, 0
+            );
+            if (dbItemCount === 0) return null;
 
-          return (
-            <div key={group}>
-              <button
-                onClick={() => toggleGroup(group)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-              >
-                <span className="text-[10px] text-text-muted w-3">
-                  {isCollapsed ? '▸' : '▾'}
-                </span>
-                <span style={{ color }}>{GROUP_ICONS[group]}</span>
-                <span className="font-medium">{group}</span>
-                <span className="ml-auto text-[10px] text-text-muted">{items.length}</span>
-              </button>
+            return (
+              <div key={db}>
+                <button
+                  onClick={() => toggleGroup(dbKey)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors font-medium"
+                >
+                  <span className="text-[10px] text-text-muted w-3">{isDbCollapsed ? '▸' : '▾'}</span>
+                  <span className="text-accent">⊛</span>
+                  <span>{db}</span>
+                  <span className="ml-auto text-[10px] text-text-muted">{dbItemCount}</span>
+                </button>
 
-              {!isCollapsed && (
-                <div>
-                  {items.map((item) => {
-                    const usageColor = item.usageLevel ? USAGE_COLORS[item.usageLevel] : '';
-                    const usageLabel = item.usageLevel ? USAGE_LABELS[item.usageLevel] : '';
-
-                    return (
-                      <button
-                        key={item.fullName}
-                        onClick={() =>
-                          openTab({
-                            objectType: item.objectType,
-                            fullName: item.fullName,
-                            label: item.label,
-                            definition: item.definition,
-                          })
-                        }
-                        className="w-full flex items-center gap-2 pl-8 pr-3 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors group"
-                        title={usageLabel ? `${item.fullName} (${usageLabel})` : item.fullName}
-                      >
-                        <span
-                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: color }}
-                        />
-                        <span className="truncate">{item.label}</span>
-                        <span className="ml-auto flex items-center gap-1.5">
-                          {item.referencedBy > 0 && (
-                            <span
-                              className="text-[9px] px-1 rounded bg-bg-hover text-text-muted"
-                              title={`Referenced by ${item.referencedBy} object${item.referencedBy !== 1 ? 's' : ''}`}
-                            >
-                              {item.referencedBy}
-                            </span>
-                          )}
-                          {hasUsageData && usageColor && (
-                            <span
-                              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: usageColor }}
-                              title={usageLabel}
-                            />
-                          )}
-                          {explorerSort === 'modified' && item.lastModified && (
-                            <span className="text-[9px] text-text-muted">
-                              {new Date(item.lastModified).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
+                {!isDbCollapsed &&
+                  GROUP_ORDER.map((group) => {
+                    const dbItems = (filteredGroups[group] ?? []).filter((i) => i.databaseName === db);
+                    if (dbItems.length === 0) return null;
+                    return renderTypeGroup(`${dbKey}:${group}`, group, dbItems, 24);
+                  })
+                }
+              </div>
+            );
+          })
+        ) : (
+          /* Single DB mode: Type > Objects */
+          GROUP_ORDER.filter((g) => filteredGroups[g]?.length).map((group) =>
+            renderTypeGroup(group, group, filteredGroups[group]!, 12)
+          )
+        )}
 
         {Object.keys(filteredGroups).length === 0 && (
           <p className="px-3 py-4 text-xs text-text-muted text-center">
