@@ -8,6 +8,7 @@ import { CodeEditor } from './CodeEditor';
 import { ParameterBar } from './ParameterBar';
 import { DependencyMiniView } from './DependencyMiniView';
 import { ExecutionChainPanel } from './ExecutionChainPanel';
+import { DmlSummary } from './DmlSummary';
 import { OutlinePanel } from './OutlinePanel';
 import { PeekDefinition } from './PeekDefinition';
 import { StatusBar } from './StatusBar';
@@ -529,6 +530,7 @@ function CodeContent() {
                     <div className="px-3 py-1 text-[9px] text-text-muted uppercase tracking-wider">Visual Settings</div>
                     {([
                       { key: 'outline' as const, label: 'Outline Panel', desc: 'Symbol overview sidebar' },
+                      { key: 'dmlSummary' as const, label: 'DML Summary', desc: 'Show table operations for procs' },
                       { key: 'indentGuides' as const, label: 'Indent Guides', desc: 'Vertical indent lines' },
                       { key: 'bracketColors' as const, label: 'Bracket Colors', desc: 'Colored nested parentheses' },
                       { key: 'highlightOccurrences' as const, label: 'Highlight Occurrences', desc: 'Highlight matching words' },
@@ -558,8 +560,11 @@ function CodeContent() {
 
         {activeTab ? (
           <div className="flex-1 min-h-0 flex flex-col">
-            {/* Parameter bar, trigger metadata & dependency mini-view */}
+            {/* Parameter bar, DML summary, trigger metadata & dependency mini-view */}
             <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
+            {visualSettings.dmlSummary && (activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
+              <DmlSummary definition={activeTab.definition} objectType={activeTab.objectType} fullName={activeTab.fullName} />
+            )}
             {activeTab.objectType === 'Trigger' && result?.schema && (() => {
               const trig = result.schema.triggers.find((t) => t.fullName === activeTab.fullName);
               if (!trig) return null;
