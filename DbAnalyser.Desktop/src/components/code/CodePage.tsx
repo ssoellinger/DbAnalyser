@@ -530,7 +530,9 @@ function CodeContent() {
                     <div className="px-3 py-1 text-[9px] text-text-muted uppercase tracking-wider">Visual Settings</div>
                     {([
                       { key: 'outline' as const, label: 'Outline Panel', desc: 'Symbol overview sidebar' },
+                      { key: 'parameters' as const, label: 'Parameters', desc: 'Show parameter bar for procs' },
                       { key: 'dmlSummary' as const, label: 'DML Summary', desc: 'Show table operations for procs' },
+                      { key: 'dependencies' as const, label: 'Dependencies', desc: 'Show dependency mini-view' },
                       { key: 'indentGuides' as const, label: 'Indent Guides', desc: 'Vertical indent lines' },
                       { key: 'bracketColors' as const, label: 'Bracket Colors', desc: 'Colored nested parentheses' },
                       { key: 'highlightOccurrences' as const, label: 'Highlight Occurrences', desc: 'Highlight matching words' },
@@ -561,7 +563,9 @@ function CodeContent() {
         {activeTab ? (
           <div className="flex-1 min-h-0 flex flex-col">
             {/* Parameter bar, DML summary, trigger metadata & dependency mini-view */}
-            <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
+            {visualSettings.parameters && (
+              <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
+            )}
             {visualSettings.dmlSummary && (activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
               <DmlSummary definition={activeTab.definition} objectType={activeTab.objectType} fullName={activeTab.fullName} />
             )}
@@ -599,9 +603,13 @@ function CodeContent() {
                 </div>
               );
             })()}
-            <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
-            {(activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
-              <ExecutionChainPanel fullName={activeTab.fullName} objectType={activeTab.objectType} />
+            {visualSettings.dependencies && (
+              <>
+                <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
+                {(activeTab.objectType === 'Procedure' || activeTab.objectType === 'Function') && (
+                  <ExecutionChainPanel fullName={activeTab.fullName} objectType={activeTab.objectType} />
+                )}
+              </>
             )}
 
             {/* Diff view or Editor(s) + Outline */}

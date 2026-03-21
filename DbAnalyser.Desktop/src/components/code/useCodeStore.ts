@@ -18,10 +18,12 @@ export interface EditorVisualSettings {
   highlightOccurrences: boolean;
   outline: boolean;
   dmlSummary: boolean;
+  parameters: boolean;
+  dependencies: boolean;
 }
 
 const VISUAL_SETTINGS_KEY = 'dbanalyser-editor-visual';
-const DEFAULTS: EditorVisualSettings = { indentGuides: false, bracketColors: false, highlightOccurrences: false, outline: false, dmlSummary: true };
+const DEFAULTS: EditorVisualSettings = { indentGuides: false, bracketColors: false, highlightOccurrences: false, outline: false, dmlSummary: true, parameters: true, dependencies: true };
 
 function loadAllVisualSettings(): Record<string, EditorVisualSettings> {
   try {
