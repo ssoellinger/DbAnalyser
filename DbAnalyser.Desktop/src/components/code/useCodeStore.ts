@@ -22,12 +22,6 @@ export interface EditorVisualSettings {
 const VISUAL_SETTINGS_KEY = 'dbanalyser-editor-visual';
 const DEFAULTS: EditorVisualSettings = { indentGuides: false, bracketColors: false, highlightOccurrences: false, outline: false };
 
-function getConnectionKey(): string {
-  // Import from main store would create a circular dep, so read from the store directly
-  // We'll pass the key in from the component instead
-  return '_global';
-}
-
 function loadAllVisualSettings(): Record<string, EditorVisualSettings> {
   try {
     const raw = localStorage.getItem(VISUAL_SETTINGS_KEY);

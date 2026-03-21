@@ -42,26 +42,30 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
 
     // Find the current object's definition
     const currentObj = allObjects.find((o) => o.fullName === fullName);
-    const currentDef = currentObj?.definition?.toLowerCase() ?? '';
+    const currentDef = currentObj?.definition ?? '';
 
-    // dependsOn: objects whose names appear in the current object's definition
+    // dependsOn: objects whose names appear in the current object's definition (word boundary match)
     const dependsOn: DepItem[] = [];
     for (const obj of allObjects) {
       if (obj.fullName === fullName) continue;
-      const objLower = obj.fullName.toLowerCase();
-      const objShort = obj.fullName.split('.').pop()?.toLowerCase() ?? objLower;
-      if (currentDef.includes(objLower) || currentDef.includes(objShort)) {
+      const escaped = obj.fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const objShort = obj.fullName.split('.').pop() ?? obj.fullName;
+      const shortEscaped = objShort.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\b(?:${escaped}|${shortEscaped})\\b`, 'i');
+      if (re.test(currentDef)) {
         dependsOn.push(obj);
       }
     }
 
-    // referencedBy: objects whose definitions mention the current object
+    // referencedBy: objects whose definitions mention the current object (word boundary match)
+    const escapedName = fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const shortEscaped = shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const selfRe = new RegExp(`\\b(?:${escapedName}|${shortEscaped})\\b`, 'i');
     const referencedBy: DepItem[] = [];
     for (const obj of allObjects) {
       if (obj.fullName === fullName) continue;
       if (!obj.definition) continue;
-      const defLower = obj.definition.toLowerCase();
-      if (defLower.includes(nameLower) || defLower.includes(shortName)) {
+      if (selfRe.test(obj.definition)) {
         referencedBy.push(obj);
       }
     }

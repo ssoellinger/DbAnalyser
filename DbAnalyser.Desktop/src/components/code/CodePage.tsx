@@ -254,19 +254,24 @@ function CodeContent() {
     for (const t of schema.triggers)
       allObjects.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
 
+    // Word boundary regex to avoid false positives like "User" matching "UserRole"
+    const escapedTarget = refsTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedShort = shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const refRe = new RegExp(`\\b(?:${escapedTarget}|${escapedShort})\\b`, 'gi');
+
     const results: ReferenceResult[] = [];
     for (const obj of allObjects) {
       if (obj.fullName.toLowerCase() === target) continue;
       if (!obj.definition) continue;
 
-      const defLower = obj.definition.toLowerCase();
-      if (!defLower.includes(target) && !defLower.includes(shortName)) continue;
+      refRe.lastIndex = 0;
+      if (!refRe.test(obj.definition)) continue;
 
+      const lineRe = new RegExp(`\\b(?:${escapedTarget}|${escapedShort})\\b`, 'i');
       const lines = obj.definition.split('\n');
       const matchLines: { lineNum: number; text: string }[] = [];
       for (let i = 0; i < lines.length; i++) {
-        const lineLower = lines[i].toLowerCase();
-        if (lineLower.includes(target) || lineLower.includes(shortName)) {
+        if (lineRe.test(lines[i])) {
           matchLines.push({ lineNum: i + 1, text: lines[i] });
           if (matchLines.length >= 3) break;
         }

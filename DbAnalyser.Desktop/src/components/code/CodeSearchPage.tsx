@@ -82,6 +82,7 @@ function CodeSearchContent() {
   const openTab = useCodeStore((s) => s.openTab);
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [isRegex, setIsRegex] = useState(false);
   const [isCaseSensitive, setIsCaseSensitive] = useState(false);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
@@ -94,6 +95,12 @@ function CodeSearchContent() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Debounce search query (200ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   // Close history dropdown on outside click
   useEffect(() => {
@@ -156,9 +163,9 @@ function CodeSearchContent() {
     return items;
   }, [result]);
 
-  // Build regex or plain matcher
+  // Build regex or plain matcher (uses debounced query for performance)
   const matcher = useMemo<{ regex: RegExp | null; error: string | null }>(() => {
-    const q = query.trim();
+    const q = debouncedQuery.trim();
     if (!q) return { regex: null, error: null };
 
     if (isRegex) {
@@ -175,7 +182,7 @@ function CodeSearchContent() {
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const flags = isCaseSensitive ? 'g' : 'gi';
     return { regex: new RegExp(escaped, flags), error: null };
-  }, [query, isRegex, isCaseSensitive]);
+  }, [debouncedQuery, isRegex, isCaseSensitive]);
 
   // Update error state
   useEffect(() => {

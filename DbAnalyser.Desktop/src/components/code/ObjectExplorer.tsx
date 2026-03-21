@@ -85,13 +85,15 @@ export function ObjectExplorer() {
     for (const t of schema.triggers) if (t.definition) allDefs.push({ fullName: t.fullName, definition: t.definition });
 
     for (const name of allNames) {
-      const nameLower = name.toLowerCase();
-      const shortName = name.split('.').pop()?.toLowerCase() ?? nameLower;
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const shortName = name.split('.').pop() ?? name;
+      const shortEscaped = shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Word boundary match to avoid "User" matching "UserRole"
+      const re = new RegExp(`\\b(?:${escaped}|${shortEscaped})\\b`, 'i');
       let count = 0;
       for (const def of allDefs) {
-        if (def.fullName === name) continue; // skip self
-        const defLower = def.definition.toLowerCase();
-        if (defLower.includes(nameLower) || defLower.includes(shortName)) {
+        if (def.fullName === name) continue;
+        if (re.test(def.definition)) {
           count++;
         }
       }

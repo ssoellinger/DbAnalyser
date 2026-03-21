@@ -163,6 +163,17 @@ export const bracketColorsExtension = [bracketColorPlugin, bracketColorTheme];
 
 /* ── Highlight All Occurrences ────────────────────────────────────────── */
 
+const SQL_KEYWORDS = new Set([
+  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 'SET',
+  'NULL', 'IS', 'BY', 'ORDER', 'GROUP', 'HAVING', 'JOIN', 'LEFT', 'RIGHT',
+  'INNER', 'OUTER', 'CROSS', 'INTO', 'INSERT', 'UPDATE', 'DELETE', 'CREATE',
+  'ALTER', 'DROP', 'TABLE', 'VIEW', 'PROCEDURE', 'FUNCTION', 'BEGIN', 'END',
+  'IF', 'ELSE', 'WHILE', 'RETURN', 'DECLARE', 'EXEC', 'EXECUTE', 'THEN',
+  'WHEN', 'CASE', 'WITH', 'VALUES', 'GO', 'USE', 'PRINT', 'RAISERROR',
+  'THROW', 'TRY', 'CATCH', 'TRANSACTION', 'COMMIT', 'ROLLBACK', 'INT',
+  'VARCHAR', 'NVARCHAR', 'BIT', 'DATETIME', 'FLOAT', 'DECIMAL',
+]);
+
 const occurrenceHighlightTheme = EditorView.baseTheme({
   '.cm-occurrence-highlight': {
     backgroundColor: '#4fc3f720',
@@ -209,9 +220,7 @@ function buildOccurrences(view: EditorView): DecorationSet {
     if (start === end || end - start < 2) return builder.finish();
     const word = text.slice(start, end);
 
-    // Don't highlight SQL keywords
-    const sqlKeywords = new Set(['SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON', 'AS', 'SET', 'NULL', 'IS', 'BY', 'ORDER', 'GROUP', 'HAVING', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS', 'INTO', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TABLE', 'VIEW', 'PROCEDURE', 'FUNCTION', 'BEGIN', 'END', 'IF', 'ELSE', 'WHILE', 'RETURN', 'DECLARE', 'EXEC', 'EXECUTE', 'THEN', 'WHEN', 'CASE', 'WITH', 'VALUES', 'GO', 'USE', 'PRINT', 'RAISERROR', 'THROW', 'TRY', 'CATCH', 'TRANSACTION', 'COMMIT', 'ROLLBACK', 'INT', 'VARCHAR', 'NVARCHAR', 'BIT', 'DATETIME', 'FLOAT', 'DECIMAL']);
-    if (sqlKeywords.has(word.toUpperCase())) return builder.finish();
+    if (SQL_KEYWORDS.has(word.toUpperCase())) return builder.finish();
 
     // Find all occurrences in visible ranges
     const wordRe = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');

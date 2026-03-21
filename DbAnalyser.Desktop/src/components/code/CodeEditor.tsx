@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo } from 'react';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 import { sql, MSSQL } from '@codemirror/lang-sql';
 import { foldGutter, bracketMatching } from '@codemirror/language';
@@ -26,6 +26,11 @@ interface CodeEditorProps {
   visualSettings?: EditorVisualSettings;
 }
 
+// Compartments for dynamically toggled extensions
+const indentGuidesCompartment = new Compartment();
+const bracketColorsCompartment = new Compartment();
+const highlightOccurrencesCompartment = new Compartment();
+
 export function CodeEditor({
   code,
   scrollPos,
@@ -42,8 +47,8 @@ export function CodeEditor({
   const viewRef = useRef<EditorView | null>(null);
   const codeRef = useRef(code);
 
-  // Build extensions once per resolve/navigate change
-  const extensions = useMemo(() => {
+  // Build core extensions (stable — only changes when resolve/navigate callbacks change)
+  const coreExtensions = useMemo(() => {
     const exts = [
       lineNumbers(),
       highlightActiveLine(),
@@ -70,20 +75,21 @@ export function CodeEditor({
       exts.push(hoverTooltipExtension(resolveTooltip));
     }
 
-    if (visualSettings?.indentGuides) exts.push(...indentGuidesExtension);
-    if (visualSettings?.bracketColors) exts.push(...bracketColorsExtension);
-    if (visualSettings?.highlightOccurrences) exts.push(...highlightOccurrencesExtension);
+    // Visual settings via compartments (initial values)
+    exts.push(indentGuidesCompartment.of(visualSettings?.indentGuides ? indentGuidesExtension : []));
+    exts.push(bracketColorsCompartment.of(visualSettings?.bracketColors ? bracketColorsExtension : []));
+    exts.push(highlightOccurrencesCompartment.of(visualSettings?.highlightOccurrences ? highlightOccurrencesExtension : []));
 
     return exts;
-  }, [resolveIdentifier, onNavigate, onPeek, resolveTooltip, visualSettings]);
+  }, [resolveIdentifier, onNavigate, onPeek, resolveTooltip]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Create/recreate editor when extensions change
+  // Create/recreate editor when core extensions change
   useEffect(() => {
     if (!containerRef.current) return;
 
     const state = EditorState.create({
       doc: codeRef.current,
-      extensions,
+      extensions: coreExtensions,
     });
 
     const view = new EditorView({
@@ -111,7 +117,20 @@ export function CodeEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [extensions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [coreExtensions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dynamically toggle visual extensions without recreating editor
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: [
+        indentGuidesCompartment.reconfigure(visualSettings?.indentGuides ? indentGuidesExtension : []),
+        bracketColorsCompartment.reconfigure(visualSettings?.bracketColors ? bracketColorsExtension : []),
+        highlightOccurrencesCompartment.reconfigure(visualSettings?.highlightOccurrences ? highlightOccurrencesExtension : []),
+      ],
+    });
+  }, [visualSettings?.indentGuides, visualSettings?.bracketColors, visualSettings?.highlightOccurrences]);
 
   // Handle goToLine
   useEffect(() => {
