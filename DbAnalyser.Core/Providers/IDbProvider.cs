@@ -38,4 +38,34 @@ public interface IDbProvider : IAsyncDisposable
     {
         return Task.FromResult(new QueryExecutionResult([], []));
     }
+
+    /// <summary>Begin a transaction on a new connection and return a transaction ID.</summary>
+    Task<string> BeginTransactionAsync(string connectionString, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Transactions not supported by this provider.");
+    }
+
+    /// <summary>Commit a previously started transaction.</summary>
+    Task CommitTransactionAsync(string txnId, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Transactions not supported by this provider.");
+    }
+
+    /// <summary>Rollback a previously started transaction.</summary>
+    Task RollbackTransactionAsync(string txnId, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Transactions not supported by this provider.");
+    }
+
+    /// <summary>Execute a query within an existing transaction.</summary>
+    Task<QueryExecutionResult> ExecuteInTransactionAsync(string txnId, string sql, int maxRows = 1000, int timeoutSeconds = 30, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Transactions not supported by this provider.");
+    }
+
+    /// <summary>Rollback all open transactions (for cleanup).</summary>
+    Task RollbackAllTransactionsAsync()
+    {
+        return Task.CompletedTask;
+    }
 }

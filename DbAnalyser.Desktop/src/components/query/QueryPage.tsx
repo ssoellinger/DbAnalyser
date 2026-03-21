@@ -34,6 +34,13 @@ interface SavedQuery {
   savedAt: string;
 }
 
+interface PinnedResult {
+  id: string;
+  sql: string;
+  response: QueryResponse;
+  pinnedAt: string;
+}
+
 // ── Persistence helpers ──
 
 function loadHistory(): QueryHistoryEntry[] {
@@ -179,6 +186,10 @@ export function QueryPage() {
   const [showSaved, setShowSaved] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveQueryName, setSaveQueryName] = useState('');
+  const [executionStartTime, setExecutionStartTime] = useState<number | null>(null);
+  const [elapsedDisplay, setElapsedDisplay] = useState('');
+  const [pinnedResults, setPinnedResults] = useState<PinnedResult[]>([]);
+  const [transactionState, setTransactionState] = useState<'none' | 'active'>('none');
 
   const abortRef = useRef<AbortController | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -202,6 +213,17 @@ export function QueryPage() {
     }).catch(() => {});
   }, [sessionId, isFileSession]);
 
+  // ── Elapsed timer ──
+  useEffect(() => {
+    if (executionStartTime === null) return;
+    const id = setInterval(() => {
+      const ms = Date.now() - executionStartTime;
+      if (ms < 1000) setElapsedDisplay(`${ms}ms`);
+      else setElapsedDisplay(`${(ms / 1000).toFixed(1)}s`);
+    }, 100);
+    return () => clearInterval(id);
+  }, [executionStartTime]);
+
   // ── Execute ──
   const executeQuery = useCallback(async (sqlOverride?: string, showPlan = false) => {
     if (!sessionId || isFileSession) return;
@@ -221,6 +243,7 @@ export function QueryPage() {
     abortRef.current = controller;
 
     setIsExecuting(true);
+    setExecutionStartTime(Date.now());
     setResponse(null);
     setActiveResultTab(0);
     setResultsView(showPlan ? 'plan' : 'results');
@@ -247,6 +270,7 @@ export function QueryPage() {
       setResponse({ resultSets: [], elapsedMs: 0, error: err instanceof Error ? err.message : 'Query failed' });
     } finally {
       setIsExecuting(false);
+      setExecutionStartTime(null);
       abortRef.current = null;
     }
   }, [sessionId, isFileSession, maxRows, selectedDb]);
@@ -333,6 +357,74 @@ export function QueryPage() {
       return next;
     });
   }, []);
+
+  // ── Pin results ──
+  const pinCurrentResult = useCallback(() => {
+    if (!response || response.error || pinnedResults.length >= 3) return;
+    const view = viewRef.current;
+    const sqlText = view ? view.state.doc.toString() : '';
+    const pinned: PinnedResult = {
+      id: `pin-${Date.now()}`,
+      sql: sqlText.length > 100 ? sqlText.slice(0, 100) + '...' : sqlText,
+      response,
+      pinnedAt: new Date().toISOString(),
+    };
+    setPinnedResults((prev) => [...prev, pinned]);
+  }, [response, pinnedResults.length]);
+
+  const unpinResult = useCallback((id: string) => {
+    setPinnedResults((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  // ── Transaction controls ──
+  const beginTransaction = useCallback(async () => {
+    if (!sessionId || transactionState === 'active') return;
+    try {
+      await api.beginTransaction(sessionId, selectedDb || undefined);
+      setTransactionState('active');
+    } catch (err) {
+      setResponse({ resultSets: [], elapsedMs: 0, error: err instanceof Error ? err.message : 'Failed to begin transaction' });
+    }
+  }, [sessionId, transactionState, selectedDb]);
+
+  const commitTransaction = useCallback(async () => {
+    if (!sessionId || transactionState !== 'active') return;
+    try {
+      await api.commitTransaction(sessionId);
+      setTransactionState('none');
+    } catch (err) {
+      setResponse({ resultSets: [], elapsedMs: 0, error: err instanceof Error ? err.message : 'Failed to commit transaction' });
+    }
+  }, [sessionId, transactionState]);
+
+  const rollbackTransaction = useCallback(async () => {
+    if (!sessionId || transactionState !== 'active') return;
+    try {
+      await api.rollbackTransaction(sessionId);
+      setTransactionState('none');
+    } catch (err) {
+      setResponse({ resultSets: [], elapsedMs: 0, error: err instanceof Error ? err.message : 'Failed to rollback transaction' });
+    }
+  }, [sessionId, transactionState]);
+
+  // Warn before closing with active transaction
+  useEffect(() => {
+    if (transactionState !== 'active') return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [transactionState]);
+
+  // Rollback on unmount if transaction active
+  useEffect(() => {
+    return () => {
+      if (transactionState === 'active' && sessionId) {
+        api.rollbackTransaction(sessionId).catch(() => {});
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── CodeMirror setup ──
   const sqlSchema = useMemo(() => buildSqlSchema(dbSchema, selectedDb), [dbSchema, selectedDb]);
@@ -487,6 +579,33 @@ export function QueryPage() {
             </button>
           )}
 
+          {/* Transaction controls */}
+          {transactionState === 'none' ? (
+            <button onClick={beginTransaction} disabled={isExecuting}
+              className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover disabled:opacity-50 transition-colors"
+              title="Begin a new transaction">
+              BEGIN
+            </button>
+          ) : (
+            <>
+              <button onClick={commitTransaction} disabled={isExecuting}
+                className="px-2 py-1 text-xs rounded border border-green-600 text-green-400 hover:bg-green-600/10 disabled:opacity-50 transition-colors"
+                title="Commit the active transaction">
+                COMMIT
+              </button>
+              <button onClick={rollbackTransaction} disabled={isExecuting}
+                className="px-2 py-1 text-xs rounded border border-severity-error text-severity-error hover:bg-severity-error/10 disabled:opacity-50 transition-colors"
+                title="Rollback the active transaction">
+                ROLLBACK
+              </button>
+              <span className="px-2 py-0.5 text-xs rounded bg-amber-600/20 text-amber-400 border border-amber-600/40">
+                Transaction Active
+              </span>
+            </>
+          )}
+
+          <div className="w-px h-5 bg-border" />
+
           <button onClick={() => executeQuery(undefined, true)} disabled={isExecuting}
             className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
             title="Show execution plan">
@@ -613,6 +732,14 @@ export function QueryPage() {
                     {totalRows.toLocaleString()} row{totalRows !== 1 ? 's' : ''} &middot; {response.elapsedMs}ms
                   </span>
                   {anyTruncated && <span className="text-amber-400">&#9888; Truncated</span>}
+                  <button
+                    onClick={pinCurrentResult}
+                    disabled={pinnedResults.length >= 3}
+                    className="px-2 py-0.5 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 transition-colors"
+                    title={pinnedResults.length >= 3 ? 'Max 3 pinned results' : 'Pin these results'}
+                  >
+                    Pin
+                  </button>
                 </>
               )}
             </div>
@@ -641,7 +768,7 @@ export function QueryPage() {
 
           {isExecuting && (
             <div className="flex items-center justify-center h-full text-text-muted text-sm">
-              <span className="animate-spin mr-2">&#9696;</span> Executing query...
+              <span className="animate-spin mr-2">&#9696;</span> Running for {elapsedDisplay || '0ms'}...
             </div>
           )}
 
@@ -677,6 +804,36 @@ export function QueryPage() {
             <div className="bg-severity-error/10 border border-severity-error/30 rounded p-4 text-sm text-severity-error">
               <div className="font-medium mb-1">Query Error</div>
               <pre className="whitespace-pre-wrap font-mono text-xs">{response.error}</pre>
+            </div>
+          )}
+
+          {/* Pinned results */}
+          {pinnedResults.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {pinnedResults.map((pin) => (
+                <details key={pin.id} className="border border-border rounded bg-bg-secondary">
+                  <summary className="px-3 py-2 text-xs cursor-pointer hover:bg-bg-hover transition-colors flex items-center gap-2">
+                    <span className="text-accent font-medium">Pinned</span>
+                    <span className="text-text-muted font-mono truncate flex-1">{pin.sql}</span>
+                    <span className="text-text-secondary">{pin.response.elapsedMs}ms</span>
+                    <button
+                      onClick={(e) => { e.preventDefault(); unpinResult(pin.id); }}
+                      className="text-text-muted hover:text-severity-error text-[10px] ml-1"
+                      title="Unpin"
+                    >
+                      &#10005;
+                    </button>
+                  </summary>
+                  <div className="p-3 border-t border-border">
+                    {pin.response.resultSets.length > 0 && (
+                      <QueryResultsGrid resultSet={pin.response.resultSets[0]} />
+                    )}
+                    {pin.response.resultSets.length === 0 && (
+                      <div className="text-text-muted text-xs">No result sets.</div>
+                    )}
+                  </div>
+                </details>
+              ))}
             </div>
           )}
         </div>

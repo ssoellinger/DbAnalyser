@@ -30,6 +30,13 @@ function resultSetToCsv(resultSet: QueryResultSet): string {
 
 export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
   const { columns: colNames, rows } = resultSet;
+  const [copiedCell, setCopiedCell] = useState<string | null>(null);
+
+  const handleCellClick = useCallback((text: string, cellId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCell(cellId);
+    setTimeout(() => setCopiedCell(null), 800);
+  }, []);
 
   const columns = useMemo<ColumnDef<RowData, unknown>[]>(
     () => [
@@ -46,16 +53,26 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
       ...colNames.map((col) => ({
         accessorKey: col,
         header: col,
-        cell: ({ getValue }: { getValue: () => unknown }) => {
+        cell: ({ getValue, row }: { getValue: () => unknown; row: { index: number } }) => {
           const val = getValue();
-          if (val === null || val === undefined) {
-            return <span className="italic text-text-muted">NULL</span>;
-          }
-          return String(val);
+          const text = cellToString(val);
+          const cellId = `${row.index}-${col}`;
+          const isCopied = copiedCell === cellId;
+          return (
+            <span
+              onClick={() => handleCellClick(text, cellId)}
+              className={`cursor-pointer rounded px-0.5 -mx-0.5 transition-colors hover:bg-white/5 ${isCopied ? 'bg-green-500/20 text-green-400' : ''}`}
+              title="Click to copy"
+            >
+              {val === null || val === undefined
+                ? <span className="italic text-text-muted">NULL</span>
+                : String(val)}
+            </span>
+          );
         },
       })),
     ],
-    [colNames],
+    [colNames, copiedCell, handleCellClick],
   );
 
   const data = useMemo<RowData[]>(
@@ -121,6 +138,7 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
         pageSize={50}
         searchable={data.length > 10}
         searchPlaceholder="Filter results..."
+        enableColumnResizing
       />
     </div>
   );

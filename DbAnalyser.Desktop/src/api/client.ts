@@ -57,6 +57,22 @@ export const api = {
 
   getQueryDatabases: (sessionId: string) =>
     request<{ databases: string[]; currentDatabase: string | null }>(`/api/query/${sessionId}/databases`),
+
+  beginTransaction: (sessionId: string, database?: string) =>
+    request<{ transactionId: string }>(`/api/query/${sessionId}/transaction/begin`, {
+      method: 'POST',
+      body: JSON.stringify({ database: database || undefined }),
+    }),
+
+  commitTransaction: (sessionId: string) =>
+    request<{ message: string }>(`/api/query/${sessionId}/transaction/commit`, {
+      method: 'POST',
+    }),
+
+  rollbackTransaction: (sessionId: string) =>
+    request<{ message: string }>(`/api/query/${sessionId}/transaction/rollback`, {
+      method: 'POST',
+    }),
 };
 
 // ── SignalR ─────────────────────────────────────────────────────────────────

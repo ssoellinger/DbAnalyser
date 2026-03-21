@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using Npgsql;
 
@@ -8,6 +9,7 @@ public class PostgreSqlProvider : IDbProvider
     private NpgsqlDataSource? _dataSource;
     private NpgsqlConnection? _connection;
     private string _connectionString = string.Empty;
+    private readonly ConcurrentDictionary<string, (NpgsqlConnection Connection, NpgsqlTransaction Transaction)> _transactions = new();
 
     public string ConnectionString => _connectionString;
     public string DatabaseName => _connection?.Database ?? string.Empty;
@@ -150,8 +152,86 @@ public class PostgreSqlProvider : IDbProvider
         return new QueryExecutionResult(results, messages);
     }
 
+    public async Task<string> BeginTransactionAsync(string connectionString, CancellationToken ct = default)
+    {
+        await using var ds = NpgsqlDataSource.Create(connectionString);
+        var conn = await ds.OpenConnectionAsync(ct);
+        var txn = await conn.BeginTransactionAsync(ct);
+        var txnId = Guid.NewGuid().ToString("N")[..12];
+        _transactions[txnId] = (conn, txn);
+        return txnId;
+    }
+
+    public async Task CommitTransactionAsync(string txnId, CancellationToken ct = default)
+    {
+        if (!_transactions.TryRemove(txnId, out var entry))
+            throw new InvalidOperationException($"Transaction '{txnId}' not found.");
+        await entry.Transaction.CommitAsync(ct);
+        await entry.Connection.DisposeAsync();
+    }
+
+    public async Task RollbackTransactionAsync(string txnId, CancellationToken ct = default)
+    {
+        if (!_transactions.TryRemove(txnId, out var entry))
+            throw new InvalidOperationException($"Transaction '{txnId}' not found.");
+        await entry.Transaction.RollbackAsync(ct);
+        await entry.Connection.DisposeAsync();
+    }
+
+    public async Task<QueryExecutionResult> ExecuteInTransactionAsync(string txnId, string sql, int maxRows = 1000, int timeoutSeconds = 30, CancellationToken ct = default)
+    {
+        if (!_transactions.TryGetValue(txnId, out var entry))
+            throw new InvalidOperationException($"Transaction '{txnId}' not found.");
+
+        var messages = new List<string>();
+        entry.Connection.Notice += (_, e) => {
+            if (!string.IsNullOrWhiteSpace(e.Notice.MessageText))
+                messages.Add(e.Notice.MessageText);
+        };
+
+        await using var cmd = new NpgsqlCommand(sql, entry.Connection, entry.Transaction) { CommandTimeout = timeoutSeconds };
+        var results = new List<DataTable>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        do
+        {
+            var table = new DataTable();
+            for (var i = 0; i < reader.FieldCount; i++)
+                table.Columns.Add(reader.GetName(i), reader.GetFieldType(i) ?? typeof(object));
+
+            var rowCount = 0;
+            while (rowCount < maxRows && await reader.ReadAsync(ct))
+            {
+                var values = new object[reader.FieldCount];
+                reader.GetValues(values);
+                table.Rows.Add(values);
+                rowCount++;
+            }
+
+            results.Add(table);
+        } while (await reader.NextResultAsync(ct));
+
+        if (reader.RecordsAffected >= 0)
+            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+
+        return new QueryExecutionResult(results, messages);
+    }
+
+    public async Task RollbackAllTransactionsAsync()
+    {
+        foreach (var txnId in _transactions.Keys.ToList())
+        {
+            if (_transactions.TryRemove(txnId, out var entry))
+            {
+                try { await entry.Transaction.RollbackAsync(); } catch { }
+                try { await entry.Connection.DisposeAsync(); } catch { }
+            }
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
+        await RollbackAllTransactionsAsync();
         if (_connection is not null)
         {
             await _connection.DisposeAsync();

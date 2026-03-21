@@ -16,6 +16,7 @@ interface DataTableProps<T> {
   pageSize?: number;
   searchable?: boolean;
   searchPlaceholder?: string;
+  enableColumnResizing?: boolean;
 }
 
 export function DataTable<T>({
@@ -24,6 +25,7 @@ export function DataTable<T>({
   pageSize = 25,
   searchable = true,
   searchPlaceholder = 'Filter...',
+  enableColumnResizing = false,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -39,6 +41,7 @@ export function DataTable<T>({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize } },
+    ...(enableColumnResizing ? { columnResizeMode: 'onChange' as const, enableColumnResizing: true } : {}),
   });
 
   return (
@@ -53,7 +56,7 @@ export function DataTable<T>({
       )}
 
       <div className="overflow-x-auto rounded border border-border">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" style={enableColumnResizing ? { tableLayout: 'fixed', width: table.getCenterTotalSize() } : undefined}>
           <thead>
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id} className="border-b border-border bg-bg-secondary">
@@ -61,12 +64,21 @@ export function DataTable<T>({
                   <th
                     key={header.id}
                     onClick={header.column.getToggleSortingHandler()}
-                    className="px-3 py-2 text-left text-xs font-medium text-text-secondary cursor-pointer hover:text-text-primary select-none"
+                    className={`px-3 py-2 text-left text-xs font-medium text-text-secondary cursor-pointer hover:text-text-primary select-none${enableColumnResizing ? ' relative' : ''}`}
+                    style={enableColumnResizing ? { width: header.getSize() } : undefined}
                   >
                     <div className="flex items-center gap-1">
                       {flexRender(header.column.columnDef.header, header.getContext())}
                       {{ asc: ' ▲', desc: ' ▼' }[header.column.getIsSorted() as string] ?? ''}
                     </div>
+                    {enableColumnResizing && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-colors ${header.column.getIsResizing() ? 'bg-accent' : 'hover:bg-accent/50'}`}
+                      />
+                    )}
                   </th>
                 ))}
               </tr>
@@ -76,7 +88,11 @@ export function DataTable<T>({
             {table.getRowModel().rows.map((row) => (
               <tr key={row.id} className="border-b border-border/50 hover:bg-bg-hover transition-colors">
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2 text-text-primary">
+                  <td
+                    key={cell.id}
+                    className="px-3 py-2 text-text-primary overflow-hidden text-ellipsis"
+                    style={enableColumnResizing ? { width: cell.column.getSize() } : undefined}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}

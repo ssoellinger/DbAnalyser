@@ -43,7 +43,11 @@ public class AnalysisSessionService : IAsyncDisposable
             {
                 _logger.LogInformation("Cleaning up idle session {SessionId} (last activity: {LastActivity})",
                     id, removed.LastActivityUtc);
-                removed.Provider.DisposeAsync().AsTask().ContinueWith(t =>
+                // Rollback any open transaction before disposing
+                var disposeTask = removed.Provider.RollbackAllTransactionsAsync()
+                    .ContinueWith(_ => removed.Provider.DisposeAsync().AsTask())
+                    .Unwrap();
+                disposeTask.ContinueWith(t =>
                 {
                     if (t.IsFaulted)
                         _logger.LogWarning(t.Exception, "Error disposing idle session {SessionId}", id);
@@ -464,6 +468,56 @@ public class AnalysisSessionService : IAsyncDisposable
         }
     }
 
+    public string? GetActiveTransactionId(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return null;
+        return session.ActiveTransactionId;
+    }
+
+    public async Task<string> BeginTransactionAsync(string sessionId, string? database = null, CancellationToken ct = default)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            throw new InvalidOperationException($"Session '{sessionId}' not found.");
+
+        if (session.ActiveTransactionId is not null)
+            throw new InvalidOperationException("A transaction is already active. Commit or rollback first.");
+
+        session.LastActivityUtc = DateTime.UtcNow;
+        var connStr = !string.IsNullOrWhiteSpace(database)
+            ? session.Bundle.Factory.SetDatabase(session.ConnectionString, database)
+            : session.ConnectionString;
+
+        var txnId = await session.Provider.BeginTransactionAsync(connStr, ct);
+        session.ActiveTransactionId = txnId;
+        return txnId;
+    }
+
+    public async Task CommitTransactionAsync(string sessionId, CancellationToken ct = default)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            throw new InvalidOperationException($"Session '{sessionId}' not found.");
+
+        if (session.ActiveTransactionId is null)
+            throw new InvalidOperationException("No active transaction.");
+
+        session.LastActivityUtc = DateTime.UtcNow;
+        await session.Provider.CommitTransactionAsync(session.ActiveTransactionId, ct);
+        session.ActiveTransactionId = null;
+    }
+
+    public async Task RollbackTransactionAsync(string sessionId, CancellationToken ct = default)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            throw new InvalidOperationException($"Session '{sessionId}' not found.");
+
+        if (session.ActiveTransactionId is null)
+            throw new InvalidOperationException("No active transaction.");
+
+        session.LastActivityUtc = DateTime.UtcNow;
+        await session.Provider.RollbackTransactionAsync(session.ActiveTransactionId, ct);
+        session.ActiveTransactionId = null;
+    }
+
     public async Task DisconnectAsync(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var session))
@@ -549,6 +603,7 @@ public class AnalysisSessionService : IAsyncDisposable
         await _cleanupTimer.DisposeAsync();
         foreach (var session in _sessions.Values)
         {
+            await session.Provider.RollbackAllTransactionsAsync();
             await session.Provider.DisposeAsync();
         }
         _sessions.Clear();
@@ -563,6 +618,7 @@ public class AnalysisSessionService : IAsyncDisposable
         public bool IsServerMode { get; init; }
         public string ConnectionString { get; init; } = string.Empty;
         public DateTime LastActivityUtc { get; set; } = DateTime.UtcNow;
+        public string? ActiveTransactionId { get; set; }
     }
 }
 

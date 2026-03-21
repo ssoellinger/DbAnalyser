@@ -99,6 +99,50 @@ public static class AnalysisEndpoints
             return Results.Ok(new { databases, currentDatabase });
         });
 
+        // ── Transaction endpoints ──
+
+        group.MapPost("/query/{sessionId}/transaction/begin", async (string sessionId, TransactionRequest? request, AnalysisSessionService sessionService, ILogger<AnalysisSessionService> logger, CancellationToken ct) =>
+        {
+            try
+            {
+                var txnId = await sessionService.BeginTransactionAsync(sessionId, request?.Database, ct);
+                logger.LogInformation("Transaction {TxnId} started for session {SessionId}", txnId, sessionId);
+                return Results.Ok(new { transactionId = txnId });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/query/{sessionId}/transaction/commit", async (string sessionId, AnalysisSessionService sessionService, ILogger<AnalysisSessionService> logger, CancellationToken ct) =>
+        {
+            try
+            {
+                await sessionService.CommitTransactionAsync(sessionId, ct);
+                logger.LogInformation("Transaction committed for session {SessionId}", sessionId);
+                return Results.Ok(new { message = "Transaction committed." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/query/{sessionId}/transaction/rollback", async (string sessionId, AnalysisSessionService sessionService, ILogger<AnalysisSessionService> logger, CancellationToken ct) =>
+        {
+            try
+            {
+                await sessionService.RollbackTransactionAsync(sessionId, ct);
+                logger.LogInformation("Transaction rolled back for session {SessionId}", sessionId);
+                return Results.Ok(new { message = "Transaction rolled back." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         group.MapPost("/query/{sessionId}", async (string sessionId, ExecuteQueryRequest request, AnalysisSessionService sessionService, ILogger<AnalysisSessionService> logger, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.Sql))
@@ -114,11 +158,14 @@ public static class AnalysisEndpoints
             var maxRows = request.MaxRows ?? 1000;
             var timeoutSeconds = request.TimeoutSeconds ?? 30;
             var connStr = sessionService.GetConnectionString(sessionId, request.Database) ?? provider.ConnectionString;
+            var activeTxnId = sessionService.GetActiveTransactionId(sessionId);
             var sw = Stopwatch.StartNew();
 
             try
             {
-                var execResult = await provider.ExecuteQueryFullAsync(request.Sql, connStr, maxRows, timeoutSeconds, request.ShowPlan, ct);
+                var execResult = activeTxnId is not null
+                    ? await provider.ExecuteInTransactionAsync(activeTxnId, request.Sql, maxRows, timeoutSeconds, ct)
+                    : await provider.ExecuteQueryFullAsync(request.Sql, connStr, maxRows, timeoutSeconds, request.ShowPlan, ct);
                 sw.Stop();
 
                 var resultSets = new List<QueryResultSetDto>();
@@ -173,5 +220,6 @@ public record StartAnalysisRequest(string SessionId, List<string>? Analyzers = n
 public record DisconnectRequest(string SessionId);
 public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false, string? Database = null);
 public record ExecuteQueryRequest(string Sql, int? MaxRows = 1000, int? TimeoutSeconds = 30, string? Database = null, bool ShowPlan = false);
+public record TransactionRequest(string? Database = null);
 public record QueryResultSetDto(List<string> Columns, List<List<object?>> Rows, int TotalRowsReturned, bool Truncated);
 public record QueryResponseDto(List<QueryResultSetDto> ResultSets, long ElapsedMs, string? Error, List<string>? Messages = null, string? ExecutionPlan = null);
