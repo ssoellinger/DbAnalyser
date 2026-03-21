@@ -31,6 +31,24 @@ const KIND_CONFIG: Record<string, { icon: string; color: string; label: string }
   'begin-tran': { icon: 'T', color: '#ff7043', label: 'Transaction' },
 };
 
+// Pre-compiled regex patterns (module level — created once)
+const RE_DECLARE = /^DECLARE\s+(@\w+)/i;
+const RE_TEMP_TABLE = /CREATE\s+TABLE\s+(#\w+)/i;
+const RE_CURSOR = /^DECLARE\s+(\w+)\s+CURSOR/i;
+const RE_WITH = /^WITH\s+/i;
+const RE_CTE = /^WITH\s+(\w+)\s+AS\s*\(/i;
+const RE_CTE_CONT = /^,?\s*(\w+)\s+AS\s*\(/i;
+const RE_INSERT = /^INSERT\s+(?:INTO\s+)?(\[?\w+\]?(?:\.\[?\w+\]?)?)/;
+const RE_UPDATE = /^UPDATE\s+(\[?\w+\]?(?:\.\[?\w+\]?)?)/;
+const RE_UPDATE_STATS = /^UPDATE\s+STATISTICS/i;
+const RE_DELETE = /^DELETE\s+(?:FROM\s+)?(\[?\w+\]?(?:\.\[?\w+\]?)?)/;
+const RE_SELECT = /\bSELECT\b/i;
+const RE_INTO = /\bINTO\s+(#?\[?\w+\]?)/i;
+const RE_INTO_FULL = /\bINTO\s+(#?\[?\w+\]?(?:\.\[?\w+\]?)?)/i;
+const RE_EXEC = /^EXEC(?:UTE)?\s+(\[?\w+\]?(?:\.\[?\w+\]?)?)/i;
+const RE_BEGIN_TRY = /^BEGIN\s+TRY\b/i;
+const RE_BEGIN_TRAN = /^BEGIN\s+TRAN(SACTION)?\b/i;
+
 function parseOutline(definition: string): OutlineSymbol[] {
   const symbols: OutlineSymbol[] = [];
   const lines = definition.split('\n');
@@ -41,9 +59,7 @@ function parseOutline(definition: string): OutlineSymbol[] {
     const upper = trimmed.toUpperCase();
     const lineNum = i + 1;
 
-    // Parameters: @Name type (at the start, in CREATE section)
-    // Variables: DECLARE @Name
-    const declareMatch = trimmed.match(/^DECLARE\s+(@\w+)/i);
+    const declareMatch = trimmed.match(RE_DECLARE);
     if (declareMatch) {
       const name = declareMatch[1];
       if (name.startsWith('@#') || name.startsWith('@__')) continue;
@@ -51,80 +67,70 @@ function parseOutline(definition: string): OutlineSymbol[] {
       continue;
     }
 
-    // Temp tables: CREATE TABLE #Name or SELECT INTO #Name
-    const tempTableMatch = trimmed.match(/CREATE\s+TABLE\s+(#\w+)/i);
+    const tempTableMatch = trimmed.match(RE_TEMP_TABLE);
     if (tempTableMatch) {
       symbols.push({ name: tempTableMatch[1], kind: 'temptable', line: lineNum, ...KIND_CONFIG.temptable });
       continue;
     }
 
-    // Cursors: DECLARE name CURSOR
-    const cursorMatch = trimmed.match(/^DECLARE\s+(\w+)\s+CURSOR/i);
+    const cursorMatch = trimmed.match(RE_CURSOR);
     if (cursorMatch) {
       symbols.push({ name: cursorMatch[1], kind: 'cursor', line: lineNum, ...KIND_CONFIG.cursor });
       continue;
     }
 
-    // CTEs: name AS (
-    if (/^WITH\s+/i.test(trimmed)) {
-      const cteMatch = trimmed.match(/^WITH\s+(\w+)\s+AS\s*\(/i);
+    if (RE_WITH.test(trimmed)) {
+      const cteMatch = trimmed.match(RE_CTE);
       if (cteMatch) {
         symbols.push({ name: cteMatch[1], kind: 'cte', line: lineNum, ...KIND_CONFIG.cte });
       }
       continue;
     }
-    // Additional CTE: , Name AS (
-    const cteContMatch = trimmed.match(/^,?\s*(\w+)\s+AS\s*\(/i);
+
+    const cteContMatch = trimmed.match(RE_CTE_CONT);
     if (cteContMatch && symbols.length > 0 && symbols[symbols.length - 1].kind === 'cte') {
       symbols.push({ name: cteContMatch[1], kind: 'cte', line: lineNum, ...KIND_CONFIG.cte });
       continue;
     }
 
-    // INSERT INTO
-    const insertMatch = upper.match(/^INSERT\s+(?:INTO\s+)?(\[?\w+\]?(?:\.\[?\w+\]?)?)/);
+    const insertMatch = upper.match(RE_INSERT);
     if (insertMatch) {
       symbols.push({ name: `INSERT ${insertMatch[1]}`, kind: 'insert', line: lineNum, ...KIND_CONFIG.insert });
       continue;
     }
 
-    // UPDATE
-    const updateMatch = upper.match(/^UPDATE\s+(\[?\w+\]?(?:\.\[?\w+\]?)?)/);
-    if (updateMatch && !/^UPDATE\s+STATISTICS/i.test(trimmed)) {
+    const updateMatch = upper.match(RE_UPDATE);
+    if (updateMatch && !RE_UPDATE_STATS.test(trimmed)) {
       symbols.push({ name: `UPDATE ${updateMatch[1]}`, kind: 'update', line: lineNum, ...KIND_CONFIG.update });
       continue;
     }
 
-    // DELETE
-    const deleteMatch = upper.match(/^DELETE\s+(?:FROM\s+)?(\[?\w+\]?(?:\.\[?\w+\]?)?)/);
+    const deleteMatch = upper.match(RE_DELETE);
     if (deleteMatch) {
       symbols.push({ name: `DELETE ${deleteMatch[1]}`, kind: 'delete', line: lineNum, ...KIND_CONFIG.delete });
       continue;
     }
 
-    // SELECT INTO
-    if (/\bSELECT\b/i.test(trimmed) && /\bINTO\s+(#?\[?\w+\]?)/i.test(trimmed)) {
-      const intoMatch = trimmed.match(/\bINTO\s+(#?\[?\w+\]?(?:\.\[?\w+\]?)?)/i);
+    if (RE_SELECT.test(trimmed) && RE_INTO.test(trimmed)) {
+      const intoMatch = trimmed.match(RE_INTO_FULL);
       if (intoMatch) {
         symbols.push({ name: `SELECT INTO ${intoMatch[1]}`, kind: 'select-into', line: lineNum, ...KIND_CONFIG['select-into'] });
         continue;
       }
     }
 
-    // EXEC / EXECUTE
-    const execMatch = trimmed.match(/^EXEC(?:UTE)?\s+(\[?\w+\]?(?:\.\[?\w+\]?)?)/i);
+    const execMatch = trimmed.match(RE_EXEC);
     if (execMatch) {
       symbols.push({ name: `EXEC ${execMatch[1]}`, kind: 'exec', line: lineNum, ...KIND_CONFIG.exec });
       continue;
     }
 
-    // BEGIN TRY
-    if (/^BEGIN\s+TRY\b/i.test(trimmed)) {
+    if (RE_BEGIN_TRY.test(trimmed)) {
       symbols.push({ name: 'BEGIN TRY', kind: 'try', line: lineNum, ...KIND_CONFIG.try });
       continue;
     }
 
-    // BEGIN TRANSACTION
-    if (/^BEGIN\s+TRAN(SACTION)?\b/i.test(trimmed)) {
+    if (RE_BEGIN_TRAN.test(trimmed)) {
       symbols.push({ name: 'BEGIN TRANSACTION', kind: 'begin-tran', line: lineNum, ...KIND_CONFIG['begin-tran'] });
       continue;
     }

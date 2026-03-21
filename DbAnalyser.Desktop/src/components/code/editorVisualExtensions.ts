@@ -53,8 +53,8 @@ function buildIndentGuides(view: EditorView): DecorationSet {
         else break;
       }
 
-      // Add guide marks at each indent level (every 4 spaces)
-      const step = 4;
+      // Add guide marks at each indent level (respects editor tab size)
+      const step = tabSize;
       if (indent >= step && charIdx > 0) {
         let guideCol = step;
         while (guideCol <= indent) {

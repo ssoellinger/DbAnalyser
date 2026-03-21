@@ -118,11 +118,16 @@ function makeTabId(type: string, fullName: string) {
   return `${type}:${fullName}`;
 }
 
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
 function autoSave(get: () => CodeState) {
-  const state = get();
-  if (state.connectionKey) {
-    saveSession(state.connectionKey, state);
-  }
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    const state = get();
+    if (state.connectionKey) {
+      saveSession(state.connectionKey, state);
+    }
+  }, 300);
 }
 
 export const useCodeStore = create<CodeState>((set, get) => ({

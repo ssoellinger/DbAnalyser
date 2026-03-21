@@ -12,14 +12,16 @@ interface ParsedParam {
   defaultValue?: string;
 }
 
-/**
- * Extracts parameters from a stored procedure or function definition.
- */
+// Pre-compiled regex patterns
+const RE_CREATE_OR_ALTER = /^(CREATE|ALTER)\s+(PROCEDURE|PROC|FUNCTION)\b/i;
+const RE_HAS_PARAM = /@\w+/;
+const RE_AS_STANDALONE = /^\bAS\b\s*$/i;
+const RE_BEGIN = /^\bBEGIN\b/i;
+const RE_PARAM = /(@\w+)\s+([\w]+(?:\([\w,\s]+\))?(?:\s*\((?:max|\d+(?:,\s*\d+)?)\))?)\s*(?:=\s*([^,\-\/]+?))?\s*(OUTPUT|OUT)?\s*[,]?\s*(?:--.*)?$/i;
+
 function parseParameters(definition: string, objectType: string): ParsedParam[] {
   if (objectType !== 'Procedure' && objectType !== 'Function') return [];
 
-  // Match parameter declarations: @Name Type [= default] [OUTPUT]
-  // They appear between CREATE PROC/FUNC line and the AS keyword
   const lines = definition.split('\n');
   const params: ParsedParam[] = [];
   let inParamSection = false;
@@ -28,26 +30,18 @@ function parseParameters(definition: string, objectType: string): ParsedParam[] 
     const trimmed = line.trim();
     const upper = trimmed.toUpperCase();
 
-    // Start after CREATE PROCEDURE/FUNCTION
-    if (/^(CREATE|ALTER)\s+(PROCEDURE|PROC|FUNCTION)\b/i.test(trimmed)) {
+    if (RE_CREATE_OR_ALTER.test(trimmed)) {
       inParamSection = true;
-      // Check if params are on the same line
-      const sameLine = trimmed.match(/@\w+/);
-      if (!sameLine) continue;
+      if (!RE_HAS_PARAM.test(trimmed)) continue;
     }
 
-    // Stop at AS keyword (standalone)
-    if (inParamSection && /^\bAS\b\s*$/i.test(trimmed)) break;
+    if (inParamSection && RE_AS_STANDALONE.test(trimmed)) break;
     if (inParamSection && upper === 'AS') break;
-    // Also stop at BEGIN if no AS
-    if (inParamSection && /^\bBEGIN\b/i.test(trimmed)) break;
+    if (inParamSection && RE_BEGIN.test(trimmed)) break;
 
     if (!inParamSection) continue;
 
-    // Match @ParamName type [= default] [OUTPUT|OUT]
-    const paramMatch = trimmed.match(
-      /(@\w+)\s+([\w]+(?:\([\w,\s]+\))?(?:\s*\((?:max|\d+(?:,\s*\d+)?)\))?)\s*(?:=\s*([^,\-\/]+?))?\s*(OUTPUT|OUT)?\s*[,]?\s*(?:--.*)?$/i
-    );
+    const paramMatch = trimmed.match(RE_PARAM);
 
     if (paramMatch) {
       params.push({

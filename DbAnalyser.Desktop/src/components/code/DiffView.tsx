@@ -116,9 +116,9 @@ export function DiffView({ left, right, onClose }: DiffViewProps) {
         </span>
       </div>
 
-      {/* Diff content — side by side */}
+      {/* Diff content — side by side with horizontal scroll */}
       <div className="flex-1 overflow-auto font-mono text-[11px] leading-relaxed">
-        <table className="w-full border-collapse">
+        <table className="w-full border-collapse table-fixed">
           <tbody>
             {diffLines.map((line, i) => (
               <tr key={i} className={TYPE_COLORS[line.type]}>
@@ -126,15 +126,15 @@ export function DiffView({ left, right, onClose }: DiffViewProps) {
                 <td className="w-10 text-right pr-2 text-text-muted select-none border-r border-border/30 align-top">
                   {line.leftNum ?? ''}
                 </td>
-                <td className={`px-2 whitespace-pre align-top w-1/2 ${LINE_COLORS[line.type === 'removed' ? 'removed' : 'same']}`}>
+                <td className={`px-2 whitespace-pre align-top overflow-hidden text-ellipsis ${LINE_COLORS[line.type === 'removed' ? 'removed' : 'same']}`}>
                   {line.type === 'removed' && <span className="text-red-400/50 select-none">- </span>}
                   {line.leftText}
                 </td>
                 {/* Right side */}
-                <td className="w-10 text-right pr-2 text-text-muted select-none border-l border-r border-border/30 align-top">
+                <td className="w-10 text-right pr-2 text-text-muted select-none border-l border-r border-border/30 align-top flex-shrink-0">
                   {line.rightNum ?? ''}
                 </td>
-                <td className={`px-2 whitespace-pre align-top w-1/2 ${LINE_COLORS[line.type === 'added' ? 'added' : 'same']}`}>
+                <td className={`px-2 whitespace-pre align-top overflow-hidden text-ellipsis ${LINE_COLORS[line.type === 'added' ? 'added' : 'same']}`}>
                   {line.type === 'added' && <span className="text-green-400/50 select-none">+ </span>}
                   {line.rightText}
                 </td>

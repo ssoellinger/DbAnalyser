@@ -113,7 +113,7 @@ function CodeContent() {
   const [showSettings, setShowSettings] = useState(false);
   const showOutline = visualSettings.outline;
   const [showDiff, setShowDiff] = useState(false);
-  const [copyFeedback, setCopyFeedback] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<false | 'copied' | 'failed'>(false);
   const [explorerWidth, setExplorerWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
   const [refsOpen, setRefsOpen] = useState(false);
@@ -387,12 +387,13 @@ function CodeContent() {
               <button
                 onClick={async () => {
                   const ok = await copyAsFormatted(activeTab.definition);
-                  if (ok) { setCopyFeedback(true); setTimeout(() => setCopyFeedback(false), 1500); }
+                  setCopyFeedback(ok ? 'copied' : 'failed');
+                  setTimeout(() => setCopyFeedback(false), 1500);
                 }}
-                className="text-text-secondary hover:text-accent transition-colors"
+                className={`transition-colors ${copyFeedback === 'failed' ? 'text-severity-error' : 'text-text-secondary hover:text-accent'}`}
                 title="Copy with syntax highlighting"
               >
-                {copyFeedback ? 'Copied!' : 'Copy'}
+                {copyFeedback === 'copied' ? 'Copied!' : copyFeedback === 'failed' ? 'Failed!' : 'Copy'}
               </button>
               {tabs.length >= 2 && (
                 <button
