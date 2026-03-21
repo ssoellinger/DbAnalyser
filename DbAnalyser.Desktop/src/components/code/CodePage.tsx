@@ -17,7 +17,8 @@ const MiniErd = lazy(() => import('./MiniErd').then((m) => ({ default: m.MiniErd
 import { copyAsFormatted } from './copyFormatted';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
-import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl } from './tableDdlGenerator';
+import { buildObjectLookup } from './schemaLookup';
+import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl, generateSynonymDdl } from './tableDdlGenerator';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ColumnInfo } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
@@ -113,7 +114,7 @@ function CodeContent() {
       if (objectType === 'Trigger') return schema.triggers.find((t) => t.fullName === fullName)?.definition ?? '';
       if (objectType === 'Synonym') {
         const s = schema.synonyms.find((s) => s.fullName === fullName);
-        return s ? `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};` : '';
+        return s ? generateSynonymDdl(s) : '';
       }
       if (objectType === 'Job') {
         const j = schema.jobs.find((j) => j.jobName === fullName);
@@ -154,6 +155,9 @@ function CodeContent() {
     () => (splitTabId ? tabs.find((t) => t.id === splitTabId) ?? null : null),
     [tabs, splitTabId]
   );
+
+  // Shared object lookup (used by references, column usage, etc.)
+  const objectLookup = useMemo(() => buildObjectLookup(result?.schema ?? null), [result?.schema]);
 
   // Build identifier map for click-through
   const identifierMap = useMemo(
@@ -262,9 +266,8 @@ function CodeContent() {
   }, [activeTab]);
 
   const references = useMemo<ReferenceResult[]>(() => {
-    if (!refsTarget || !result?.schema) return [];
-    const schema = result.schema;
-    const deps = result.relationships?.dependencies;
+    if (!refsTarget) return [];
+    const deps = result?.relationships?.dependencies;
 
     // Use API dependency data to get accurate referencing objects
     const referencingNames = new Set<string>();
@@ -275,17 +278,6 @@ function CodeContent() {
       }
     }
 
-    // Build lookup for object definitions
-    const objMap = new Map<string, { objectType: string; fullName: string; label: string; definition: string }>();
-    for (const v of schema.views)
-      objMap.set(v.fullName, { objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
-    for (const p of schema.storedProcedures)
-      objMap.set(p.fullName, { objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
-    for (const f of schema.functions)
-      objMap.set(f.fullName, { objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
-    for (const t of schema.triggers)
-      objMap.set(t.fullName, { objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
-
     // Find matching lines in each referencing object's definition
     const shortName = refsTarget.split('.').pop() ?? refsTarget;
     const escapedTarget = refsTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -294,7 +286,7 @@ function CodeContent() {
 
     const results: ReferenceResult[] = [];
     for (const refName of referencingNames) {
-      const obj = objMap.get(refName);
+      const obj = objectLookup.get(refName);
       if (!obj || !obj.definition) continue;
 
       const lines = obj.definition.split('\n');
@@ -311,7 +303,7 @@ function CodeContent() {
 
     results.sort((a, b) => a.fullName.localeCompare(b.fullName));
     return results;
-  }, [refsTarget, result?.schema, result?.relationships?.dependencies]);
+  }, [refsTarget, result?.relationships?.dependencies, objectLookup]);
 
   // Column list for current table/view (for Column Usage feature)
   const activeColumns = useMemo<ColumnInfo[]>(() => {
@@ -328,25 +320,19 @@ function CodeContent() {
     return [];
   }, [activeTab, result?.schema]);
 
-  // Column usage search results
+  // Column usage search results — search all definitions for the column name
   const columnUsageResults = useMemo<ReferenceResult[]>(() => {
-    if (!colUsageColumn || !result?.schema) return [];
-    const schema = result.schema;
+    if (!colUsageColumn) return [];
     const escaped = colUsageColumn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const colRe = new RegExp(`\\b${escaped}\\b`, 'i');
 
-    const objDefs: { objectType: string; fullName: string; label: string; definition: string }[] = [];
-    for (const v of schema.views)
-      objDefs.push({ objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
-    for (const p of schema.storedProcedures)
-      objDefs.push({ objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
-    for (const f of schema.functions)
-      objDefs.push({ objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
-    for (const t of schema.triggers)
-      objDefs.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
-
+    // Dedupe by fullName since objectLookup has both fullName and shortName keys
+    const seen = new Set<string>();
     const results: ReferenceResult[] = [];
-    for (const obj of objDefs) {
+    for (const obj of objectLookup.values()) {
+      if (seen.has(obj.fullName)) continue;
+      seen.add(obj.fullName);
+      if (obj.objectType === 'Table') continue; // skip tables — we're searching definitions
       if (!obj.definition) continue;
       const lines = obj.definition.split('\n');
       const matchLines: { lineNum: number; text: string }[] = [];
@@ -362,7 +348,7 @@ function CodeContent() {
     }
     results.sort((a, b) => a.fullName.localeCompare(b.fullName));
     return results;
-  }, [colUsageColumn, result?.schema]);
+  }, [colUsageColumn, objectLookup]);
 
   const handleColumnUsage = useCallback(() => {
     if (activeColumns.length > 0) {

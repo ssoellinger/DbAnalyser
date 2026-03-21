@@ -1,4 +1,4 @@
-import type { TableInfo, ColumnInfo, JobInfo, SequenceInfo, UserDefinedTypeInfo } from '../../api/types';
+import type { TableInfo, ColumnInfo, JobInfo, SequenceInfo, UserDefinedTypeInfo, SynonymInfo } from '../../api/types';
 
 function formatColumnType(c: ColumnInfo): string {
   let t = c.dataType;
@@ -121,4 +121,8 @@ export function generateUdtDdl(udt: UserDefinedTypeInfo): string {
     typeDef += `(${udt.maxLength === -1 ? 'max' : udt.maxLength})`;
   }
   return `CREATE TYPE [${udt.schemaName}].[${udt.typeName}]\n    FROM ${typeDef.toUpperCase()} ${udt.isNullable ? 'NULL' : 'NOT NULL'};`;
+}
+
+export function generateSynonymDdl(syn: SynonymInfo): string {
+  return `-- Synonym: ${syn.fullName}\n-- Points to: ${syn.baseObjectName}\n\nCREATE SYNONYM [${syn.schemaName}].[${syn.synonymName}]\n    FOR ${syn.baseObjectName};`;
 }

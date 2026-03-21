@@ -3,7 +3,7 @@ import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { UsageLevel } from '../../api/types';
 import { useCodeStore, type ExplorerSort } from './useCodeStore';
-import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl, generateSynonymDdl } from './tableDdlGenerator';
 
 interface ObjectItem {
   objectType: string;
@@ -143,7 +143,7 @@ export function ObjectExplorer() {
         objectType: 'Synonym',
         fullName: s.fullName,
         label: s.synonymName,
-        definition: `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};`,
+        definition: generateSynonymDdl(s),
         usageLevel: usageMap.get(s.fullName),
         referencedBy: refCountMap.get(s.fullName) ?? 0,
         databaseName: s.databaseName,

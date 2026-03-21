@@ -1,4 +1,5 @@
 import type { DatabaseSchema } from '../../api/types';
+import { generateSynonymDdl } from './tableDdlGenerator';
 
 export interface ResolvedObject {
   objectType: string;  // Table, View, Procedure, Function, Trigger
@@ -125,7 +126,7 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       objectType: 'Synonym',
       fullName: s.fullName,
       label: s.synonymName,
-      definition: `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};`,
+      definition: generateSynonymDdl(s),
     };
     addAllVariants(s.fullName, s.schemaName, s.synonymName, s.databaseName, obj);
   }

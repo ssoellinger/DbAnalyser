@@ -2,18 +2,11 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import { useCodeStore } from './useCodeStore';
-import { generateTableDdl } from './tableDdlGenerator';
+import { buildObjectLookup, type SchemaObject } from './schemaLookup';
 
 interface DependencyMiniViewProps {
   fullName: string;
   objectType: string;
-}
-
-interface DepItem {
-  fullName: string;
-  objectType: string;
-  label: string;
-  definition: string;
 }
 
 export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewProps) {
@@ -21,23 +14,7 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
   const openTab = useCodeStore((s) => s.openTab);
   const [expanded, setExpanded] = useState(false);
 
-  // Build a lookup for resolving fullName → DepItem
-  const objectLookup = useMemo(() => {
-    if (!result?.schema) return new Map<string, DepItem>();
-    const schema = result.schema;
-    const map = new Map<string, DepItem>();
-    for (const t of schema.tables)
-      map.set(t.fullName, { fullName: t.fullName, objectType: 'Table', label: t.tableName, definition: generateTableDdl(t) });
-    for (const v of schema.views)
-      map.set(v.fullName, { fullName: v.fullName, objectType: 'View', label: v.viewName, definition: v.definition ?? '' });
-    for (const p of schema.storedProcedures)
-      map.set(p.fullName, { fullName: p.fullName, objectType: 'Procedure', label: p.procedureName, definition: p.definition ?? '' });
-    for (const f of schema.functions)
-      map.set(f.fullName, { fullName: f.fullName, objectType: 'Function', label: f.functionName, definition: f.definition ?? '' });
-    for (const t of schema.triggers)
-      map.set(t.fullName, { fullName: t.fullName, objectType: 'Trigger', label: t.triggerName, definition: t.definition ?? '' });
-    return map;
-  }, [result?.schema]);
+  const objectLookup = useMemo(() => buildObjectLookup(result?.schema ?? null), [result?.schema]);
 
   // Use API dependency data (pre-computed by the relationships analyzer)
   const { dependsOn, referencedBy } = useMemo(() => {
@@ -47,13 +24,13 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
     const entry = deps.find((d) => d.fullName === fullName);
     if (!entry) return { dependsOn: [], referencedBy: [] };
 
-    const dependsOn: DepItem[] = entry.dependsOn
+    const dependsOn: SchemaObject[] = entry.dependsOn
       .map((name) => objectLookup.get(name))
-      .filter((item): item is DepItem => !!item);
+      .filter((item): item is SchemaObject => !!item);
 
-    const referencedBy: DepItem[] = entry.referencedBy
+    const referencedBy: SchemaObject[] = entry.referencedBy
       .map((name) => objectLookup.get(name))
-      .filter((item): item is DepItem => !!item);
+      .filter((item): item is SchemaObject => !!item);
 
     return { dependsOn, referencedBy };
   }, [fullName, result?.relationships?.dependencies, objectLookup]);
@@ -61,7 +38,7 @@ export function DependencyMiniView({ fullName, objectType }: DependencyMiniViewP
   const total = dependsOn.length + referencedBy.length;
   if (total === 0) return null;
 
-  function handleClick(item: DepItem) {
+  function handleClick(item: SchemaObject) {
     openTab({
       objectType: item.objectType,
       fullName: item.fullName,

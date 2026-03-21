@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { useCodeStore } from './useCodeStore';
-import { generateTableDdl } from './tableDdlGenerator';
-import { OBJECT_TYPE_COLORS } from '../../api/types';
+import { buildObjectLookup } from './schemaLookup';
 
 interface DmlSummaryProps {
   definition: string;
@@ -141,29 +140,8 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
     };
   }, [definition, objectType]);
 
-  // Build a lookup to resolve table names to navigable objects
-  const objectLookup = useMemo(() => {
-    if (!result?.schema) return new Map<string, { objectType: string; fullName: string; label: string; definition: string }>();
-    const schema = result.schema;
-    const map = new Map<string, { objectType: string; fullName: string; label: string; definition: string }>();
-    for (const t of schema.tables) {
-      map.set(t.fullName.toLowerCase(), { objectType: 'Table', fullName: t.fullName, label: t.tableName, definition: generateTableDdl(t) });
-      map.set(t.tableName.toLowerCase(), { objectType: 'Table', fullName: t.fullName, label: t.tableName, definition: generateTableDdl(t) });
-    }
-    for (const v of schema.views) {
-      map.set(v.fullName.toLowerCase(), { objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
-      map.set(v.viewName.toLowerCase(), { objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
-    }
-    for (const p of schema.storedProcedures) {
-      map.set(p.fullName.toLowerCase(), { objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
-      map.set(p.procedureName.toLowerCase(), { objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
-    }
-    for (const f of schema.functions) {
-      map.set(f.fullName.toLowerCase(), { objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
-      map.set(f.functionName.toLowerCase(), { objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
-    }
-    return map;
-  }, [result?.schema]);
+  // Build a lookup to resolve table names to navigable objects (case-insensitive via buildObjectLookup)
+  const objectLookup = useMemo(() => buildObjectLookup(result?.schema ?? null), [result?.schema]);
 
   if (regularEntries.length === 0 && tempEntries.length === 0) return null;
 

@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { useCodeStore } from './useCodeStore';
-import { generateTableDdl } from './tableDdlGenerator';
+import { buildObjectLookup } from './schemaLookup';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
-import type { TableDependency, ObjectDependency } from '../../api/types';
 
 interface ExecutionChainPanelProps {
   fullName: string;
@@ -25,23 +24,7 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
   const openTab = useCodeStore((s) => s.openTab);
   const [expanded, setExpanded] = useState(false);
 
-  // Build object lookup
-  const objectLookup = useMemo(() => {
-    if (!result?.schema) return new Map<string, { fullName: string; objectType: string; label: string; definition: string }>();
-    const schema = result.schema;
-    const map = new Map<string, { fullName: string; objectType: string; label: string; definition: string }>();
-    for (const t of schema.tables)
-      map.set(t.fullName, { fullName: t.fullName, objectType: 'Table', label: t.tableName, definition: generateTableDdl(t) });
-    for (const v of schema.views)
-      map.set(v.fullName, { fullName: v.fullName, objectType: 'View', label: v.viewName, definition: v.definition ?? '' });
-    for (const p of schema.storedProcedures)
-      map.set(p.fullName, { fullName: p.fullName, objectType: 'Procedure', label: p.procedureName, definition: p.definition ?? '' });
-    for (const f of schema.functions)
-      map.set(f.fullName, { fullName: f.fullName, objectType: 'Function', label: f.functionName, definition: f.definition ?? '' });
-    for (const t of schema.triggers)
-      map.set(t.fullName, { fullName: t.fullName, objectType: 'Trigger', label: t.triggerName, definition: t.definition ?? '' });
-    return map;
-  }, [result?.schema]);
+  const objectLookup = useMemo(() => buildObjectLookup(result?.schema ?? null), [result?.schema]);
 
   // Build proc/function-only call graph
   const { callers, callees, hasCycles } = useMemo(() => {
