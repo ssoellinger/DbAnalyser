@@ -3,7 +3,7 @@ import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { UsageLevel } from '../../api/types';
 import { useCodeStore, type ExplorerSort } from './useCodeStore';
-import { generateTableDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl } from './tableDdlGenerator';
 
 interface ObjectItem {
   objectType: string;
@@ -16,7 +16,7 @@ interface ObjectItem {
   databaseName?: string;
 }
 
-const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers', 'Synonyms'];
+const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers', 'Synonyms', 'Jobs'];
 
 const GROUP_ICONS: Record<string, string> = {
   Tables: '⊟',
@@ -25,6 +25,7 @@ const GROUP_ICONS: Record<string, string> = {
   Functions: 'ƒ',
   Triggers: '⚡',
   Synonyms: '↔',
+  Jobs: '⏱',
 };
 
 const USAGE_COLORS: Record<UsageLevel, string> = {
@@ -47,6 +48,7 @@ function groupTypeKey(group: string): string {
   if (group === 'Views') return 'View';
   if (group === 'Functions') return 'Function';
   if (group === 'Synonyms') return 'Synonym';
+  if (group === 'Jobs') return 'Job';
   return 'Trigger';
 }
 
@@ -141,6 +143,15 @@ export function ObjectExplorer() {
         usageLevel: usageMap.get(s.fullName),
         referencedBy: refCountMap.get(s.fullName) ?? 0,
         databaseName: s.databaseName,
+      })),
+      Jobs: schema.jobs.map((j) => ({
+        objectType: 'Job',
+        fullName: j.jobName,
+        label: j.jobName,
+        definition: generateJobDdl(j),
+        usageLevel: undefined,
+        referencedBy: 0,
+        databaseName: undefined,
       })),
     };
     return items;

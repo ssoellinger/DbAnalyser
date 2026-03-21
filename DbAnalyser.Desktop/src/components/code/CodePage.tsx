@@ -17,7 +17,7 @@ const MiniErd = lazy(() => import('./MiniErd').then((m) => ({ default: m.MiniErd
 import { copyAsFormatted } from './copyFormatted';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
-import { generateTableDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl } from './tableDdlGenerator';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ColumnInfo } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
@@ -114,6 +114,10 @@ function CodeContent() {
       if (objectType === 'Synonym') {
         const s = schema.synonyms.find((s) => s.fullName === fullName);
         return s ? `-- Synonym: ${s.fullName}\n-- Points to: ${s.baseObjectName}\n\nCREATE SYNONYM [${s.schemaName}].[${s.synonymName}]\n    FOR ${s.baseObjectName};` : '';
+      }
+      if (objectType === 'Job') {
+        const j = schema.jobs.find((j) => j.jobName === fullName);
+        return j ? generateJobDdl(j) : '';
       }
       return '';
     });
@@ -597,6 +601,36 @@ function CodeContent() {
                     <span className="text-text-primary font-medium">{trig.parentTable}</span>
                   </button>
                   {!trig.isEnabled && (
+                    <span className="px-1.5 py-0.5 rounded bg-severity-error/10 text-severity-error text-[10px] font-medium">
+                      DISABLED
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+            {activeTab.objectType === 'Job' && result?.schema && (() => {
+              const job = result.schema.jobs.find((j) => j.jobName === activeTab.fullName);
+              if (!job) return null;
+              return (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-bg-primary overflow-x-auto scrollbar-none">
+                  <span className="text-[10px] text-text-muted flex-shrink-0">Job:</span>
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-card border border-border/50 text-[10px]">
+                    <span className="text-text-muted">Steps</span>
+                    <span className="text-accent font-medium">{job.steps.length}</span>
+                  </span>
+                  {job.scheduleDescription && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-card border border-border/50 text-[10px]">
+                      <span className="text-text-muted">Schedule</span>
+                      <span className="text-node-function font-medium">{job.scheduleDescription}</span>
+                    </span>
+                  )}
+                  {job.lastRunDate && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-card border border-border/50 text-[10px]">
+                      <span className="text-text-muted">Last Run</span>
+                      <span className="text-text-secondary">{new Date(job.lastRunDate).toLocaleDateString()}</span>
+                    </span>
+                  )}
+                  {!job.isEnabled && (
                     <span className="px-1.5 py-0.5 rounded bg-severity-error/10 text-severity-error text-[10px] font-medium">
                       DISABLED
                     </span>
