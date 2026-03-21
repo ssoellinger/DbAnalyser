@@ -257,3 +257,57 @@ function buildOccurrences(view: EditorView): DecorationSet {
 }
 
 export const highlightOccurrencesExtension = [occurrencePlugin, occurrenceHighlightTheme];
+
+/* ── Temp Table Highlighting ────────────────────────────────────────── */
+
+const tempTableTheme = EditorView.baseTheme({
+  '.cm-temp-table': {
+    color: '#ff7043 !important',
+    fontStyle: 'italic',
+  },
+  '.cm-global-temp-table': {
+    color: '#ff7043 !important',
+    fontWeight: 'bold',
+    fontStyle: 'italic',
+  },
+});
+
+const tempTableMark = Decoration.mark({ class: 'cm-temp-table' });
+const globalTempTableMark = Decoration.mark({ class: 'cm-global-temp-table' });
+
+const TEMP_TABLE_NAME_RE = /##[\w]+|#[\w]+/g;
+
+const tempTablePlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildTempTableHighlights(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildTempTableHighlights(update.view);
+      }
+    }
+  },
+  { decorations: (v) => v.decorations }
+);
+
+function buildTempTableHighlights(view: EditorView): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+    TEMP_TABLE_NAME_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = TEMP_TABLE_NAME_RE.exec(text)) !== null) {
+      const mFrom = from + match.index;
+      const mTo = mFrom + match[0].length;
+      const isGlobal = match[0].startsWith('##');
+      builder.add(mFrom, mTo, isGlobal ? globalTempTableMark : tempTableMark);
+    }
+  }
+
+  return builder.finish();
+}
+
+export const tempTableHighlightExtension = [tempTablePlugin, tempTableTheme];

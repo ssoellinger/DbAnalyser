@@ -9,7 +9,7 @@ import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from './codemirrorTheme
 import { clickthroughExtension } from './codemirrorClickthrough';
 import { sqlFoldService } from './sqlFolding';
 import { hoverTooltipExtension, type TooltipInfo } from './codemirrorTooltip';
-import { indentGuidesExtension, bracketColorsExtension, highlightOccurrencesExtension } from './editorVisualExtensions';
+import { indentGuidesExtension, bracketColorsExtension, highlightOccurrencesExtension, tempTableHighlightExtension } from './editorVisualExtensions';
 import type { ResolvedObject } from './sqlIdentifierResolver';
 import type { EditorVisualSettings } from './useCodeStore';
 
@@ -65,6 +65,7 @@ export function CodeEditor({
       EditorState.readOnly.of(true),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       EditorView.lineWrapping,
+      ...tempTableHighlightExtension,
     ];
 
     if (resolveIdentifier && onNavigate) {

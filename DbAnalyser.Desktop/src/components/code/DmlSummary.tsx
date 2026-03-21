@@ -10,7 +10,7 @@ interface DmlSummaryProps {
   fullName: string;
 }
 
-type DmlOp = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'EXEC';
+type DmlOp = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'EXEC' | 'CREATE';
 
 const OP_COLORS: Record<DmlOp, string> = {
   SELECT: '#4fc3f7',
@@ -18,11 +18,13 @@ const OP_COLORS: Record<DmlOp, string> = {
   UPDATE: '#f0a500',
   DELETE: '#e94560',
   EXEC: '#bb86fc',
+  CREATE: '#78909c',
 };
 
 interface DmlEntry {
   tableName: string;
   ops: Set<DmlOp>;
+  isTemp: boolean;
 }
 
 // Table reference pattern: supports 1, 2, or 3-part names (db.schema.name)
@@ -57,6 +59,17 @@ const NOISE_WORDS = new Set([
   'nocount', 'xact_abort', 'ansi_nulls', 'quoted_identifier',
 ]);
 
+// Temp table patterns
+const TEMP_TABLE_RE = /\bCREATE\s+TABLE\s+(#{1,2}[\w]+)/gi;
+const TEMP_REF = '(#{1,2}[\\w]+)';
+const TEMP_DML_PATTERNS: { op: DmlOp; re: RegExp }[] = [
+  { op: 'SELECT', re: new RegExp(`\\bFROM\\s+${TEMP_REF}`, 'gi') },
+  { op: 'SELECT', re: new RegExp(`\\bJOIN\\s+${TEMP_REF}`, 'gi') },
+  { op: 'INSERT', re: new RegExp(`\\bINSERT\\s+(?:INTO\\s+)?${TEMP_REF}`, 'gi') },
+  { op: 'UPDATE', re: new RegExp(`\\bUPDATE\\s+${TEMP_REF}`, 'gi') },
+  { op: 'DELETE', re: new RegExp(`\\bDELETE\\s+(?:FROM\\s+)?${TEMP_REF}`, 'gi') },
+];
+
 function parseDmlOperations(definition: string): Map<string, DmlEntry> {
   const entries = new Map<string, DmlEntry>();
 
@@ -65,6 +78,7 @@ function parseDmlOperations(definition: string): Map<string, DmlEntry> {
     .replace(/--[^\n]*/g, '')           // line comments
     .replace(/\/\*[\s\S]*?\*\//g, '');  // block comments
 
+  // Parse regular table references
   for (const { op, re } of DML_PATTERNS) {
     re.lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -76,8 +90,36 @@ function parseDmlOperations(definition: string): Map<string, DmlEntry> {
 
       const key = raw.toLowerCase();
       if (!entries.has(key)) {
-        entries.set(key, { tableName: raw, ops: new Set() });
+        entries.set(key, { tableName: raw, ops: new Set(), isTemp: false });
       }
+      entries.get(key)!.ops.add(op);
+    }
+  }
+
+  // Parse temp table CREATE statements
+  TEMP_TABLE_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = TEMP_TABLE_RE.exec(cleaned)) !== null) {
+    const name = match[1];
+    const key = name.toLowerCase();
+    if (!entries.has(key)) {
+      entries.set(key, { tableName: name, ops: new Set(), isTemp: true });
+    }
+    entries.get(key)!.isTemp = true;
+    entries.get(key)!.ops.add('CREATE');
+  }
+
+  // Parse temp table DML references
+  for (const { op, re } of TEMP_DML_PATTERNS) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(cleaned)) !== null) {
+      const name = m[1];
+      const key = name.toLowerCase();
+      if (!entries.has(key)) {
+        entries.set(key, { tableName: name, ops: new Set(), isTemp: true });
+      }
+      entries.get(key)!.isTemp = true;
       entries.get(key)!.ops.add(op);
     }
   }
@@ -89,10 +131,14 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
   const result = useStore((s) => s.result);
   const openTab = useCodeStore((s) => s.openTab);
 
-  const entries = useMemo(() => {
-    if (objectType !== 'Procedure' && objectType !== 'Function') return [];
+  const { regularEntries, tempEntries } = useMemo(() => {
+    if (objectType !== 'Procedure' && objectType !== 'Function') return { regularEntries: [], tempEntries: [] };
     const map = parseDmlOperations(definition);
-    return Array.from(map.values()).sort((a, b) => a.tableName.localeCompare(b.tableName));
+    const all = Array.from(map.values());
+    return {
+      regularEntries: all.filter((e) => !e.isTemp).sort((a, b) => a.tableName.localeCompare(b.tableName)),
+      tempEntries: all.filter((e) => e.isTemp).sort((a, b) => a.tableName.localeCompare(b.tableName)),
+    };
   }, [definition, objectType]);
 
   // Build a lookup to resolve table names to navigable objects
@@ -119,7 +165,7 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
     return map;
   }, [result?.schema]);
 
-  if (entries.length === 0) return null;
+  if (regularEntries.length === 0 && tempEntries.length === 0) return null;
 
   function handleClick(tableName: string) {
     const obj = objectLookup.get(tableName.toLowerCase());
@@ -129,13 +175,16 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
   }
 
   const allOps: DmlOp[] = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'EXEC'];
+  const tempOps: DmlOp[] = ['CREATE', 'SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+  const opLabel = (op: DmlOp) =>
+    op === 'SELECT' ? 'S' : op === 'INSERT' ? 'I' : op === 'UPDATE' ? 'U' : op === 'DELETE' ? 'D' : op === 'EXEC' ? 'E' : 'C';
 
   return (
     <div className="border-b border-border bg-bg-primary">
       <div className="flex items-start gap-3 px-3 py-1.5 overflow-x-auto scrollbar-none">
         <span className="text-[10px] text-text-muted flex-shrink-0 pt-0.5">DML:</span>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {entries.map((entry) => {
+          {regularEntries.map((entry) => {
             const resolved = objectLookup.get(entry.tableName.toLowerCase());
             const isClickable = !!resolved;
             const displayName = resolved ? resolved.fullName : entry.tableName;
@@ -160,18 +209,42 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
                     <span
                       key={op}
                       className="px-1 py-px rounded text-[8px] font-bold"
-                      style={{
-                        backgroundColor: OP_COLORS[op] + '20',
-                        color: OP_COLORS[op],
-                      }}
+                      style={{ backgroundColor: OP_COLORS[op] + '20', color: OP_COLORS[op] }}
                     >
-                      {op === 'SELECT' ? 'S' : op === 'INSERT' ? 'I' : op === 'UPDATE' ? 'U' : op === 'DELETE' ? 'D' : 'E'}
+                      {opLabel(op)}
                     </span>
                   ))}
                 </span>
               </span>
             );
           })}
+          {tempEntries.length > 0 && regularEntries.length > 0 && (
+            <span className="text-text-muted text-[10px]">|</span>
+          )}
+          {tempEntries.map((entry) => (
+            <span key={entry.tableName} className="flex items-center gap-1 text-[10px]">
+              <span className="text-text-muted font-mono italic" title={entry.tableName.startsWith('##') ? 'Global temp table' : 'Local temp table'}>
+                {entry.tableName}
+              </span>
+              <span
+                className="px-1 py-px rounded text-[8px] font-bold"
+                style={{ backgroundColor: '#ff704320', color: '#ff7043' }}
+              >
+                {entry.tableName.startsWith('##') ? 'G-TMP' : 'TMP'}
+              </span>
+              <span className="flex gap-0.5">
+                {tempOps.filter((op) => entry.ops.has(op)).map((op) => (
+                  <span
+                    key={op}
+                    className="px-1 py-px rounded text-[8px] font-bold"
+                    style={{ backgroundColor: OP_COLORS[op] + '20', color: OP_COLORS[op] }}
+                  >
+                    {opLabel(op)}
+                  </span>
+                ))}
+              </span>
+            </span>
+          ))}
         </div>
       </div>
     </div>

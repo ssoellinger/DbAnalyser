@@ -780,6 +780,213 @@ GROUP BY c.Id, c.FirstName, c.LastName;
 GO
 
 -- ============================================================
+-- PROCEDURES: temp table usage patterns
+-- ============================================================
+
+-- Procedure using local temp table for batch processing
+CREATE PROCEDURE dbo.usp_ProcessPendingOrders
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Collect pending orders into a temp table
+    CREATE TABLE #PendingOrders (
+        OrderId INT,
+        CustomerId INT,
+        TotalAmount DECIMAL(18,2),
+        OrderDate DATETIME2
+    );
+
+    INSERT INTO #PendingOrders (OrderId, CustomerId, TotalAmount, OrderDate)
+    SELECT Id, CustomerId, TotalAmount, OrderDate
+    FROM dbo.Orders
+    WHERE Status = 'Pending';
+
+    -- Update each pending order
+    UPDATE dbo.Orders
+    SET Status = 'Processing'
+    WHERE Id IN (SELECT OrderId FROM #PendingOrders);
+
+    -- Log each processed order
+    INSERT INTO dbo.ErrorLog (Message, OccurredAt)
+    SELECT 'Processing order: ' + CAST(OrderId AS NVARCHAR(20)) + ' Amount: ' + CAST(TotalAmount AS NVARCHAR(20)),
+           GETUTCDATE()
+    FROM #PendingOrders;
+
+    -- Return summary
+    SELECT COUNT(*) AS ProcessedCount, SUM(TotalAmount) AS TotalValue
+    FROM #PendingOrders;
+
+    DROP TABLE #PendingOrders;
+END;
+GO
+
+-- Procedure using multiple temp tables for reporting
+CREATE PROCEDURE dbo.usp_GenerateSalesReport
+    @StartDate DATETIME2,
+    @EndDate DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Temp table for order summaries
+    CREATE TABLE #OrderSummary (
+        CustomerId INT,
+        CustomerName NVARCHAR(200),
+        OrderCount INT,
+        TotalSpend DECIMAL(18,2)
+    );
+
+    INSERT INTO #OrderSummary
+    SELECT
+        c.Id,
+        c.FirstName + ' ' + c.LastName,
+        COUNT(o.Id),
+        SUM(o.TotalAmount)
+    FROM dbo.Customers c
+    JOIN dbo.Orders o ON o.CustomerId = c.Id
+    WHERE o.OrderDate BETWEEN @StartDate AND @EndDate
+      AND o.Status != 'Cancelled'
+    GROUP BY c.Id, c.FirstName, c.LastName;
+
+    -- Temp table for product performance
+    CREATE TABLE #ProductPerformance (
+        ProductId INT,
+        ProductName NVARCHAR(200),
+        CategoryName NVARCHAR(100),
+        UnitsSold INT,
+        Revenue DECIMAL(18,2)
+    );
+
+    INSERT INTO #ProductPerformance
+    SELECT
+        p.Id,
+        p.Name,
+        cat.Name,
+        SUM(oi.Quantity),
+        SUM(oi.Quantity * oi.UnitPrice * (1 - oi.Discount / 100))
+    FROM dbo.OrderItems oi
+    JOIN dbo.Orders o ON o.Id = oi.OrderId
+    JOIN dbo.Products p ON p.Id = oi.ProductId
+    JOIN dbo.Categories cat ON cat.Id = p.CategoryId
+    WHERE o.OrderDate BETWEEN @StartDate AND @EndDate
+      AND o.Status != 'Cancelled'
+    GROUP BY p.Id, p.Name, cat.Name;
+
+    -- Return results
+    SELECT * FROM #OrderSummary ORDER BY TotalSpend DESC;
+    SELECT * FROM #ProductPerformance ORDER BY Revenue DESC;
+
+    -- Overall summary
+    SELECT
+        (SELECT COUNT(*) FROM #OrderSummary) AS UniqueCustomers,
+        (SELECT SUM(TotalSpend) FROM #OrderSummary) AS TotalRevenue,
+        (SELECT SUM(UnitsSold) FROM #ProductPerformance) AS TotalUnitsSold;
+
+    DROP TABLE #OrderSummary;
+    DROP TABLE #ProductPerformance;
+END;
+GO
+
+-- Procedure using temp table with indexes for large data processing
+CREATE PROCEDURE dbo.usp_ReconcileInventory
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Build expected stock from orders
+    CREATE TABLE #ExpectedStock (
+        ProductId INT PRIMARY KEY,
+        TotalOrdered INT,
+        TotalInStock INT,
+        Discrepancy INT
+    );
+
+    INSERT INTO #ExpectedStock (ProductId, TotalOrdered, TotalInStock, Discrepancy)
+    SELECT
+        p.Id,
+        ISNULL(SUM(oi.Quantity), 0),
+        ISNULL((SELECT SUM(s.Quantity) FROM inventory.Stock s WHERE s.ProductId = p.Id), 0),
+        0
+    FROM dbo.Products p
+    LEFT JOIN dbo.OrderItems oi ON oi.ProductId = p.Id
+    LEFT JOIN dbo.Orders o ON o.Id = oi.OrderId AND o.Status NOT IN ('Cancelled')
+    GROUP BY p.Id;
+
+    -- Calculate discrepancies
+    UPDATE #ExpectedStock
+    SET Discrepancy = TotalInStock - TotalOrdered;
+
+    -- Report products with issues
+    SELECT
+        p.Name AS ProductName,
+        p.SKU,
+        es.TotalOrdered,
+        es.TotalInStock,
+        es.Discrepancy
+    FROM #ExpectedStock es
+    JOIN dbo.Products p ON p.Id = es.ProductId
+    WHERE es.Discrepancy < 0
+    ORDER BY es.Discrepancy ASC;
+
+    -- Log reconciliation run
+    INSERT INTO dbo.ErrorLog (Message, OccurredAt)
+    VALUES ('Inventory reconciliation completed. Issues found: ' +
+            CAST((SELECT COUNT(*) FROM #ExpectedStock WHERE Discrepancy < 0) AS NVARCHAR(10)),
+            GETUTCDATE());
+
+    DROP TABLE #ExpectedStock;
+END;
+GO
+
+-- Procedure using global temp table for cross-session sharing
+CREATE PROCEDURE dbo.usp_BuildCustomerSegments
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Drop if exists from a previous run
+    IF OBJECT_ID('tempdb..##CustomerSegments') IS NOT NULL
+        DROP TABLE ##CustomerSegments;
+
+    CREATE TABLE ##CustomerSegments (
+        CustomerId INT,
+        CustomerName NVARCHAR(200),
+        Segment NVARCHAR(50),
+        TotalSpend DECIMAL(18,2),
+        OrderCount INT
+    );
+
+    INSERT INTO ##CustomerSegments
+    SELECT
+        c.Id,
+        c.FirstName + ' ' + c.LastName,
+        CASE
+            WHEN dbo.fn_GetCustomerTotalSpend(c.Id) > 1000 THEN 'Premium'
+            WHEN dbo.fn_GetCustomerTotalSpend(c.Id) > 100 THEN 'Regular'
+            ELSE 'New'
+        END,
+        dbo.fn_GetCustomerTotalSpend(c.Id),
+        (SELECT COUNT(*) FROM dbo.Orders o WHERE o.CustomerId = c.Id AND o.Status != 'Cancelled')
+    FROM dbo.Customers c
+    WHERE c.IsActive = 1;
+
+    -- Return segment summary
+    SELECT Segment, COUNT(*) AS CustomerCount, SUM(TotalSpend) AS SegmentRevenue
+    FROM ##CustomerSegments
+    GROUP BY Segment
+    ORDER BY SegmentRevenue DESC;
+
+    -- Audit log
+    EXEC dbo.usp_LogAuditAction
+        @Action = 'SegmentBuild',
+        @ObjectType = 'Customer',
+        @ObjectId = 0,
+        @ChangedBy = 'System';
+END;
+GO
+
+-- ============================================================
 -- SEED DATA
 -- ============================================================
 
@@ -872,7 +1079,7 @@ INSERT INTO dbo.MismatchTest (CustomerId, OrderId) VALUES
 GO
 
 PRINT '=== DbAnalyserTestDb setup complete! ===';
-PRINT 'Tables: 20 (2 schemas), Views: 5, Procedures: 10, Functions: 7';
+PRINT 'Tables: 20 (2 schemas), Views: 5, Procedures: 14, Functions: 7';
 PRINT 'Triggers: 3, Synonyms: 4 (2 local, 2 cross-DB), Sequences: 3, UDTs: 3';
 PRINT 'Cross-DB refs: 3 (to DbAnalyserExternal)';
 PRINT '';
