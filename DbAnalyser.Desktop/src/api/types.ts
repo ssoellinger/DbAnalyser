@@ -378,6 +378,8 @@ export interface QueryResponse {
   resultSets: QueryResultSet[];
   elapsedMs: number;
   error?: string | null;
+  messages?: string[] | null;
+  executionPlan?: string | null;
 }
 
 export interface QueryHistoryEntry {

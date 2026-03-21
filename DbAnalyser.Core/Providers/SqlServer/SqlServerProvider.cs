@@ -87,6 +87,71 @@ public class SqlServerProvider : IDbProvider
         return results;
     }
 
+    public async Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, CancellationToken ct = default)
+    {
+        var messages = new List<string>();
+
+        // Plan-only mode: separate connection, return only the plan
+        if (showPlan)
+        {
+            await using var planConn = new SqlConnection(connectionString);
+            await planConn.OpenAsync(ct);
+
+            await using var planOnCmd = new SqlCommand("SET SHOWPLAN_TEXT ON", planConn);
+            await planOnCmd.ExecuteNonQueryAsync(ct);
+
+            await using var planCmd = new SqlCommand(sql, planConn) { CommandTimeout = timeoutSeconds };
+            await using var planReader = await planCmd.ExecuteReaderAsync(ct);
+
+            var planLines = new List<string>();
+            do
+            {
+                while (await planReader.ReadAsync(ct))
+                {
+                    if (planReader.FieldCount > 0)
+                        planLines.Add(planReader.GetString(0));
+                }
+            } while (await planReader.NextResultAsync(ct));
+
+            return new QueryExecutionResult([], messages, string.Join("\n", planLines));
+        }
+
+        // Normal execution
+        await using var conn = new SqlConnection(connectionString);
+        conn.InfoMessage += (_, e) => {
+            if (!string.IsNullOrWhiteSpace(e.Message))
+                messages.Add(e.Message);
+        };
+        await conn.OpenAsync(ct);
+
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
+        var results = new List<DataTable>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        do
+        {
+            var table = new DataTable();
+            for (var i = 0; i < reader.FieldCount; i++)
+                table.Columns.Add(reader.GetName(i), reader.GetFieldType(i) ?? typeof(object));
+
+            var rowCount = 0;
+            while (rowCount < maxRows && await reader.ReadAsync(ct))
+            {
+                var values = new object[reader.FieldCount];
+                reader.GetValues(values);
+                table.Rows.Add(values);
+                rowCount++;
+            }
+
+            results.Add(table);
+        } while (await reader.NextResultAsync(ct));
+
+        if (reader.RecordsAffected >= 0)
+            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+
+        return new QueryExecutionResult(results, messages);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_connection is not null)

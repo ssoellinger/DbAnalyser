@@ -27,6 +27,7 @@ export default defineConfig({
       '@dagrejs/dagre',
       '@tanstack/react-table',
       '@microsoft/signalr',
+      'sql-formatter',
     ],
   },
 });

@@ -2,6 +2,8 @@ using System.Data;
 
 namespace DbAnalyser.Providers;
 
+public record QueryExecutionResult(List<DataTable> ResultSets, List<string> Messages, string? ExecutionPlan = null);
+
 public interface IDbProvider : IAsyncDisposable
 {
     string ConnectionString { get; }
@@ -18,7 +20,6 @@ public interface IDbProvider : IAsyncDisposable
     /// </summary>
     Task<List<DataTable>> ExecuteQueryMultipleAsync(string sql, int maxRows = 1000, int timeoutSeconds = 30, CancellationToken ct = default)
     {
-        // Default implementation wraps existing ExecuteQueryAsync
         return Task.FromResult(new List<DataTable>());
     }
 
@@ -28,5 +29,13 @@ public interface IDbProvider : IAsyncDisposable
     Task<List<DataTable>> ExecuteQueryMultipleAsync(string sql, string connectionStringOverride, int maxRows = 1000, int timeoutSeconds = 30, CancellationToken ct = default)
     {
         return ExecuteQueryMultipleAsync(sql, maxRows, timeoutSeconds, ct);
+    }
+
+    /// <summary>
+    /// Execute a query returning result sets, messages, and optionally an execution plan.
+    /// </summary>
+    Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, CancellationToken ct = default)
+    {
+        return Task.FromResult(new QueryExecutionResult([], []));
     }
 }

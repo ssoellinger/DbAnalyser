@@ -48,10 +48,10 @@ export const api = {
       body: JSON.stringify({ sessionId }),
     }),
 
-  executeQuery: (sessionId: string, sql: string, maxRows?: number, timeoutSeconds?: number, database?: string, signal?: AbortSignal) =>
+  executeQuery: (sessionId: string, sql: string, maxRows?: number, timeoutSeconds?: number, database?: string, showPlan?: boolean, signal?: AbortSignal) =>
     request<QueryResponse>(`/api/query/${sessionId}`, {
       method: 'POST',
-      body: JSON.stringify({ sql, maxRows, timeoutSeconds, database: database || undefined }),
+      body: JSON.stringify({ sql, maxRows, timeoutSeconds, database: database || undefined, showPlan: showPlan || false }),
       signal,
     }),
 
