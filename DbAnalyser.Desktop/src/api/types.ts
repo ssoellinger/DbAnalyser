@@ -365,6 +365,29 @@ export interface AiMessage {
   content: string;
 }
 
+// ── Query Execution ─────────────────────────────────────────────────────────
+
+export interface QueryResultSet {
+  columns: string[];
+  rows: (string | number | boolean | null)[][];
+  totalRowsReturned: number;
+  truncated: boolean;
+}
+
+export interface QueryResponse {
+  resultSets: QueryResultSet[];
+  elapsedMs: number;
+  error?: string | null;
+}
+
+export interface QueryHistoryEntry {
+  sql: string;
+  executedAt: string;
+  elapsedMs: number;
+  rowCount: number;
+  error?: string | null;
+}
+
 // ── Object type colors (matching HTML report) ───────────────────────────────
 
 export const OBJECT_TYPE_COLORS: Record<string, string> = {

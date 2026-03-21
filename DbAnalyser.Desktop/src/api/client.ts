@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import type { AnalysisResult, ConnectResult, AnalysisProgress } from './types';
+import type { AnalysisResult, ConnectResult, AnalysisProgress, QueryResponse } from './types';
 
 const API_BASE = `http://localhost:${(window as any).electronAPI?.apiPort ?? 5174}`;
 
@@ -47,6 +47,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sessionId }),
     }),
+
+  executeQuery: (sessionId: string, sql: string, maxRows?: number, timeoutSeconds?: number, database?: string, signal?: AbortSignal) =>
+    request<QueryResponse>(`/api/query/${sessionId}`, {
+      method: 'POST',
+      body: JSON.stringify({ sql, maxRows, timeoutSeconds, database: database || undefined }),
+      signal,
+    }),
+
+  getQueryDatabases: (sessionId: string) =>
+    request<{ databases: string[]; currentDatabase: string | null }>(`/api/query/${sessionId}/databases`),
 };
 
 // ── SignalR ─────────────────────────────────────────────────────────────────

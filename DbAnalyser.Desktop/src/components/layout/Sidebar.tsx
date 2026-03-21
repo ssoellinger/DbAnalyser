@@ -15,6 +15,7 @@ const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: Analyze
   { path: '/usage', label: 'Usage', icon: '◎', analyzer: 'usage' },
   { path: '/code', label: 'Code', icon: '{ }', analyzer: 'schema' },
   { path: '/code-search', label: 'Code Search', icon: '⌕', analyzer: 'schema' },
+  { path: '/query', label: 'Query', icon: '▷' },
   { path: '/ai', label: 'AI Insights', icon: '✦' },
 ];
 
@@ -39,6 +40,11 @@ export function Sidebar() {
   const isServerMode = useStore((s) => s.isServerMode);
   const serverName = useStore((s) => s.serverName);
   const analyzerStatus = useStore((s) => s.analyzerStatus);
+  const isFileSession = useStore((s) => s.isFileSession);
+
+  const visibleNavItems = isFileSession
+    ? NAV_ITEMS.filter((item) => item.path !== '/query')
+    : NAV_ITEMS;
 
   return (
     <aside
@@ -63,7 +69,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 py-2 overflow-y-auto">
-        {NAV_ITEMS.map(({ path, label, icon, analyzer }) => (
+        {visibleNavItems.map(({ path, label, icon, analyzer }) => (
           <NavLink
             key={path}
             to={path}

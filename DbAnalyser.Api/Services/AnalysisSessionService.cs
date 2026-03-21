@@ -420,6 +420,50 @@ public class AnalysisSessionService : IAsyncDisposable
         return session.LastResult;
     }
 
+    public IDbProvider? GetProvider(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return null;
+        session.LastActivityUtc = DateTime.UtcNow;
+        return session.Provider;
+    }
+
+    public bool IsFileSession(string sessionId) => sessionId == "file-session";
+
+    /// <summary>Get the connection string for a session, optionally targeting a specific database.</summary>
+    public string? GetConnectionString(string sessionId, string? database = null)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return null;
+        session.LastActivityUtc = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(database))
+            return session.Bundle.Factory.SetDatabase(session.ConnectionString, database);
+        return session.ConnectionString;
+    }
+
+    /// <summary>Get the list of available databases for a session, querying the server if needed.</summary>
+    public async Task<(bool isServerMode, List<string> databases, string? currentDatabase)> GetSessionInfoAsync(string sessionId, CancellationToken ct = default)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return (false, [], null);
+        session.LastActivityUtc = DateTime.UtcNow;
+
+        // Return cached list if we have it
+        if (session.LastResult?.Databases is { Count: > 0 } cached)
+            return (session.IsServerMode, cached, session.Provider.DatabaseName);
+
+        // Query the server directly for the database list
+        try
+        {
+            var databases = await session.Bundle.ServerQueries.EnumerateDatabasesAsync(session.Provider, ct);
+            return (session.IsServerMode, databases, session.Provider.DatabaseName);
+        }
+        catch
+        {
+            // Single-DB mode — just return the current database
+            var current = session.Provider.DatabaseName;
+            return (session.IsServerMode, string.IsNullOrEmpty(current) ? [] : [current], current);
+        }
+    }
+
     public async Task DisconnectAsync(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var session))

@@ -35,6 +35,7 @@ interface AppState {
   databaseName: string | null;
   isServerMode: boolean;
   serverName: string | null;
+  providerType: string;
   isConnecting: boolean;
   connectionError: string | null;
 
@@ -66,7 +67,7 @@ interface AppState {
   // Actions
   initSignalR: () => Promise<void>;
   setConnecting: (isConnecting: boolean) => void;
-  setConnected: (sessionId: string, databaseName: string | null, isServerMode?: boolean, serverName?: string | null) => void;
+  setConnected: (sessionId: string, databaseName: string | null, isServerMode?: boolean, serverName?: string | null, providerType?: string) => void;
   setConnectionError: (error: string | null) => void;
   setAnalyzing: (isAnalyzing: boolean) => void;
   setProgress: (progress: AnalysisProgress | null) => void;
@@ -87,6 +88,7 @@ export const useStore = create<AppState>((set, get) => ({
   databaseName: null,
   isServerMode: false,
   serverName: null,
+  providerType: 'sqlserver',
   isConnecting: false,
   connectionError: null,
   result: null,
@@ -130,8 +132,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setConnecting: (isConnecting) => set({ isConnecting, connectionError: null }),
-  setConnected: (sessionId, databaseName, isServerMode = false, serverName = null) =>
-    set({ sessionId, databaseName, isServerMode, serverName, isConnecting: false, connectionError: null }),
+  setConnected: (sessionId, databaseName, isServerMode = false, serverName = null, providerType = 'sqlserver') =>
+    set({ sessionId, databaseName, isServerMode, serverName, providerType, isConnecting: false, connectionError: null }),
   setConnectionError: (error) => set({ connectionError: error, isConnecting: false }),
   setAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
   setProgress: (progress) => set({ progress }),
@@ -268,6 +270,7 @@ export const useStore = create<AppState>((set, get) => ({
       databaseName: null,
       isServerMode: false,
       serverName: null,
+      providerType: 'sqlserver',
       result: null,
       progress: null,
       signalRConnection: null,

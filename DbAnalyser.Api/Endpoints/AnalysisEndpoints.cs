@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DbAnalyser.Api.Services;
 using DbAnalyser.Providers;
 
@@ -91,6 +92,81 @@ public static class AnalysisEndpoints
         });
 
         group.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+
+        group.MapGet("/query/{sessionId}/databases", async (string sessionId, AnalysisSessionService sessionService, CancellationToken ct) =>
+        {
+            var (_, databases, currentDatabase) = await sessionService.GetSessionInfoAsync(sessionId, ct);
+            return Results.Ok(new { databases, currentDatabase });
+        });
+
+        group.MapPost("/query/{sessionId}", async (string sessionId, ExecuteQueryRequest request, AnalysisSessionService sessionService, ILogger<AnalysisSessionService> logger, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Sql))
+                return Results.BadRequest(new { error = "SQL query is required." });
+
+            if (sessionService.IsFileSession(sessionId))
+                return Results.BadRequest(new { error = "Cannot execute queries in file-session mode." });
+
+            var provider = sessionService.GetProvider(sessionId);
+            if (provider is null)
+                return Results.NotFound(new { error = "Session not found. Connect first." });
+
+            var maxRows = request.MaxRows ?? 1000;
+            var timeoutSeconds = request.TimeoutSeconds ?? 30;
+            var connStr = sessionService.GetConnectionString(sessionId, request.Database);
+            var sw = Stopwatch.StartNew();
+
+            try
+            {
+                var tables = !string.IsNullOrWhiteSpace(request.Database) && connStr is not null
+                    ? await provider.ExecuteQueryMultipleAsync(request.Sql, connStr, maxRows, timeoutSeconds, ct)
+                    : await provider.ExecuteQueryMultipleAsync(request.Sql, maxRows, timeoutSeconds, ct);
+                sw.Stop();
+
+                var resultSets = new List<QueryResultSetDto>();
+                foreach (var table in tables)
+                {
+                    var columns = new List<string>();
+                    for (var i = 0; i < table.Columns.Count; i++)
+                        columns.Add(table.Columns[i].ColumnName);
+
+                    var rows = new List<List<object?>>();
+                    foreach (System.Data.DataRow row in table.Rows)
+                    {
+                        var rowData = new List<object?>();
+                        foreach (var val in row.ItemArray)
+                        {
+                            rowData.Add(val switch
+                            {
+                                null or DBNull => null,
+                                byte[] => "(binary)",
+                                DateTime dt => dt.ToString("O"),
+                                DateTimeOffset dto => dto.ToString("O"),
+                                _ => val
+                            });
+                        }
+                        rows.Add(rowData);
+                    }
+
+                    resultSets.Add(new QueryResultSetDto(
+                        columns,
+                        rows,
+                        table.Rows.Count,
+                        table.Rows.Count >= maxRows));
+                }
+
+                logger.LogInformation("Query executed for session {SessionId}: {ResultSets} result set(s), {ElapsedMs}ms",
+                    sessionId, resultSets.Count, sw.ElapsedMilliseconds);
+
+                return Results.Ok(new QueryResponseDto(resultSets, sw.ElapsedMilliseconds, null));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                sw.Stop();
+                logger.LogWarning(ex, "Query failed for session {SessionId}", sessionId);
+                return Results.Ok(new QueryResponseDto([], sw.ElapsedMilliseconds, ex.Message));
+            }
+        });
     }
 }
 
@@ -98,3 +174,6 @@ public record ConnectRequest(string ConnectionString, string? ProviderType = "sq
 public record StartAnalysisRequest(string SessionId, List<string>? Analyzers = null, string? SignalRConnectionId = null);
 public record DisconnectRequest(string SessionId);
 public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false, string? Database = null);
+public record ExecuteQueryRequest(string Sql, int? MaxRows = 1000, int? TimeoutSeconds = 30, string? Database = null);
+public record QueryResultSetDto(List<string> Columns, List<List<object?>> Rows, int TotalRowsReturned, bool Truncated);
+public record QueryResponseDto(List<QueryResultSetDto> ResultSets, long ElapsedMs, string? Error);

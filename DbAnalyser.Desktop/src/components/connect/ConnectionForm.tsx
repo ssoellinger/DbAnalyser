@@ -98,7 +98,7 @@ export function ConnectionForm({ fields, setFields, rawMode, rawConnectionString
     try {
       const { sessionId, databaseName, isServerMode, serverName } = await api.connect(connectionString, providerType);
       await store.initSignalR();
-      store.setConnected(sessionId, databaseName, isServerMode, serverName);
+      store.setConnected(sessionId, databaseName, isServerMode, serverName, providerType);
       const historyFields = rawMode ? parseConnectionString(rawConnectionString, providerType) : fields;
       store.addToHistory(historyFields, providerType);
     } catch (err) {
