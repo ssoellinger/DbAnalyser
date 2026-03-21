@@ -9,6 +9,9 @@ import { ParameterBar } from './ParameterBar';
 import { DependencyMiniView } from './DependencyMiniView';
 import { OutlinePanel } from './OutlinePanel';
 import { PeekDefinition } from './PeekDefinition';
+import { StatusBar } from './StatusBar';
+import { DiffView } from './DiffView';
+import { copyAsFormatted } from './copyFormatted';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
 import { generateTableDdl } from './tableDdlGenerator';
@@ -89,6 +92,8 @@ function CodeContent() {
   }, [serverName, databaseName, loadVisualSettingsForConnection]);
   const [showSettings, setShowSettings] = useState(false);
   const showOutline = visualSettings.outline;
+  const [showDiff, setShowDiff] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
   const [explorerWidth, setExplorerWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
   const [refsOpen, setRefsOpen] = useState(false);
@@ -355,6 +360,25 @@ function CodeContent() {
                 </button>
               )}
               <button
+                onClick={async () => {
+                  const ok = await copyAsFormatted(activeTab.definition);
+                  if (ok) { setCopyFeedback(true); setTimeout(() => setCopyFeedback(false), 1500); }
+                }}
+                className="text-text-secondary hover:text-accent transition-colors"
+                title="Copy with syntax highlighting"
+              >
+                {copyFeedback ? 'Copied!' : 'Copy'}
+              </button>
+              {tabs.length >= 2 && (
+                <button
+                  onClick={() => setShowDiff(!showDiff)}
+                  className={`text-text-secondary hover:text-accent transition-colors ${showDiff ? 'text-accent' : ''}`}
+                  title="Compare two open tabs"
+                >
+                  Diff
+                </button>
+              )}
+              <button
                 onClick={handleFindRefs}
                 className="text-text-secondary hover:text-accent transition-colors"
                 title="Find all references to this object"
@@ -407,7 +431,20 @@ function CodeContent() {
             <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
             <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
 
-            {/* Editor(s) + Outline */}
+            {/* Diff view or Editor(s) + Outline */}
+            {showDiff && splitTab ? (
+              <div className="flex-1 min-h-0">
+                <DiffView left={activeTab} right={splitTab} onClose={() => setShowDiff(false)} />
+              </div>
+            ) : showDiff && tabs.length >= 2 ? (
+              <div className="flex-1 min-h-0">
+                <DiffView
+                  left={activeTab}
+                  right={tabs.find((t) => t.id !== activeTab.id)!}
+                  onClose={() => setShowDiff(false)}
+                />
+              </div>
+            ) : (
             <div className="flex-1 min-h-0 flex">
               <div className={splitTab ? 'flex-1 min-w-0 border-r border-border' : 'flex-1 min-w-0'}>
                 <CodeEditor
@@ -447,6 +484,10 @@ function CodeContent() {
                 />
               )}
             </div>
+            )}
+
+            {/* Status bar */}
+            <StatusBar definition={activeTab.definition} objectType={activeTab.objectType} />
 
             {/* References panel */}
             {refsOpen && (
