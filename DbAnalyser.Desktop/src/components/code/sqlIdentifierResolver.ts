@@ -97,6 +97,28 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
     addAllVariants(t.fullName, t.schemaName, t.triggerName, t.databaseName, obj);
   }
 
+  // Sequences
+  for (const seq of schema.sequences) {
+    const obj: ResolvedObject = {
+      objectType: 'Sequence',
+      fullName: seq.fullName,
+      label: seq.sequenceName,
+      definition: '',
+    };
+    addAllVariants(seq.fullName, seq.schemaName, seq.sequenceName, seq.databaseName, obj);
+  }
+
+  // User-Defined Types
+  for (const udt of schema.userDefinedTypes) {
+    const obj: ResolvedObject = {
+      objectType: 'Type',
+      fullName: udt.fullName,
+      label: udt.typeName,
+      definition: '',
+    };
+    addAllVariants(udt.fullName, udt.schemaName, udt.typeName, udt.databaseName, obj);
+  }
+
   // Synonyms — resolve to the synonym itself (shows CREATE SYNONYM DDL)
   for (const s of schema.synonyms) {
     const obj: ResolvedObject = {

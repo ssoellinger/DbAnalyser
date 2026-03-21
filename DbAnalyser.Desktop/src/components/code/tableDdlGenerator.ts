@@ -1,4 +1,4 @@
-import type { TableInfo, ColumnInfo, JobInfo } from '../../api/types';
+import type { TableInfo, ColumnInfo, JobInfo, SequenceInfo, UserDefinedTypeInfo } from '../../api/types';
 
 function formatColumnType(c: ColumnInfo): string {
   let t = c.dataType;
@@ -98,4 +98,27 @@ export function generateJobDdl(job: JobInfo): string {
   }
 
   return lines.join('\n');
+}
+
+export function generateSequenceDdl(seq: SequenceInfo): string {
+  const lines: string[] = [];
+  lines.push(`CREATE SEQUENCE [${seq.schemaName}].[${seq.sequenceName}]`);
+  lines.push(`    AS ${seq.dataType}`);
+  lines.push(`    START WITH ${seq.currentValue}`);
+  lines.push(`    INCREMENT BY ${seq.increment}`);
+  lines.push(`    MINVALUE ${seq.minValue}`);
+  lines.push(`    MAXVALUE ${seq.maxValue}`);
+  lines.push(`    ${seq.isCycling ? 'CYCLE' : 'NO CYCLE'};`);
+  return lines.join('\n');
+}
+
+export function generateUdtDdl(udt: UserDefinedTypeInfo): string {
+  if (udt.isTableType) {
+    return `-- Table Type: ${udt.fullName}\nCREATE TYPE [${udt.schemaName}].[${udt.typeName}] AS TABLE (\n    -- columns defined in system catalog\n);`;
+  }
+  let typeDef = udt.baseType;
+  if (udt.maxLength !== null && udt.maxLength > 0) {
+    typeDef += `(${udt.maxLength === -1 ? 'max' : udt.maxLength})`;
+  }
+  return `CREATE TYPE [${udt.schemaName}].[${udt.typeName}]\n    FROM ${typeDef.toUpperCase()} ${udt.isNullable ? 'NULL' : 'NOT NULL'};`;
 }

@@ -3,7 +3,7 @@ import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { UsageLevel } from '../../api/types';
 import { useCodeStore, type ExplorerSort } from './useCodeStore';
-import { generateTableDdl, generateJobDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl } from './tableDdlGenerator';
 
 interface ObjectItem {
   objectType: string;
@@ -16,7 +16,7 @@ interface ObjectItem {
   databaseName?: string;
 }
 
-const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers', 'Synonyms', 'Jobs'];
+const GROUP_ORDER = ['Tables', 'Views', 'Procedures', 'Functions', 'Triggers', 'Synonyms', 'Sequences', 'Types', 'Jobs'];
 
 const GROUP_ICONS: Record<string, string> = {
   Tables: '⊟',
@@ -25,6 +25,8 @@ const GROUP_ICONS: Record<string, string> = {
   Functions: 'ƒ',
   Triggers: '⚡',
   Synonyms: '↔',
+  Sequences: '#',
+  Types: 'T',
   Jobs: '⏱',
 };
 
@@ -48,6 +50,8 @@ function groupTypeKey(group: string): string {
   if (group === 'Views') return 'View';
   if (group === 'Functions') return 'Function';
   if (group === 'Synonyms') return 'Synonym';
+  if (group === 'Sequences') return 'Sequence';
+  if (group === 'Types') return 'Type';
   if (group === 'Jobs') return 'Job';
   return 'Trigger';
 }
@@ -143,6 +147,24 @@ export function ObjectExplorer() {
         usageLevel: usageMap.get(s.fullName),
         referencedBy: refCountMap.get(s.fullName) ?? 0,
         databaseName: s.databaseName,
+      })),
+      Sequences: schema.sequences.map((seq) => ({
+        objectType: 'Sequence',
+        fullName: seq.fullName,
+        label: seq.sequenceName,
+        definition: generateSequenceDdl(seq),
+        usageLevel: undefined,
+        referencedBy: 0,
+        databaseName: seq.databaseName,
+      })),
+      Types: schema.userDefinedTypes.map((udt) => ({
+        objectType: 'Type',
+        fullName: udt.fullName,
+        label: udt.typeName,
+        definition: generateUdtDdl(udt),
+        usageLevel: undefined,
+        referencedBy: 0,
+        databaseName: udt.databaseName,
       })),
       Jobs: schema.jobs.map((j) => ({
         objectType: 'Job',

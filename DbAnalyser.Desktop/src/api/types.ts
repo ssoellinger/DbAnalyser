@@ -374,6 +374,8 @@ export const OBJECT_TYPE_COLORS: Record<string, string> = {
   Function: '#bb86fc',
   Trigger: '#ff7043',
   Synonym: '#78909c',
+  Sequence: '#42a5f5',
+  Type: '#ab47bc',
   Job: '#26a69a',
   External: '#ff6b6b',
 };

@@ -17,7 +17,7 @@ const MiniErd = lazy(() => import('./MiniErd').then((m) => ({ default: m.MiniErd
 import { copyAsFormatted } from './copyFormatted';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
-import { generateTableDdl, generateJobDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl } from './tableDdlGenerator';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ColumnInfo } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
@@ -118,6 +118,14 @@ function CodeContent() {
       if (objectType === 'Job') {
         const j = schema.jobs.find((j) => j.jobName === fullName);
         return j ? generateJobDdl(j) : '';
+      }
+      if (objectType === 'Sequence') {
+        const seq = schema.sequences.find((s) => s.fullName === fullName);
+        return seq ? generateSequenceDdl(seq) : '';
+      }
+      if (objectType === 'Type') {
+        const udt = schema.userDefinedTypes.find((u) => u.fullName === fullName);
+        return udt ? generateUdtDdl(udt) : '';
       }
       return '';
     });
