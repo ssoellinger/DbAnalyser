@@ -4,7 +4,7 @@ import {
   EditorView,
   ViewPlugin,
   type ViewUpdate,
-  WidgetType,
+  keymap,
 } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/state';
 import type { ResolvedObject } from './sqlIdentifierResolver';
@@ -28,6 +28,7 @@ const clickableMark = Decoration.mark({ class: 'cm-clickable-identifier' });
 export function clickthroughExtension(
   resolveId: (text: string) => ResolvedObject | null,
   onNavigate: (obj: ResolvedObject) => void,
+  onPeek?: (obj: ResolvedObject, coords: { x: number; y: number }) => void,
 ) {
   const decorate = (view: EditorView): DecorationSet => {
     const builder = new RangeSetBuilder<Decoration>();
@@ -70,15 +71,16 @@ export function clickthroughExtension(
     }
   );
 
-  // Click handler: Ctrl+Click or Cmd+Click on a decorated identifier
+  // Click handler: Ctrl+Click to navigate, Alt+Click to peek
   const clickHandler = EditorView.domEventHandlers({
     click(event: MouseEvent, view: EditorView) {
-      if (!event.ctrlKey && !event.metaKey) return false;
+      const isNav = event.ctrlKey || event.metaKey;
+      const isPeek = event.altKey && !isNav;
+      if (!isNav && !isPeek) return false;
 
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
 
-      // Get the word at the click position
       const line = view.state.doc.lineAt(pos);
       const lineText = line.text;
       const lineOffset = pos - line.from;
@@ -92,7 +94,11 @@ export function clickthroughExtension(
           const resolved = resolveId(match[0]);
           if (resolved) {
             event.preventDefault();
-            onNavigate(resolved);
+            if (isPeek && onPeek) {
+              onPeek(resolved, { x: event.clientX, y: event.clientY });
+            } else {
+              onNavigate(resolved);
+            }
             return true;
           }
         }
@@ -102,5 +108,48 @@ export function clickthroughExtension(
     },
   });
 
-  return [plugin, clickHandler];
+  // Helper: resolve identifier at cursor position
+  function resolveAtCursor(view: EditorView): { resolved: ResolvedObject; coords: { x: number; y: number } } | null {
+    const pos = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(pos);
+    const lineText = line.text;
+    const lineOffset = pos - line.from;
+    const coords = view.coordsAtPos(pos);
+
+    IDENTIFIER_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = IDENTIFIER_RE.exec(lineText)) !== null) {
+      const matchStart = match.index;
+      const matchEnd = matchStart + match[0].length;
+      if (lineOffset >= matchStart && lineOffset <= matchEnd) {
+        const resolved = resolveId(match[0]);
+        if (resolved) {
+          return { resolved, coords: coords ? { x: coords.left, y: coords.bottom } : { x: 0, y: 0 } };
+        }
+      }
+    }
+    return null;
+  }
+
+  const f12Keymap = keymap.of([
+    {
+      key: 'F12',
+      run(view: EditorView) {
+        const result = resolveAtCursor(view);
+        if (result) { onNavigate(result.resolved); return true; }
+        return false;
+      },
+    },
+    {
+      key: 'Alt-F12',
+      run(view: EditorView) {
+        if (!onPeek) return false;
+        const result = resolveAtCursor(view);
+        if (result) { onPeek(result.resolved, result.coords); return true; }
+        return false;
+      },
+    },
+  ]);
+
+  return [plugin, clickHandler, f12Keymap];
 }

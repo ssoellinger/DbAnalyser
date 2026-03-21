@@ -19,6 +19,7 @@ interface CodeEditorProps {
   onGoToLineDone?: () => void;
   resolveIdentifier?: (text: string) => ResolvedObject | null;
   onNavigate?: (obj: ResolvedObject) => void;
+  onPeek?: (obj: ResolvedObject, coords: { x: number; y: number }) => void;
   resolveTooltip?: (text: string) => TooltipInfo | null;
 }
 
@@ -30,6 +31,7 @@ export function CodeEditor({
   onGoToLineDone,
   resolveIdentifier,
   onNavigate,
+  onPeek,
   resolveTooltip,
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,7 +59,7 @@ export function CodeEditor({
     ];
 
     if (resolveIdentifier && onNavigate) {
-      exts.push(...clickthroughExtension(resolveIdentifier, onNavigate));
+      exts.push(...clickthroughExtension(resolveIdentifier, onNavigate, onPeek));
     }
 
     if (resolveTooltip) {
@@ -65,7 +67,7 @@ export function CodeEditor({
     }
 
     return exts;
-  }, [resolveIdentifier, onNavigate, resolveTooltip]);
+  }, [resolveIdentifier, onNavigate, onPeek, resolveTooltip]);
 
   // Create/recreate editor when extensions change
   useEffect(() => {

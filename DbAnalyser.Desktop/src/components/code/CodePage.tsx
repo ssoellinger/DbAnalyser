@@ -7,6 +7,8 @@ import { CodeTabBar } from './CodeTabBar';
 import { CodeEditor } from './CodeEditor';
 import { ParameterBar } from './ParameterBar';
 import { DependencyMiniView } from './DependencyMiniView';
+import { OutlinePanel } from './OutlinePanel';
+import { PeekDefinition } from './PeekDefinition';
 import { useCodeStore } from './useCodeStore';
 import { buildIdentifierMap, resolveIdentifier } from './sqlIdentifierResolver';
 import { generateTableDdl } from './tableDdlGenerator';
@@ -81,6 +83,9 @@ function CodeContent() {
   const [refsOpen, setRefsOpen] = useState(false);
   const [refsTarget, setRefsTarget] = useState<string | null>(null);
   const [refsHeight, setRefsHeight] = useState(200);
+  const [peekObj, setPeekObj] = useState<{ obj: ResolvedObject; coords: { x: number; y: number } } | null>(null);
+  const [outlineGoToLine, setOutlineGoToLine] = useState<number | undefined>(undefined);
+  const [showOutline, setShowOutline] = useState(true);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
@@ -153,6 +158,25 @@ function CodeContent() {
     },
     [openTab, result?.schema]
   );
+
+  const handlePeek = useCallback(
+    (obj: ResolvedObject, coords: { x: number; y: number }) => {
+      // Resolve full definition for tables
+      let resolved = obj;
+      if (obj.objectType === 'Table' && result?.schema) {
+        const table = result.schema.tables.find((t) => t.fullName === obj.fullName);
+        if (table) resolved = { ...obj, definition: generateTableDdl(table) };
+      }
+      setPeekObj({ obj: resolved, coords });
+    },
+    [result?.schema]
+  );
+
+  const handleOutlineGoToLine = useCallback((line: number) => {
+    setOutlineGoToLine(line);
+    // Clear after a tick so it can be set again to the same line
+    setTimeout(() => setOutlineGoToLine(undefined), 100);
+  }, []);
 
   const handleScrollChange = useCallback(
     (pos: number) => {
@@ -321,6 +345,13 @@ function CodeContent() {
                 </button>
               )}
               <button
+                onClick={() => setShowOutline(!showOutline)}
+                className={`text-text-secondary hover:text-accent transition-colors ${showOutline ? 'text-accent' : ''}`}
+                title={showOutline ? 'Hide outline' : 'Show outline'}
+              >
+                Outline
+              </button>
+              <button
                 onClick={handleFindRefs}
                 className="text-text-secondary hover:text-accent transition-colors"
                 title="Find all references to this object"
@@ -337,18 +368,19 @@ function CodeContent() {
             <ParameterBar definition={activeTab.definition} objectType={activeTab.objectType} />
             <DependencyMiniView fullName={activeTab.fullName} objectType={activeTab.objectType} />
 
-            {/* Editor(s) */}
+            {/* Editor(s) + Outline */}
             <div className="flex-1 min-h-0 flex">
               <div className={splitTab ? 'flex-1 min-w-0 border-r border-border' : 'flex-1 min-w-0'}>
                 <CodeEditor
                   key={activeTab.id}
                   code={activeTab.definition}
                   scrollPos={activeTab.scrollPos}
-                  goToLine={activeTab.goToLine}
+                  goToLine={activeTab.goToLine ?? outlineGoToLine}
                   onGoToLineDone={handleGoToLineDone}
                   onScrollChange={handleScrollChange}
                   resolveIdentifier={resolveId}
                   onNavigate={handleNavigate}
+                  onPeek={handlePeek}
                   resolveTooltip={resolveTooltip}
                 />
               </div>
@@ -361,9 +393,17 @@ function CodeContent() {
                     onScrollChange={handleSplitScrollChange}
                     resolveIdentifier={resolveId}
                     onNavigate={handleNavigate}
+                    onPeek={handlePeek}
                     resolveTooltip={resolveTooltip}
                   />
                 </div>
+              )}
+              {showOutline && (
+                <OutlinePanel
+                  definition={activeTab.definition}
+                  objectType={activeTab.objectType}
+                  onGoToLine={handleOutlineGoToLine}
+                />
               )}
             </div>
 
@@ -449,6 +489,16 @@ function CodeContent() {
           </div>
         )}
       </div>
+
+      {/* Peek definition overlay */}
+      {peekObj && (
+        <PeekDefinition
+          object={peekObj.obj}
+          coords={peekObj.coords}
+          onClose={() => setPeekObj(null)}
+          onOpenFull={(obj) => handleNavigate(obj)}
+        />
+      )}
     </div>
   );
 }
