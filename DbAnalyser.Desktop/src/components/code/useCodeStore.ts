@@ -48,6 +48,50 @@ function saveVisualSettingsForKey(key: string, settings: EditorVisualSettings) {
   localStorage.setItem(VISUAL_SETTINGS_KEY, JSON.stringify(all));
 }
 
+// ── Per-connection session state ──────────────────────────────────────
+
+const SESSION_KEY = 'dbanalyser-code-sessions';
+
+interface SavedTabInfo {
+  id: string;
+  objectType: string;
+  fullName: string;
+  label: string;
+}
+
+interface SavedSession {
+  tabs: SavedTabInfo[];
+  activeTabId: string | null;
+  splitTabId: string | null;
+  explorerCollapsed: Record<string, boolean>;
+  explorerSort: ExplorerSort;
+}
+
+function loadAllSessions(): Record<string, SavedSession> {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSession(key: string, state: CodeState) {
+  const all = loadAllSessions();
+  all[key] = {
+    tabs: state.tabs.map((t) => ({ id: t.id, objectType: t.objectType, fullName: t.fullName, label: t.label })),
+    activeTabId: state.activeTabId,
+    splitTabId: state.splitTabId,
+    explorerCollapsed: state.explorerCollapsed,
+    explorerSort: state.explorerSort,
+  };
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(all)); } catch { /* quota */ }
+}
+
+function loadSession(key: string): SavedSession | null {
+  return loadAllSessions()[key] ?? null;
+}
+
 interface CodeState {
   tabs: CodeTab[];
   activeTabId: string | null;
@@ -56,7 +100,7 @@ interface CodeState {
   explorerSort: ExplorerSort;
   splitTabId: string | null;
   visualSettings: EditorVisualSettings;
-  visualSettingsKey: string;
+  connectionKey: string;
 
   openTab: (tab: Omit<CodeTab, 'id'>) => void;
   closeTab: (id: string) => void;
@@ -73,10 +117,18 @@ interface CodeState {
   moveTab: (fromIndex: number, toIndex: number) => void;
   setVisualSetting: (key: keyof EditorVisualSettings, value: boolean) => void;
   loadVisualSettingsForConnection: (serverName: string | null, databaseName: string | null) => void;
+  loadSessionForConnection: (serverName: string | null, databaseName: string | null, resolveDefinition: (objectType: string, fullName: string) => string) => void;
 }
 
 function makeTabId(type: string, fullName: string) {
   return `${type}:${fullName}`;
+}
+
+function autoSave(get: () => CodeState) {
+  const state = get();
+  if (state.connectionKey) {
+    saveSession(state.connectionKey, state);
+  }
 }
 
 export const useCodeStore = create<CodeState>((set, get) => ({
@@ -87,14 +139,13 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   explorerSort: 'name' as ExplorerSort,
   splitTabId: null,
   visualSettings: { ...DEFAULTS },
-  visualSettingsKey: '_global',
+  connectionKey: '',
 
   openTab: (tab) => {
     const id = makeTabId(tab.objectType, tab.fullName);
     const { tabs } = get();
     const existing = tabs.find((t) => t.id === id);
     if (existing) {
-      // Update goToLine if provided
       if (tab.goToLine) {
         set({
           tabs: tabs.map((t) => (t.id === id ? { ...t, goToLine: tab.goToLine } : t)),
@@ -103,12 +154,14 @@ export const useCodeStore = create<CodeState>((set, get) => ({
       } else {
         set({ activeTabId: id });
       }
+      autoSave(get);
       return;
     }
     set({
       tabs: [...tabs, { ...tab, id }],
       activeTabId: id,
     });
+    autoSave(get);
   },
 
   closeTab: (id) => {
@@ -131,11 +184,12 @@ export const useCodeStore = create<CodeState>((set, get) => ({
       activeTabId: newActive,
       splitTabId: splitTabId === id ? null : splitTabId,
     });
+    autoSave(get);
   },
 
-  setActiveTab: (id) => set({ activeTabId: id }),
+  setActiveTab: (id) => { set({ activeTabId: id }); autoSave(get); },
 
-  closeAllTabs: () => set({ tabs: [], activeTabId: null, splitTabId: null }),
+  closeAllTabs: () => { set({ tabs: [], activeTabId: null, splitTabId: null }); autoSave(get); },
 
   closeOtherTabs: (id) => {
     const { tabs } = get();
@@ -144,6 +198,7 @@ export const useCodeStore = create<CodeState>((set, get) => ({
       activeTabId: id,
       splitTabId: null,
     });
+    autoSave(get);
   },
 
   setExplorerFilter: (filter) => set({ explorerFilter: filter }),
@@ -189,9 +244,10 @@ export const useCodeStore = create<CodeState>((set, get) => ({
         set({ splitTabId: otherTab.id });
       }
     }
+    autoSave(get);
   },
 
-  closeSplit: () => set({ splitTabId: null }),
+  closeSplit: () => { set({ splitTabId: null }); autoSave(get); },
 
   moveTab: (fromIndex, toIndex) => {
     const { tabs } = get();
@@ -202,18 +258,66 @@ export const useCodeStore = create<CodeState>((set, get) => ({
     const [moved] = newTabs.splice(fromIndex, 1);
     newTabs.splice(toIndex, 0, moved);
     set({ tabs: newTabs });
+    autoSave(get);
   },
 
   setVisualSetting: (key, value) => {
-    const { visualSettings, visualSettingsKey } = get();
+    const { visualSettings, connectionKey } = get();
     const updated = { ...visualSettings, [key]: value };
-    saveVisualSettingsForKey(visualSettingsKey, updated);
+    saveVisualSettingsForKey(connectionKey, updated);
     set({ visualSettings: updated });
   },
 
   loadVisualSettingsForConnection: (serverName, databaseName) => {
     const connKey = [serverName ?? '', databaseName ?? ''].filter(Boolean).join(':') || '_global';
     const settings = loadVisualSettingsForKey(connKey);
-    set({ visualSettings: settings, visualSettingsKey: connKey });
+    set({ visualSettings: settings, connectionKey: connKey });
   },
+
+  loadSessionForConnection: (serverName, databaseName, resolveDefinition) => {
+    const connKey = [serverName ?? '', databaseName ?? ''].filter(Boolean).join(':') || '_global';
+
+    // Save current session before switching (if we have a different connection)
+    const current = get();
+    if (current.connectionKey && current.connectionKey !== connKey && current.tabs.length > 0) {
+      saveSession(current.connectionKey, current);
+    }
+
+    // Set the connection key immediately
+    set({ connectionKey: connKey });
+
+    const saved = loadSession(connKey);
+    if (saved && saved.tabs.length > 0) {
+      const restoredTabs: CodeTab[] = saved.tabs
+        .map((t) => ({
+          ...t,
+          definition: resolveDefinition(t.objectType, t.fullName),
+          scrollPos: undefined,
+          goToLine: undefined,
+        }))
+        .filter((t) => t.definition);
+
+      const restoredActiveId = restoredTabs.find((t) => t.id === saved.activeTabId)?.id ?? restoredTabs[0]?.id ?? null;
+      const restoredSplitId = saved.splitTabId && restoredTabs.find((t) => t.id === saved.splitTabId) ? saved.splitTabId : null;
+
+      set({
+        tabs: restoredTabs,
+        activeTabId: restoredActiveId,
+        splitTabId: restoredSplitId,
+        explorerCollapsed: saved.explorerCollapsed ?? {},
+        explorerSort: saved.explorerSort ?? 'name',
+        explorerFilter: '',
+      });
+    } else {
+      set({
+        tabs: [],
+        activeTabId: null,
+        splitTabId: null,
+        explorerCollapsed: {},
+        explorerSort: 'name',
+        explorerFilter: '',
+      });
+    }
+  },
+
 }));

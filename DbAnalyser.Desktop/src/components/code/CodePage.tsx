@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
@@ -85,11 +85,31 @@ function CodeContent() {
   const visualSettings = useCodeStore((s) => s.visualSettings);
   const setVisualSetting = useCodeStore((s) => s.setVisualSetting);
   const loadVisualSettingsForConnection = useCodeStore((s) => s.loadVisualSettingsForConnection);
+  const loadSessionForConnection = useCodeStore((s) => s.loadSessionForConnection);
+  const initializedRef = useRef('');
 
-  // Load visual settings for the current connection
+  // Load settings + restore session once per connection
   useEffect(() => {
+    const connKey = [serverName ?? '', databaseName ?? ''].filter(Boolean).join(':') || '_global';
+    if (initializedRef.current === connKey) return;
+    if (!result?.schema) return;
+    initializedRef.current = connKey;
+
     loadVisualSettingsForConnection(serverName, databaseName);
-  }, [serverName, databaseName, loadVisualSettingsForConnection]);
+
+    const schema = result.schema;
+    loadSessionForConnection(serverName, databaseName, (objectType, fullName) => {
+      if (objectType === 'Table') {
+        const t = schema.tables.find((t) => t.fullName === fullName);
+        return t ? generateTableDdl(t) : '';
+      }
+      if (objectType === 'View') return schema.views.find((v) => v.fullName === fullName)?.definition ?? '';
+      if (objectType === 'Procedure') return schema.storedProcedures.find((p) => p.fullName === fullName)?.definition ?? '';
+      if (objectType === 'Function') return schema.functions.find((f) => f.fullName === fullName)?.definition ?? '';
+      if (objectType === 'Trigger') return schema.triggers.find((t) => t.fullName === fullName)?.definition ?? '';
+      return '';
+    });
+  }); // runs every render but exits early via initializedRef
   const [showSettings, setShowSettings] = useState(false);
   const showOutline = visualSettings.outline;
   const [showDiff, setShowDiff] = useState(false);
