@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
@@ -70,6 +70,7 @@ function Breadcrumb({ objectType, fullName, databaseName }: { objectType: string
 function CodeContent() {
   const result = useStore((s) => s.result);
   const databaseName = useStore((s) => s.databaseName);
+  const serverName = useStore((s) => s.serverName);
   const tabs = useCodeStore((s) => s.tabs);
   const activeTabId = useCodeStore((s) => s.activeTabId);
   const splitTabId = useCodeStore((s) => s.splitTabId);
@@ -78,6 +79,16 @@ function CodeContent() {
   const clearGoToLine = useCodeStore((s) => s.clearGoToLine);
   const toggleSplit = useCodeStore((s) => s.toggleSplit);
   const closeSplit = useCodeStore((s) => s.closeSplit);
+  const visualSettings = useCodeStore((s) => s.visualSettings);
+  const setVisualSetting = useCodeStore((s) => s.setVisualSetting);
+  const loadVisualSettingsForConnection = useCodeStore((s) => s.loadVisualSettingsForConnection);
+
+  // Load visual settings for the current connection
+  useEffect(() => {
+    loadVisualSettingsForConnection(serverName, databaseName);
+  }, [serverName, databaseName, loadVisualSettingsForConnection]);
+  const [showSettings, setShowSettings] = useState(false);
+  const showOutline = visualSettings.outline;
   const [explorerWidth, setExplorerWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
   const [refsOpen, setRefsOpen] = useState(false);
@@ -85,7 +96,6 @@ function CodeContent() {
   const [refsHeight, setRefsHeight] = useState(200);
   const [peekObj, setPeekObj] = useState<{ obj: ResolvedObject; coords: { x: number; y: number } } | null>(null);
   const [outlineGoToLine, setOutlineGoToLine] = useState<number | undefined>(undefined);
-  const [showOutline, setShowOutline] = useState(true);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) ?? null,
@@ -345,19 +355,48 @@ function CodeContent() {
                 </button>
               )}
               <button
-                onClick={() => setShowOutline(!showOutline)}
-                className={`text-text-secondary hover:text-accent transition-colors ${showOutline ? 'text-accent' : ''}`}
-                title={showOutline ? 'Hide outline' : 'Show outline'}
-              >
-                Outline
-              </button>
-              <button
                 onClick={handleFindRefs}
                 className="text-text-secondary hover:text-accent transition-colors"
                 title="Find all references to this object"
               >
                 Find References
               </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowSettings(!showSettings)}
+                  className={`text-text-secondary hover:text-accent transition-colors ${showSettings ? 'text-accent' : ''}`}
+                  title="Visual settings"
+                >
+                  ⚙
+                </button>
+                {showSettings && (
+                  <div className="absolute right-0 top-full mt-1 bg-bg-card border border-border rounded-lg shadow-2xl z-50 w-52 py-1">
+                    <div className="px-3 py-1 text-[9px] text-text-muted uppercase tracking-wider">Visual Settings</div>
+                    {([
+                      { key: 'outline' as const, label: 'Outline Panel', desc: 'Symbol overview sidebar' },
+                      { key: 'indentGuides' as const, label: 'Indent Guides', desc: 'Vertical indent lines' },
+                      { key: 'bracketColors' as const, label: 'Bracket Colors', desc: 'Colored nested parentheses' },
+                      { key: 'highlightOccurrences' as const, label: 'Highlight Occurrences', desc: 'Highlight matching words' },
+                    ]).map(({ key, label, desc }) => (
+                      <button
+                        key={key}
+                        onClick={() => setVisualSetting(key, !visualSettings[key])}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors"
+                      >
+                        <span className={`w-3 h-3 rounded border flex items-center justify-center flex-shrink-0 ${
+                          visualSettings[key] ? 'bg-accent border-accent text-bg-primary text-[9px] font-bold' : 'border-border'
+                        }`}>
+                          {visualSettings[key] ? '✓' : ''}
+                        </span>
+                        <span className="text-left">
+                          <span className="text-text-primary block">{label}</span>
+                          <span className="text-[10px] text-text-muted">{desc}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -382,6 +421,7 @@ function CodeContent() {
                   onNavigate={handleNavigate}
                   onPeek={handlePeek}
                   resolveTooltip={resolveTooltip}
+                  visualSettings={visualSettings}
                 />
               </div>
               {splitTab && (
@@ -395,6 +435,7 @@ function CodeContent() {
                     onNavigate={handleNavigate}
                     onPeek={handlePeek}
                     resolveTooltip={resolveTooltip}
+                    visualSettings={visualSettings}
                   />
                 </div>
               )}

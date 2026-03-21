@@ -12,13 +12,51 @@ export interface CodeTab {
 
 export type ExplorerSort = 'name' | 'modified';
 
+export interface EditorVisualSettings {
+  indentGuides: boolean;
+  bracketColors: boolean;
+  highlightOccurrences: boolean;
+  outline: boolean;
+}
+
+const VISUAL_SETTINGS_KEY = 'dbanalyser-editor-visual';
+const DEFAULTS: EditorVisualSettings = { indentGuides: false, bracketColors: false, highlightOccurrences: false, outline: false };
+
+function getConnectionKey(): string {
+  // Import from main store would create a circular dep, so read from the store directly
+  // We'll pass the key in from the component instead
+  return '_global';
+}
+
+function loadAllVisualSettings(): Record<string, EditorVisualSettings> {
+  try {
+    const raw = localStorage.getItem(VISUAL_SETTINGS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadVisualSettingsForKey(key: string): EditorVisualSettings {
+  const all = loadAllVisualSettings();
+  return all[key] ? { ...DEFAULTS, ...all[key] } : { ...DEFAULTS };
+}
+
+function saveVisualSettingsForKey(key: string, settings: EditorVisualSettings) {
+  const all = loadAllVisualSettings();
+  all[key] = settings;
+  localStorage.setItem(VISUAL_SETTINGS_KEY, JSON.stringify(all));
+}
+
 interface CodeState {
   tabs: CodeTab[];
   activeTabId: string | null;
   explorerFilter: string;
   explorerCollapsed: Record<string, boolean>;
   explorerSort: ExplorerSort;
-  splitTabId: string | null; // secondary editor in split view
+  splitTabId: string | null;
+  visualSettings: EditorVisualSettings;
+  visualSettingsKey: string;
 
   openTab: (tab: Omit<CodeTab, 'id'>) => void;
   closeTab: (id: string) => void;
@@ -33,6 +71,8 @@ interface CodeState {
   toggleSplit: (id: string) => void;
   closeSplit: () => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
+  setVisualSetting: (key: keyof EditorVisualSettings, value: boolean) => void;
+  loadVisualSettingsForConnection: (serverName: string | null, databaseName: string | null) => void;
 }
 
 function makeTabId(type: string, fullName: string) {
@@ -46,6 +86,8 @@ export const useCodeStore = create<CodeState>((set, get) => ({
   explorerCollapsed: {},
   explorerSort: 'name' as ExplorerSort,
   splitTabId: null,
+  visualSettings: { ...DEFAULTS },
+  visualSettingsKey: '_global',
 
   openTab: (tab) => {
     const id = makeTabId(tab.objectType, tab.fullName);
@@ -160,5 +202,18 @@ export const useCodeStore = create<CodeState>((set, get) => ({
     const [moved] = newTabs.splice(fromIndex, 1);
     newTabs.splice(toIndex, 0, moved);
     set({ tabs: newTabs });
+  },
+
+  setVisualSetting: (key, value) => {
+    const { visualSettings, visualSettingsKey } = get();
+    const updated = { ...visualSettings, [key]: value };
+    saveVisualSettingsForKey(visualSettingsKey, updated);
+    set({ visualSettings: updated });
+  },
+
+  loadVisualSettingsForConnection: (serverName, databaseName) => {
+    const connKey = [serverName ?? '', databaseName ?? ''].filter(Boolean).join(':') || '_global';
+    const settings = loadVisualSettingsForKey(connKey);
+    set({ visualSettings: settings, visualSettingsKey: connKey });
   },
 }));

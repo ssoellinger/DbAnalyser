@@ -18,8 +18,8 @@ export function ConnectionHistory({ onSelect }: ConnectionHistoryProps) {
 
   return (
     <div className="bg-bg-card border border-border rounded-lg p-4">
-      <h3 className="text-xs font-medium text-text-secondary mb-3">Recent Connections</h3>
-      <div className="space-y-1 max-h-72 overflow-y-auto">
+      <h3 className="text-xs font-medium text-text-secondary mb-3">Recent Connections ({history.length})</h3>
+      <div className="space-y-1 max-h-[50vh] overflow-y-auto">
         {history.map((entry, i) => (
           <button
             key={i}

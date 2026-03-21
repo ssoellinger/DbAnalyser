@@ -304,10 +304,10 @@ export const useStore = create<AppState>((set, get) => ({
       encryptedUsername,
       encryptedPassword,
     };
-    const dedupeKey = `${entry.server}|${entry.database}|${entry.providerType}`;
+    const dedupeKey = `${entry.server}|${entry.database}|${entry.providerType}|${entry.authMode}`;
     const history = [entry, ...get().connectionHistory.filter(
-      (h) => `${h.server}|${h.database}|${h.providerType}` !== dedupeKey
-    )].slice(0, 10);
+      (h) => `${h.server}|${h.database}|${h.providerType}|${h.authMode}` !== dedupeKey
+    )];
     set({ connectionHistory: history });
     try {
       localStorage.setItem('dbanalyser-history', JSON.stringify(history));

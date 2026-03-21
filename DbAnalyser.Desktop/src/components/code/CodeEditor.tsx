@@ -9,7 +9,9 @@ import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from './codemirrorTheme
 import { clickthroughExtension } from './codemirrorClickthrough';
 import { sqlFoldService } from './sqlFolding';
 import { hoverTooltipExtension, type TooltipInfo } from './codemirrorTooltip';
+import { indentGuidesExtension, bracketColorsExtension, highlightOccurrencesExtension } from './editorVisualExtensions';
 import type { ResolvedObject } from './sqlIdentifierResolver';
+import type { EditorVisualSettings } from './useCodeStore';
 
 interface CodeEditorProps {
   code: string;
@@ -21,6 +23,7 @@ interface CodeEditorProps {
   onNavigate?: (obj: ResolvedObject) => void;
   onPeek?: (obj: ResolvedObject, coords: { x: number; y: number }) => void;
   resolveTooltip?: (text: string) => TooltipInfo | null;
+  visualSettings?: EditorVisualSettings;
 }
 
 export function CodeEditor({
@@ -33,6 +36,7 @@ export function CodeEditor({
   onNavigate,
   onPeek,
   resolveTooltip,
+  visualSettings,
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -66,8 +70,12 @@ export function CodeEditor({
       exts.push(hoverTooltipExtension(resolveTooltip));
     }
 
+    if (visualSettings?.indentGuides) exts.push(...indentGuidesExtension);
+    if (visualSettings?.bracketColors) exts.push(...bracketColorsExtension);
+    if (visualSettings?.highlightOccurrences) exts.push(...highlightOccurrencesExtension);
+
     return exts;
-  }, [resolveIdentifier, onNavigate, onPeek, resolveTooltip]);
+  }, [resolveIdentifier, onNavigate, onPeek, resolveTooltip, visualSettings]);
 
   // Create/recreate editor when extensions change
   useEffect(() => {

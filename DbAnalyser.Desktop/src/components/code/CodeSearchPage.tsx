@@ -36,28 +36,49 @@ export function CodeSearchPage() {
 const HISTORY_KEY = 'dbanalyser-code-search-history';
 const MAX_HISTORY = 20;
 
-function loadHistory(): { query: string; isRegex: boolean; isCaseSensitive: boolean }[] {
+type HistoryEntry = { query: string; isRegex: boolean; isCaseSensitive: boolean };
+
+function connKey(serverName: string | null, databaseName: string | null): string {
+  return [serverName ?? '', databaseName ?? ''].filter(Boolean).join(':') || '_global';
+}
+
+function loadAllHistory(): Record<string, HistoryEntry[]> {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Migration: if it's an array (old format), convert to keyed
+    if (Array.isArray(parsed)) return { _global: parsed };
+    return parsed;
   } catch {
-    return [];
+    return {};
   }
 }
 
-function saveToHistory(entry: { query: string; isRegex: boolean; isCaseSensitive: boolean }) {
-  const history = loadHistory().filter((h) => h.query !== entry.query);
-  history.unshift(entry);
-  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+function loadHistory(key: string): HistoryEntry[] {
+  return loadAllHistory()[key] ?? [];
 }
 
-function clearHistory() {
-  localStorage.removeItem(HISTORY_KEY);
+function saveToHistory(key: string, entry: HistoryEntry) {
+  const all = loadAllHistory();
+  const history = (all[key] ?? []).filter((h) => h.query !== entry.query);
+  history.unshift(entry);
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  all[key] = history;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(all));
+}
+
+function clearHistory(key: string) {
+  const all = loadAllHistory();
+  delete all[key];
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(all));
 }
 
 function CodeSearchContent() {
   const result = useStore((s) => s.result);
+  const serverName = useStore((s) => s.serverName);
+  const databaseName = useStore((s) => s.databaseName);
+  const historyKey = connKey(serverName, databaseName);
   const openTab = useCodeStore((s) => s.openTab);
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
@@ -66,7 +87,7 @@ function CodeSearchContent() {
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [regexError, setRegexError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [history, setHistory] = useState(loadHistory);
+  const [history, setHistory] = useState(() => loadHistory(historyKey));
   const inputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
 
@@ -90,8 +111,8 @@ function CodeSearchContent() {
   useEffect(() => {
     if (!query.trim() || regexError) return;
     const timer = setTimeout(() => {
-      saveToHistory({ query, isRegex, isCaseSensitive });
-      setHistory(loadHistory());
+      saveToHistory(historyKey, { query, isRegex, isCaseSensitive });
+      setHistory(loadHistory(historyKey));
     }, 1000);
     return () => clearTimeout(timer);
   }, [query, isRegex, isCaseSensitive, regexError]);
@@ -106,7 +127,7 @@ function CodeSearchContent() {
   }
 
   function handleClearHistory() {
-    clearHistory();
+    clearHistory(historyKey);
     setHistory([]);
   }
 
@@ -262,7 +283,7 @@ function CodeSearchContent() {
             <input
               ref={inputRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setShowHistory(false); }}
               onFocus={() => { if (!query && history.length > 0) setShowHistory(true); }}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowDown' && !query && history.length > 0) {
