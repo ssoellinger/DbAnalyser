@@ -987,6 +987,91 @@ END;
 GO
 
 -- ============================================================
+-- PROCEDURES: MERGE and TRUNCATE patterns
+-- ============================================================
+
+CREATE PROCEDURE dbo.usp_SyncProductPrices
+    @SupplierId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    CREATE TABLE #SupplierPrices (
+        ProductId INT PRIMARY KEY,
+        NewPrice DECIMAL(18,2)
+    );
+
+    INSERT INTO #SupplierPrices (ProductId, NewPrice)
+    SELECT ps.ProductId, ps.CostPrice * 1.3
+    FROM dbo.ProductSuppliers ps
+    WHERE ps.SupplierId = @SupplierId;
+
+    MERGE INTO dbo.Products AS target
+    USING #SupplierPrices AS source
+    ON target.Id = source.ProductId
+    WHEN MATCHED AND target.Price <> source.NewPrice THEN
+        UPDATE SET target.Price = source.NewPrice;
+
+    INSERT INTO dbo.ErrorLog (Message, OccurredAt)
+    VALUES ('Price sync completed for supplier ' + CAST(@SupplierId AS NVARCHAR(10)), GETUTCDATE());
+
+    DROP TABLE #SupplierPrices;
+END;
+GO
+
+CREATE PROCEDURE dbo.usp_RebuildStagingData
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF OBJECT_ID('tempdb..#StagingOrders') IS NOT NULL
+        DROP TABLE #StagingOrders;
+
+    CREATE TABLE #StagingOrders (
+        OrderId INT,
+        CustomerId INT,
+        CustomerName NVARCHAR(200),
+        TotalAmount DECIMAL(18,2),
+        ItemCount INT
+    );
+
+    TRUNCATE TABLE dbo.ErrorLog;
+
+    INSERT INTO #StagingOrders
+    SELECT
+        o.Id,
+        o.CustomerId,
+        c.FirstName + ' ' + c.LastName,
+        o.TotalAmount,
+        (SELECT COUNT(*) FROM dbo.OrderItems oi WHERE oi.OrderId = o.Id)
+    FROM dbo.Orders o
+    JOIN dbo.Customers c ON c.Id = o.CustomerId
+    WHERE o.Status != 'Cancelled';
+
+    MERGE INTO dbo.AppSettings AS target
+    USING (
+        SELECT 'LastStagingRun' AS SettingKey,
+               CAST(GETUTCDATE() AS NVARCHAR(50)) AS SettingValue
+    ) AS source
+    ON target.SettingKey = source.SettingKey
+    WHEN MATCHED THEN
+        UPDATE SET SettingValue = source.SettingValue, UpdatedAt = GETUTCDATE()
+    WHEN NOT MATCHED THEN
+        INSERT (SettingKey, SettingValue) VALUES (source.SettingKey, source.SettingValue);
+
+    SELECT COUNT(*) AS StagedOrders, SUM(TotalAmount) AS TotalValue
+    FROM #StagingOrders;
+
+    IF (SELECT COUNT(*) FROM #StagingOrders) = 0
+        THROW 50010, 'No orders to stage', 1;
+
+    DROP TABLE #StagingOrders;
+
+    RETURN 0;
+END;
+GO
+
+-- ============================================================
 -- SEED DATA
 -- ============================================================
 
