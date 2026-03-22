@@ -388,6 +388,7 @@ export interface QueryHistoryEntry {
   elapsedMs: number;
   rowCount: number;
   error?: string | null;
+  database?: string | null;
 }
 
 // ── Object type colors (matching HTML report) ───────────────────────────────

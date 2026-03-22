@@ -262,6 +262,7 @@ export function QueryPage() {
         elapsedMs: result.elapsedMs,
         rowCount: totalRows,
         error: result.error,
+        database: selectedDb || null,
       };
       setHistory((prev) => {
         const next = [entry, ...prev].slice(0, MAX_HISTORY);
@@ -484,8 +485,11 @@ export function QueryPage() {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: entry.sql } });
+    if (entry.database && databases.includes(entry.database)) {
+      setSelectedDb(entry.database);
+    }
     setShowHistory(false);
-  }, []);
+  }, [databases]);
 
   // ── Resizable split ──
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -689,6 +693,8 @@ export function QueryPage() {
                     className="w-full text-left px-3 py-2 text-xs hover:bg-bg-hover border-b border-border/50 transition-colors">
                     <div className="font-mono text-text-primary truncate">{entry.sql}</div>
                     <div className="text-text-muted mt-0.5">
+                      {entry.database && <span className="text-accent">[{entry.database}]</span>}
+                      {entry.database && ' \u00B7 '}
                       {new Date(entry.executedAt).toLocaleString()} &middot; {entry.elapsedMs}ms
                       {entry.error ? <span className="text-severity-error"> &middot; Error</span> : <> &middot; {entry.rowCount} rows</>}
                     </div>
