@@ -14,57 +14,163 @@ public static partial class SqlRowLimiter
     [GeneratedRegex(@"\bLIMIT\s+\d", RegexOptions.IgnoreCase)]
     private static partial Regex HasLimitRegex();
 
-    // Detect non-SELECT statements
-    [GeneratedRegex(@"^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXEC|EXECUTE|SET|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE|MERGE|TRUNCATE)\b", RegexOptions.IgnoreCase)]
+    // Detect non-SELECT, non-WITH statements
+    [GeneratedRegex(@"^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXEC|EXECUTE|SET|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE|MERGE|TRUNCATE)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NonSelectRegex();
 
-    // Strip leading SQL comments (-- line comments and /* block comments */) and whitespace
-    [GeneratedRegex(@"^(\s*(--[^\r\n]*[\r\n]*|/\*[\s\S]*?\*/\s*))*", RegexOptions.Singleline)]
-    private static partial Regex LeadingCommentsRegex();
+    /// <summary>
+    /// Find the position in the original string where actual SQL code starts,
+    /// skipping leading whitespace, single-line comments (--), and block comments (/* */).
+    /// </summary>
+    private static int SkipLeadingCommentsAndWhitespace(string sql)
+    {
+        var i = 0;
+        while (i < sql.Length)
+        {
+            // Skip whitespace
+            if (char.IsWhiteSpace(sql[i]))
+            {
+                i++;
+                continue;
+            }
+
+            // Skip single-line comment
+            if (i + 1 < sql.Length && sql[i] == '-' && sql[i + 1] == '-')
+            {
+                i += 2;
+                while (i < sql.Length && sql[i] != '\n' && sql[i] != '\r')
+                    i++;
+                continue;
+            }
+
+            // Skip block comment
+            if (i + 1 < sql.Length && sql[i] == '/' && sql[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < sql.Length && !(sql[i] == '*' && sql[i + 1] == '/'))
+                    i++;
+                if (i + 1 < sql.Length) i += 2; // skip */
+                continue;
+            }
+
+            break;
+        }
+        return i;
+    }
 
     /// <summary>
-    /// Strip leading whitespace and SQL comments to find the actual first statement.
-    /// Returns the position in the original string where the real SQL starts.
+    /// Find the position of the outermost SELECT keyword — the one that's NOT inside parentheses.
+    /// For CTEs (WITH ... AS (...) SELECT ...), this finds the final SELECT after all CTE definitions.
+    /// Returns -1 if no outer SELECT found.
     /// </summary>
-    private static int SkipLeadingComments(string sql)
+    private static int FindOuterSelectPosition(string sql, int startFrom)
     {
-        var match = LeadingCommentsRegex().Match(sql);
-        return match.Success ? match.Length : 0;
+        var depth = 0;
+        var i = startFrom;
+
+        while (i < sql.Length)
+        {
+            var ch = sql[i];
+
+            if (ch == '(') { depth++; i++; continue; }
+            if (ch == ')') { depth--; i++; continue; }
+
+            // Skip string literals
+            if (ch == '\'')
+            {
+                i++;
+                while (i < sql.Length && sql[i] != '\'') i++;
+                if (i < sql.Length) i++; // skip closing quote
+                continue;
+            }
+
+            // Skip single-line comments inside SQL
+            if (ch == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                while (i < sql.Length && sql[i] != '\n' && sql[i] != '\r') i++;
+                continue;
+            }
+
+            // Skip block comments inside SQL
+            if (ch == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < sql.Length && !(sql[i] == '*' && sql[i + 1] == '/')) i++;
+                if (i + 1 < sql.Length) i += 2;
+                continue;
+            }
+
+            // Check for SELECT keyword at depth 0
+            if (depth == 0 && i + 6 <= sql.Length &&
+                sql.Substring(i, 6).Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                // Make sure it's a whole word (not part of another identifier)
+                var before = i > 0 ? sql[i - 1] : ' ';
+                var after = i + 6 < sql.Length ? sql[i + 6] : ' ';
+                if (!char.IsLetterOrDigit(before) && before != '_' &&
+                    !char.IsLetterOrDigit(after) && after != '_')
+                {
+                    return i;
+                }
+            }
+
+            i++;
+        }
+
+        return -1;
     }
 
     /// <summary>
     /// Inject TOP(n) into a SQL Server SELECT query.
-    /// Returns the original SQL unchanged if it's not a simple SELECT or already has TOP.
+    /// Handles plain SELECTs, CTEs (WITH ... SELECT), leading comments, and subqueries.
+    /// Returns the original SQL unchanged if not applicable.
     /// </summary>
     public static string ApplyTopForSqlServer(string sql, int maxRows)
     {
         if (maxRows <= 0 || maxRows == int.MaxValue) return sql;
 
-        // Already has TOP
+        // Already has TOP anywhere in the query (user wrote their own)
         if (HasTopRegex().IsMatch(sql)) return sql;
 
-        // Find where the real SQL starts (skip comments)
-        var codeStart = SkipLeadingComments(sql);
+        // Skip leading comments/whitespace to find actual code
+        var codeStart = SkipLeadingCommentsAndWhitespace(sql);
+        if (codeStart >= sql.Length) return sql;
+
         var codePart = sql[codeStart..];
 
-        // Skip non-SELECT statements
+        // Skip non-SELECT/non-WITH statements
         if (NonSelectRegex().IsMatch(codePart)) return sql;
 
-        // Must start with SELECT
-        var selectMatch = Regex.Match(codePart, @"^SELECT(\s+(?:ALL|DISTINCT))?\s+", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        if (!selectMatch.Success) return sql;
+        // Find the outermost SELECT (handles CTEs by skipping parenthesized SELECTs)
+        int selectPos;
+        if (codePart.StartsWith("WITH", StringComparison.OrdinalIgnoreCase) &&
+            (codePart.Length <= 4 || !char.IsLetterOrDigit(codePart[4])))
+        {
+            // CTE: skip past WITH to find the final SELECT outside parens
+            selectPos = FindOuterSelectPosition(sql, codeStart + 4);
+        }
+        else
+        {
+            selectPos = FindOuterSelectPosition(sql, codeStart);
+        }
 
-        // Find insertion point after SELECT [ALL|DISTINCT]
-        var insertOffset = codeStart + "SELECT".Length;
-        if (selectMatch.Groups[1].Success)
-            insertOffset = codeStart + selectMatch.Groups[1].Index + selectMatch.Groups[1].Length;
+        if (selectPos < 0) return sql;
 
-        return string.Concat(sql.AsSpan(0, insertOffset), $" TOP({maxRows})", sql.AsSpan(insertOffset));
+        // Check for DISTINCT/ALL after SELECT
+        var afterSelect = sql[(selectPos + 6)..];
+        var distinctMatch = Regex.Match(afterSelect, @"^(\s+(?:ALL|DISTINCT))\s+", RegexOptions.IgnoreCase);
+
+        var insertPos = selectPos + 6; // right after "SELECT"
+        if (distinctMatch.Success)
+            insertPos += distinctMatch.Groups[1].Length;
+
+        return string.Concat(sql.AsSpan(0, insertPos), $" TOP({maxRows})", sql.AsSpan(insertPos));
     }
 
     /// <summary>
     /// Append LIMIT n to a PostgreSQL SELECT query.
-    /// Returns the original SQL unchanged if it's not a simple SELECT or already has LIMIT.
+    /// Handles CTEs, leading comments, and subqueries.
+    /// Returns the original SQL unchanged if not applicable.
     /// </summary>
     public static string ApplyLimitForPostgreSql(string sql, int maxRows)
     {
@@ -73,15 +179,22 @@ public static partial class SqlRowLimiter
         // Already has LIMIT
         if (HasLimitRegex().IsMatch(sql)) return sql;
 
-        // Find where the real SQL starts (skip comments)
-        var codeStart = SkipLeadingComments(sql);
+        // Skip leading comments/whitespace
+        var codeStart = SkipLeadingCommentsAndWhitespace(sql);
+        if (codeStart >= sql.Length) return sql;
+
         var codePart = sql[codeStart..];
 
-        // Skip non-SELECT statements
+        // Skip non-SELECT/non-WITH statements
         if (NonSelectRegex().IsMatch(codePart)) return sql;
 
-        // Must start with SELECT
-        if (!Regex.IsMatch(codePart, @"^SELECT\s+", RegexOptions.IgnoreCase)) return sql;
+        // Must start with SELECT or WITH (CTE)
+        var isSelect = codePart.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                       (codePart.Length <= 6 || !char.IsLetterOrDigit(codePart[6]));
+        var isWith = codePart.StartsWith("WITH", StringComparison.OrdinalIgnoreCase) &&
+                     (codePart.Length <= 4 || !char.IsLetterOrDigit(codePart[4]));
+
+        if (!isSelect && !isWith) return sql;
 
         // Strip trailing semicolon, append LIMIT
         var trimmed = sql.TrimEnd();
