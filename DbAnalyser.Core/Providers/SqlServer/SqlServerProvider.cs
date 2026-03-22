@@ -65,25 +65,8 @@ public class SqlServerProvider : IDbProvider
         await using var cmd = new SqlCommand(sql, conn);
         cmd.CommandTimeout = timeoutSeconds;
 
-        var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
-
-        do
-        {
-            var table = new DataTable();
-            ReaderColumnHelper.AddColumnsFromReader(table, reader);
-
-            var rowCount = 0;
-            while (rowCount < maxRows && await reader.ReadAsync(ct))
-            {
-                var values = new object[reader.FieldCount];
-                reader.GetValues(values);
-                table.Rows.Add(values);
-                rowCount++;
-            }
-
-            results.Add(table);
-        } while (await reader.NextResultAsync(ct));
+        var results = await ReaderColumnHelper.ReadResultSetsAsync(reader, maxRows, ct);
 
         return results;
     }
@@ -134,28 +117,10 @@ public class SqlServerProvider : IDbProvider
 
         var limitedSql = SqlRowLimiter.ApplyTopForSqlServer(sql, maxRows);
         await using var cmd = new SqlCommand(limitedSql, conn) { CommandTimeout = timeoutSeconds };
-        var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
+        var results = await ReaderColumnHelper.ReadResultSetsAsync(reader, maxRows, ct);
 
-        do
-        {
-            var table = new DataTable();
-            ReaderColumnHelper.AddColumnsFromReader(table, reader);
-
-            var rowCount = 0;
-            while (rowCount < maxRows && await reader.ReadAsync(ct))
-            {
-                var values = new object[reader.FieldCount];
-                reader.GetValues(values);
-                table.Rows.Add(values);
-                rowCount++;
-            }
-
-            results.Add(table);
-        } while (await reader.NextResultAsync(ct));
-
-        if (reader.RecordsAffected >= 0)
-            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+        ReaderColumnHelper.AddRecordsAffectedMessage(reader, messages);
 
         return new QueryExecutionResult(results, messages);
     }
@@ -198,28 +163,10 @@ public class SqlServerProvider : IDbProvider
         };
 
         await using var cmd = new SqlCommand(sql, entry.Connection, entry.Transaction) { CommandTimeout = timeoutSeconds };
-        var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
+        var results = await ReaderColumnHelper.ReadResultSetsAsync(reader, maxRows, ct);
 
-        do
-        {
-            var table = new DataTable();
-            ReaderColumnHelper.AddColumnsFromReader(table, reader);
-
-            var rowCount = 0;
-            while (rowCount < maxRows && await reader.ReadAsync(ct))
-            {
-                var values = new object[reader.FieldCount];
-                reader.GetValues(values);
-                table.Rows.Add(values);
-                rowCount++;
-            }
-
-            results.Add(table);
-        } while (await reader.NextResultAsync(ct));
-
-        if (reader.RecordsAffected >= 0)
-            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+        ReaderColumnHelper.AddRecordsAffectedMessage(reader, messages);
 
         return new QueryExecutionResult(results, messages);
     }

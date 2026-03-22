@@ -92,7 +92,7 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
   const [filterTerm, setFilterTerm] = useState('');
 
   const handleCellClick = useCallback((text: string, cellId: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text).catch(() => {});
     setCopiedCell(cellId);
     setTimeout(() => setCopiedCell(null), 800);
   }, []);
@@ -155,8 +155,9 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
 
   const copyAllResults = useCallback(() => {
     const csv = resultSetToCsv(resultSet);
-    navigator.clipboard.writeText(csv);
-    showFeedback('Copied all rows');
+    navigator.clipboard.writeText(csv)
+      .then(() => showFeedback('Copied all rows'))
+      .catch(() => showFeedback('Copy failed'));
   }, [resultSet, showFeedback]);
 
   const exportCsv = useCallback(() => {
@@ -174,14 +175,16 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
   }, [resultSet]);
 
   const copyAsJson = useCallback(() => {
-    navigator.clipboard.writeText(resultSetToJson(resultSet));
-    showFeedback('Copied as JSON');
+    navigator.clipboard.writeText(resultSetToJson(resultSet))
+      .then(() => showFeedback('Copied as JSON'))
+      .catch(() => showFeedback('Copy failed'));
     setShowExportMenu(false);
   }, [resultSet, showFeedback]);
 
   const copyAsInsert = useCallback(() => {
-    navigator.clipboard.writeText(resultSetToInsert(resultSet));
-    showFeedback('Copied as INSERT');
+    navigator.clipboard.writeText(resultSetToInsert(resultSet))
+      .then(() => showFeedback('Copied as INSERT'))
+      .catch(() => showFeedback('Copy failed'));
     setShowExportMenu(false);
   }, [resultSet, showFeedback]);
 

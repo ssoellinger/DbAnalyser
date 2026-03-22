@@ -70,25 +70,8 @@ public class PostgreSqlProvider : IDbProvider
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.CommandTimeout = timeoutSeconds;
 
-        var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
-
-        do
-        {
-            var table = new DataTable();
-            ReaderColumnHelper.AddColumnsFromReader(table, reader);
-
-            var rowCount = 0;
-            while (rowCount < maxRows && await reader.ReadAsync(ct))
-            {
-                var values = new object[reader.FieldCount];
-                reader.GetValues(values);
-                table.Rows.Add(values);
-                rowCount++;
-            }
-
-            results.Add(table);
-        } while (await reader.NextResultAsync(ct));
+        var results = await ReaderColumnHelper.ReadResultSetsAsync(reader, maxRows, ct);
 
         return results;
     }
@@ -125,28 +108,10 @@ public class PostgreSqlProvider : IDbProvider
 
         var limitedSql = SqlRowLimiter.ApplyLimitForPostgreSql(sql, maxRows);
         await using var cmd = new NpgsqlCommand(limitedSql, conn) { CommandTimeout = timeoutSeconds };
-        var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
+        var results = await ReaderColumnHelper.ReadResultSetsAsync(reader, maxRows, ct);
 
-        do
-        {
-            var table = new DataTable();
-            ReaderColumnHelper.AddColumnsFromReader(table, reader);
-
-            var rowCount = 0;
-            while (rowCount < maxRows && await reader.ReadAsync(ct))
-            {
-                var values = new object[reader.FieldCount];
-                reader.GetValues(values);
-                table.Rows.Add(values);
-                rowCount++;
-            }
-
-            results.Add(table);
-        } while (await reader.NextResultAsync(ct));
-
-        if (reader.RecordsAffected >= 0)
-            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+        ReaderColumnHelper.AddRecordsAffectedMessage(reader, messages);
 
         return new QueryExecutionResult(results, messages);
     }
@@ -189,28 +154,10 @@ public class PostgreSqlProvider : IDbProvider
         };
 
         await using var cmd = new NpgsqlCommand(sql, entry.Connection, entry.Transaction) { CommandTimeout = timeoutSeconds };
-        var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
+        var results = await ReaderColumnHelper.ReadResultSetsAsync(reader, maxRows, ct);
 
-        do
-        {
-            var table = new DataTable();
-            ReaderColumnHelper.AddColumnsFromReader(table, reader);
-
-            var rowCount = 0;
-            while (rowCount < maxRows && await reader.ReadAsync(ct))
-            {
-                var values = new object[reader.FieldCount];
-                reader.GetValues(values);
-                table.Rows.Add(values);
-                rowCount++;
-            }
-
-            results.Add(table);
-        } while (await reader.NextResultAsync(ct));
-
-        if (reader.RecordsAffected >= 0)
-            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+        ReaderColumnHelper.AddRecordsAffectedMessage(reader, messages);
 
         return new QueryExecutionResult(results, messages);
     }

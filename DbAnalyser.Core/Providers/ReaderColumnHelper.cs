@@ -89,4 +89,41 @@ public static class ReaderColumnHelper
             table.Columns.Add(name, types[i]);
         }
     }
+
+    /// <summary>
+    /// Read all result sets from a reader into DataTables, capping each at maxRows.
+    /// Handles columns (with duplicate resolution) and row reading in one place.
+    /// </summary>
+    public static async Task<List<DataTable>> ReadResultSetsAsync(DbDataReader reader, int maxRows, CancellationToken ct = default)
+    {
+        var results = new List<DataTable>();
+
+        do
+        {
+            var table = new DataTable();
+            AddColumnsFromReader(table, reader);
+
+            var rowCount = 0;
+            while (rowCount < maxRows && await reader.ReadAsync(ct))
+            {
+                var values = new object[reader.FieldCount];
+                reader.GetValues(values);
+                table.Rows.Add(values);
+                rowCount++;
+            }
+
+            results.Add(table);
+        } while (await reader.NextResultAsync(ct));
+
+        return results;
+    }
+
+    /// <summary>
+    /// Add a "(N row(s) affected)" message if the reader has records affected info.
+    /// </summary>
+    public static void AddRecordsAffectedMessage(DbDataReader reader, List<string> messages)
+    {
+        if (reader.RecordsAffected >= 0)
+            messages.Add($"({reader.RecordsAffected} row(s) affected)");
+    }
 }

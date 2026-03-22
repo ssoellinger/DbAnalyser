@@ -86,9 +86,13 @@ export function DataTable<T>({
   const isFiltering = globalFilter.length > 0;
 
   const headerGroups = table.getHeaderGroups();
-  const gridTemplate = enableColumnResizing
-    ? table.getAllColumns().map((col) => `${col.getSize()}px`).join(' ')
-    : table.getAllColumns().map(() => 'minmax(80px, 1fr)').join(' ');
+  const allColumns = table.getAllColumns();
+  const gridTemplate = useMemo(
+    () => enableColumnResizing
+      ? allColumns.map((col) => `${col.getSize()}px`).join(' ')
+      : allColumns.map(() => 'minmax(80px, 1fr)').join(' '),
+    [allColumns, enableColumnResizing],
+  );
 
   const rowStart = safePageIndex * pageSize + 1;
   const rowEnd = Math.min((safePageIndex + 1) * pageSize, allRows.length);

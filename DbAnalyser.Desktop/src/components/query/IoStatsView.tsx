@@ -70,12 +70,14 @@ function Heatbar({ value, max, color }: { value: number; max: number; color: str
 export function IoStatsView({ messages }: IoStatsViewProps) {
   const stats = useMemo(() => parseIoStats(messages), [messages]);
 
-  if (stats.length === 0) return null;
+  const { maxLogical, maxPhysical, totalLogical, totalPhysical } = useMemo(() => ({
+    maxLogical: Math.max(...stats.map((s) => s.logicalReads), 1),
+    maxPhysical: Math.max(...stats.map((s) => s.physicalReads), 1),
+    totalLogical: stats.reduce((sum, s) => sum + s.logicalReads, 0),
+    totalPhysical: stats.reduce((sum, s) => sum + s.physicalReads, 0),
+  }), [stats]);
 
-  const maxLogical = Math.max(...stats.map((s) => s.logicalReads), 1);
-  const maxPhysical = Math.max(...stats.map((s) => s.physicalReads), 1);
-  const totalLogical = stats.reduce((sum, s) => sum + s.logicalReads, 0);
-  const totalPhysical = stats.reduce((sum, s) => sum + s.physicalReads, 0);
+  if (stats.length === 0) return null;
 
   return (
     <div className="space-y-3">
