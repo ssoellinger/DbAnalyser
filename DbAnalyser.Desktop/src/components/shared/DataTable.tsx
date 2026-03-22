@@ -176,13 +176,62 @@ export function DataTable<T>({
         </div>
       </div>
 
-      {(totalCount > 50 || isFiltering) && (
-        <div className="text-xs text-text-secondary">
-          {isFiltering
-            ? `${filteredCount} of ${totalCount} rows`
-            : `${totalCount} row${totalCount !== 1 ? 's' : ''}`}
-        </div>
-      )}
+      {(rows.length > 50 || isFiltering) && (() => {
+        const rowsPerPage = 200;
+        const pageCount = Math.ceil(rows.length / rowsPerPage);
+        const currentRow = virtualizer.getVirtualItems()[0]?.index ?? 0;
+        const currentPage = Math.floor(currentRow / rowsPerPage);
+
+        const jumpToPage = (page: number) => {
+          virtualizer.scrollToIndex(page * rowsPerPage, { align: 'start' });
+        };
+
+        return (
+          <div className="flex items-center justify-between text-xs text-text-secondary">
+            <span>
+              {isFiltering
+                ? `${filteredCount} of ${totalCount} rows`
+                : `${rows.length} row${rows.length !== 1 ? 's' : ''}`}
+            </span>
+            {pageCount > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => jumpToPage(Math.max(0, currentPage - 1))}
+                  disabled={currentPage === 0}
+                  className="px-2 py-0.5 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+                >
+                  Prev
+                </button>
+                {Array.from({ length: pageCount }, (_, i) => {
+                  // Show first, last, and pages around current
+                  if (i === 0 || i === pageCount - 1 || Math.abs(i - currentPage) <= 1) {
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => jumpToPage(i)}
+                        className={`px-2 py-0.5 rounded border transition-colors ${i === currentPage ? 'border-accent text-accent bg-accent/10' : 'border-border hover:bg-bg-hover'}`}
+                      >
+                        {i + 1}
+                      </button>
+                    );
+                  }
+                  // Show ellipsis between gaps
+                  if (i === 1 && currentPage > 2) return <span key={i} className="px-1">&hellip;</span>;
+                  if (i === pageCount - 2 && currentPage < pageCount - 3) return <span key={i} className="px-1">&hellip;</span>;
+                  return null;
+                })}
+                <button
+                  onClick={() => jumpToPage(Math.min(pageCount - 1, currentPage + 1))}
+                  disabled={currentPage >= pageCount - 1}
+                  className="px-2 py-0.5 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
