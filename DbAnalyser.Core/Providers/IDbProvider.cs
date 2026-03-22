@@ -34,7 +34,7 @@ public interface IDbProvider : IAsyncDisposable
     /// <summary>
     /// Execute a query returning result sets, messages, and optionally an execution plan.
     /// </summary>
-    Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, CancellationToken ct = default)
+    Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, bool showStats = false, CancellationToken ct = default)
     {
         return Task.FromResult(new QueryExecutionResult([], []));
     }

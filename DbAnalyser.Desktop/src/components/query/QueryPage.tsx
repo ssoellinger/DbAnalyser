@@ -9,6 +9,9 @@ import { defaultKeymap, history as cmHistory, historyKeymap } from '@codemirror/
 import { format as formatSql } from 'sql-formatter';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from '../code/codemirrorTheme';
 import { QueryResultsGrid } from './QueryResultsGrid';
+import { ExecutionPlanView } from './ExecutionPlanView';
+import { ColumnStats } from './ColumnStats';
+import { IoStatsView, hasIoStats } from './IoStatsView';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../api/client';
 import type { QueryResponse, QueryHistoryEntry, DatabaseSchema } from '../../api/types';
@@ -156,7 +159,7 @@ function buildSqlSchema(schema: DatabaseSchema | null | undefined, database?: st
 const sqlCompartment = new Compartment();
 
 // ── Results view type ──
-type ResultsView = 'results' | 'messages' | 'plan';
+type ResultsView = 'results' | 'messages' | 'plan' | 'statistics' | 'performance';
 
 // ── Component ──
 
@@ -225,7 +228,7 @@ export function QueryPage() {
   }, [executionStartTime]);
 
   // ── Execute ──
-  const executeQuery = useCallback(async (sqlOverride?: string, showPlan = false) => {
+  const executeQuery = useCallback(async (sqlOverride?: string, showPlan = false, showStats = false) => {
     if (!sessionId || isFileSession) return;
     const view = viewRef.current;
     if (!view) return;
@@ -246,10 +249,10 @@ export function QueryPage() {
     setExecutionStartTime(Date.now());
     setResponse(null);
     setActiveResultTab(0);
-    setResultsView(showPlan ? 'plan' : 'results');
+    setResultsView(showPlan ? 'plan' : showStats ? 'performance' : 'results');
 
     try {
-      const result = await api.executeQuery(sessionId, sqlText, maxRows, 30, selectedDb || undefined, showPlan, controller.signal);
+      const result = await api.executeQuery(sessionId, sqlText, maxRows, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
       setResponse(result);
 
       const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.totalRowsReturned, 0);
@@ -522,6 +525,7 @@ export function QueryPage() {
   const hasSchema = !!dbSchema;
   const hasMessages = (response?.messages?.length ?? 0) > 0;
   const hasPlan = !!response?.executionPlan;
+  const hasIo = hasMessages && hasIoStats(response?.messages ?? []);
 
   return (
     <div className="flex flex-col h-full" ref={splitContainerRef}>
@@ -611,6 +615,14 @@ export function QueryPage() {
             title="Show execution plan">
             Plan
           </button>
+
+          {providerType !== 'postgresql' && (
+            <button onClick={() => executeQuery(undefined, false, true)} disabled={isExecuting}
+              className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+              title="Execute with STATISTICS IO (shows table read counts)">
+              IO Stats
+            </button>
+          )}
 
           <button onClick={formatQuery}
             className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
@@ -722,6 +734,18 @@ export function QueryPage() {
                 Plan
               </button>
             )}
+            {response.resultSets.length > 0 && !response.error && (
+              <button onClick={() => setResultsView('statistics')}
+                className={`px-3 py-1.5 border-b-2 transition-colors ${resultsView === 'statistics' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
+                Statistics
+              </button>
+            )}
+            {hasIo && (
+              <button onClick={() => setResultsView('performance')}
+                className={`px-3 py-1.5 border-b-2 transition-colors ${resultsView === 'performance' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
+                IO Stats
+              </button>
+            )}
 
             <div className="ml-auto px-3 py-1.5 flex items-center gap-3">
               {response.error ? (
@@ -795,9 +819,15 @@ export function QueryPage() {
           )}
 
           {response && resultsView === 'plan' && (
-            <pre className="font-mono text-xs text-text-secondary whitespace-pre-wrap">
-              {response.executionPlan || 'No execution plan available. Click "Plan" to generate one.'}
-            </pre>
+            <ExecutionPlanView planText={response.executionPlan ?? ''} providerType={providerType} />
+          )}
+
+          {response && resultsView === 'statistics' && !response.error && response.resultSets.length > 0 && (
+            <ColumnStats resultSet={response.resultSets[activeResultTab]} />
+          )}
+
+          {response && resultsView === 'performance' && hasIo && (
+            <IoStatsView messages={response.messages ?? []} />
           )}
 
           {response && response.error && resultsView === 'results' && (

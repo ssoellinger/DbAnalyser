@@ -94,7 +94,7 @@ public class PostgreSqlProvider : IDbProvider
         return results;
     }
 
-    public async Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, CancellationToken ct = default)
+    public async Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, bool showStats = false, CancellationToken ct = default)
     {
         var messages = new List<string>();
 

@@ -89,7 +89,7 @@ public class SqlServerProvider : IDbProvider
         return results;
     }
 
-    public async Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, CancellationToken ct = default)
+    public async Task<QueryExecutionResult> ExecuteQueryFullAsync(string sql, string connectionString, int maxRows = 1000, int timeoutSeconds = 30, bool showPlan = false, bool showStats = false, CancellationToken ct = default)
     {
         var messages = new List<string>();
 
@@ -125,6 +125,13 @@ public class SqlServerProvider : IDbProvider
                 messages.Add(e.Message);
         };
         await conn.OpenAsync(ct);
+
+        // Enable STATISTICS IO only when explicitly requested
+        if (showStats)
+        {
+            await using var statsCmd = new SqlCommand("SET STATISTICS IO ON", conn);
+            await statsCmd.ExecuteNonQueryAsync(ct);
+        }
 
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
         var results = new List<DataTable>();

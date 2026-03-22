@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -17,6 +17,7 @@ interface DataTableProps<T> {
   searchable?: boolean;
   searchPlaceholder?: string;
   enableColumnResizing?: boolean;
+  onFilterChange?: (filter: string) => void;
 }
 
 export function DataTable<T>({
@@ -26,9 +27,15 @@ export function DataTable<T>({
   searchable = true,
   searchPlaceholder = 'Filter...',
   enableColumnResizing = false,
+  onFilterChange,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
+
+  const handleFilterChange = useCallback((value: string) => {
+    setGlobalFilter(value);
+    onFilterChange?.(value);
+  }, [onFilterChange]);
 
   const table = useReactTable({
     data,
@@ -44,15 +51,41 @@ export function DataTable<T>({
     ...(enableColumnResizing ? { columnResizeMode: 'onChange' as const, enableColumnResizing: true } : {}),
   });
 
+  const filteredCount = table.getFilteredRowModel().rows.length;
+  const totalCount = data.length;
+  const isFiltering = globalFilter.length > 0;
+  const pageIndex = table.getState().pagination.pageIndex;
+  const pageCount = table.getPageCount();
+  const rowStart = pageIndex * pageSize + 1;
+  const rowEnd = Math.min((pageIndex + 1) * pageSize, filteredCount);
+
   return (
     <div className="space-y-3">
       {searchable && (
-        <input
-          value={globalFilter}
-          onChange={(e) => setGlobalFilter(e.target.value)}
-          placeholder={searchPlaceholder}
-          className="w-full max-w-xs bg-bg-primary border border-border rounded px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            value={globalFilter}
+            onChange={(e) => handleFilterChange(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="w-full max-w-xs bg-bg-primary border border-border rounded px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+          />
+          {isFiltering && (
+            <>
+              <span className="text-xs text-text-secondary">
+                {filteredCount === 0
+                  ? 'No matches'
+                  : `${filteredCount} of ${totalCount} rows`}
+              </span>
+              <button
+                onClick={() => handleFilterChange('')}
+                className="text-xs text-text-muted hover:text-text-primary transition-colors"
+                title="Clear filter"
+              >
+                &#10005;
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       <div className="overflow-x-auto rounded border border-border">
@@ -69,7 +102,7 @@ export function DataTable<T>({
                   >
                     <div className="flex items-center gap-1">
                       {flexRender(header.column.columnDef.header, header.getContext())}
-                      {{ asc: ' ▲', desc: ' ▼' }[header.column.getIsSorted() as string] ?? ''}
+                      {{ asc: ' \u25B2', desc: ' \u25BC' }[header.column.getIsSorted() as string] ?? ''}
                     </div>
                     {enableColumnResizing && (
                       <div
@@ -102,30 +135,34 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {table.getPageCount() > 1 && (
+      {(pageCount > 1 || isFiltering) && (
         <div className="flex items-center justify-between text-xs text-text-secondary">
           <span>
-            {table.getFilteredRowModel().rows.length} row{table.getFilteredRowModel().rows.length !== 1 ? 's' : ''}
+            {isFiltering
+              ? `Showing ${rowStart}-${rowEnd} of ${filteredCount} matches (${totalCount} total)`
+              : `${filteredCount} row${filteredCount !== 1 ? 's' : ''}`}
           </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
-            >
-              Prev
-            </button>
-            <span>
-              Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
-            </span>
-            <button
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
-            >
-              Next
-            </button>
-          </div>
+          {pageCount > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+                className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+              >
+                Prev
+              </button>
+              <span>
+                Page {pageIndex + 1} of {pageCount}
+              </span>
+              <button
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+                className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

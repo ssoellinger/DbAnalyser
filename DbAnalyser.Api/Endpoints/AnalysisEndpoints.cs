@@ -165,7 +165,7 @@ public static class AnalysisEndpoints
             {
                 var execResult = activeTxnId is not null
                     ? await provider.ExecuteInTransactionAsync(activeTxnId, request.Sql, maxRows, timeoutSeconds, ct)
-                    : await provider.ExecuteQueryFullAsync(request.Sql, connStr, maxRows, timeoutSeconds, request.ShowPlan, ct);
+                    : await provider.ExecuteQueryFullAsync(request.Sql, connStr, maxRows, timeoutSeconds, request.ShowPlan, request.ShowStats, ct);
                 sw.Stop();
 
                 var resultSets = new List<QueryResultSetDto>();
@@ -219,7 +219,7 @@ public record ConnectRequest(string ConnectionString, string? ProviderType = "sq
 public record StartAnalysisRequest(string SessionId, List<string>? Analyzers = null, string? SignalRConnectionId = null);
 public record DisconnectRequest(string SessionId);
 public record RunAnalyzerRequest(string? SignalRConnectionId = null, bool Force = false, string? Database = null);
-public record ExecuteQueryRequest(string Sql, int? MaxRows = 1000, int? TimeoutSeconds = 30, string? Database = null, bool ShowPlan = false);
+public record ExecuteQueryRequest(string Sql, int? MaxRows = 1000, int? TimeoutSeconds = 30, string? Database = null, bool ShowPlan = false, bool ShowStats = false);
 public record TransactionRequest(string? Database = null);
 public record QueryResultSetDto(List<string> Columns, List<List<object?>> Rows, int TotalRowsReturned, bool Truncated);
 public record QueryResponseDto(List<QueryResultSetDto> ResultSets, long ElapsedMs, string? Error, List<string>? Messages = null, string? ExecutionPlan = null);
