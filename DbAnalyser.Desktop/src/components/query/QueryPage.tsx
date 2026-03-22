@@ -208,6 +208,8 @@ export function QueryPage() {
   const [elapsedDisplay, setElapsedDisplay] = useState('');
   const [pinnedResults, setPinnedResults] = useState<PinnedResult[]>([]);
   const [transactionState, setTransactionState] = useState<'none' | 'active'>('none');
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const lastExecutedSql = useRef<string>('');
 
   const abortRef = useRef<AbortController | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -273,7 +275,10 @@ export function QueryPage() {
     setResultsView(showPlan ? 'plan' : showStats ? 'performance' : 'results');
 
     try {
-      const result = await api.executeQuery(sessionId, sqlText, maxRows || undefined, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
+      // In "All" mode (maxRows=0), load first 1000 quickly; user can "Load all" after
+      const effectiveMaxRows = maxRows === 0 ? 1000 : maxRows;
+      lastExecutedSql.current = sqlText;
+      const result = await api.executeQuery(sessionId, sqlText, effectiveMaxRows, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
       setResponse(result);
 
       const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.totalRowsReturned, 0);
@@ -311,6 +316,23 @@ export function QueryPage() {
 
   const cancelQuery = useCallback(() => { abortRef.current?.abort(); setIsExecuting(false); }, []);
   const clearResults = useCallback(() => { setResponse(null); setActiveResultTab(0); }, []);
+
+  // Load all remaining rows (re-executes with no limit)
+  const loadAllRows = useCallback(async () => {
+    if (!sessionId || !lastExecutedSql.current) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsLoadingMore(true);
+    try {
+      const result = await api.executeQuery(sessionId, lastExecutedSql.current, undefined, 120, selectedDb || undefined, false, false, controller.signal);
+      setResponse(result);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+    } finally {
+      setIsLoadingMore(false);
+      abortRef.current = null;
+    }
+  }, [sessionId, selectedDb]);
 
   const formatQuery = useCallback(() => {
     const view = viewRef.current;
@@ -782,7 +804,16 @@ export function QueryPage() {
                   <span className="text-text-secondary">
                     {totalRows.toLocaleString()} row{totalRows !== 1 ? 's' : ''} &middot; {response.elapsedMs}ms
                   </span>
-                  {anyTruncated && <span className="text-amber-400">&#9888; Truncated</span>}
+                  {anyTruncated && maxRows === 0 && (
+                    <button
+                      onClick={loadAllRows}
+                      disabled={isLoadingMore}
+                      className="px-2 py-0.5 text-xs rounded border border-accent text-accent hover:bg-accent/10 disabled:opacity-50 transition-colors"
+                    >
+                      {isLoadingMore ? 'Loading...' : 'Load all rows'}
+                    </button>
+                  )}
+                  {anyTruncated && maxRows !== 0 && <span className="text-amber-400">&#9888; Truncated at {maxRows.toLocaleString()}</span>}
                   <button
                     onClick={pinCurrentResult}
                     disabled={pinnedResults.length >= 3}
