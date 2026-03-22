@@ -136,7 +136,7 @@ export function DataTable<T>({
         <div
           ref={scrollContainerRef}
           className="overflow-auto"
-          style={{ maxHeight: 'calc(100vh - 350px)', contain: 'strict' }}
+          style={{ height: 'calc(100vh - 350px)' }}
         >
           <div
             style={{
