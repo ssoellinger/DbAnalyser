@@ -16,7 +16,7 @@ import { useStore } from '../../hooks/useStore';
 import { api } from '../../api/client';
 import type { QueryResponse, QueryHistoryEntry, DatabaseSchema } from '../../api/types';
 
-const MAX_ROWS_OPTIONS = [100, 500, 1000, 5000, 10000];
+const MAX_ROWS_OPTIONS = [100, 500, 1000, 5000, 10000, 0];
 const HISTORY_KEY_PREFIX = 'dbanalyser-query-history';
 const SAVED_QUERIES_KEY_PREFIX = 'dbanalyser-saved-queries';
 const MAX_HISTORY = 50;
@@ -273,7 +273,7 @@ export function QueryPage() {
     setResultsView(showPlan ? 'plan' : showStats ? 'performance' : 'results');
 
     try {
-      const result = await api.executeQuery(sessionId, sqlText, maxRows, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
+      const result = await api.executeQuery(sessionId, sqlText, maxRows || 1000000, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
       setResponse(result);
 
       const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.totalRowsReturned, 0);
@@ -659,7 +659,7 @@ export function QueryPage() {
             Max:
             <select value={maxRows} onChange={(e) => setMaxRows(Number(e.target.value))}
               className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary">
-              {MAX_ROWS_OPTIONS.map((n) => <option key={n} value={n}>{n.toLocaleString()}</option>)}
+              {MAX_ROWS_OPTIONS.map((n) => <option key={n} value={n}>{n === 0 ? 'All' : n.toLocaleString()}</option>)}
             </select>
           </label>
 
