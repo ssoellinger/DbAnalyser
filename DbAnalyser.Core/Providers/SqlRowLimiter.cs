@@ -8,20 +8,29 @@ namespace DbAnalyser.Providers;
 /// </summary>
 public static partial class SqlRowLimiter
 {
-    // Matches SELECT at the start (ignoring leading whitespace, comments, CTEs)
-    // Captures everything after SELECT [ALL|DISTINCT] to inject TOP before columns
-    [GeneratedRegex(@"^\s*SELECT(\s+(?:ALL|DISTINCT))?\s+", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
-    private static partial Regex SelectStartRegex();
-
     [GeneratedRegex(@"\bTOP\s*[\(\d]", RegexOptions.IgnoreCase)]
     private static partial Regex HasTopRegex();
 
     [GeneratedRegex(@"\bLIMIT\s+\d", RegexOptions.IgnoreCase)]
     private static partial Regex HasLimitRegex();
 
-    // Detect non-SELECT statements that shouldn't be limited
-    [GeneratedRegex(@"^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXEC|EXECUTE|SET|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE|MERGE|TRUNCATE|WITH\s)", RegexOptions.IgnoreCase)]
+    // Detect non-SELECT statements
+    [GeneratedRegex(@"^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXEC|EXECUTE|SET|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE|MERGE|TRUNCATE)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NonSelectRegex();
+
+    // Strip leading SQL comments (-- line comments and /* block comments */) and whitespace
+    [GeneratedRegex(@"^(\s*(--[^\r\n]*[\r\n]*|/\*[\s\S]*?\*/\s*))*", RegexOptions.Singleline)]
+    private static partial Regex LeadingCommentsRegex();
+
+    /// <summary>
+    /// Strip leading whitespace and SQL comments to find the actual first statement.
+    /// Returns the position in the original string where the real SQL starts.
+    /// </summary>
+    private static int SkipLeadingComments(string sql)
+    {
+        var match = LeadingCommentsRegex().Match(sql);
+        return match.Success ? match.Length : 0;
+    }
 
     /// <summary>
     /// Inject TOP(n) into a SQL Server SELECT query.
@@ -31,25 +40,26 @@ public static partial class SqlRowLimiter
     {
         if (maxRows <= 0 || maxRows == int.MaxValue) return sql;
 
-        // Skip non-SELECT statements
-        if (NonSelectRegex().IsMatch(sql)) return sql;
-
         // Already has TOP
         if (HasTopRegex().IsMatch(sql)) return sql;
 
-        // Inject TOP after SELECT [ALL|DISTINCT]
-        var match = SelectStartRegex().Match(sql);
-        if (!match.Success) return sql;
+        // Find where the real SQL starts (skip comments)
+        var codeStart = SkipLeadingComments(sql);
+        var codePart = sql[codeStart..];
 
-        var distinctPart = match.Groups[1].Success ? match.Groups[1].Value : "";
-        var insertPos = match.Groups[1].Success ? match.Groups[1].Index + match.Groups[1].Length : match.Index + "SELECT".Length;
+        // Skip non-SELECT statements
+        if (NonSelectRegex().IsMatch(codePart)) return sql;
 
-        // Find where "SELECT" ends in the original string
-        var selectKeywordEnd = sql.IndexOf("SELECT", StringComparison.OrdinalIgnoreCase) + "SELECT".Length;
-        if (match.Groups[1].Success)
-            selectKeywordEnd = match.Groups[1].Index + match.Groups[1].Length;
+        // Must start with SELECT
+        var selectMatch = Regex.Match(codePart, @"^SELECT(\s+(?:ALL|DISTINCT))?\s+", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!selectMatch.Success) return sql;
 
-        return string.Concat(sql.AsSpan(0, selectKeywordEnd), $" TOP({maxRows})", sql.AsSpan(selectKeywordEnd));
+        // Find insertion point after SELECT [ALL|DISTINCT]
+        var insertOffset = codeStart + "SELECT".Length;
+        if (selectMatch.Groups[1].Success)
+            insertOffset = codeStart + selectMatch.Groups[1].Index + selectMatch.Groups[1].Length;
+
+        return string.Concat(sql.AsSpan(0, insertOffset), $" TOP({maxRows})", sql.AsSpan(insertOffset));
     }
 
     /// <summary>
@@ -60,14 +70,18 @@ public static partial class SqlRowLimiter
     {
         if (maxRows <= 0 || maxRows == int.MaxValue) return sql;
 
-        // Skip non-SELECT statements
-        if (NonSelectRegex().IsMatch(sql)) return sql;
-
         // Already has LIMIT
         if (HasLimitRegex().IsMatch(sql)) return sql;
 
+        // Find where the real SQL starts (skip comments)
+        var codeStart = SkipLeadingComments(sql);
+        var codePart = sql[codeStart..];
+
+        // Skip non-SELECT statements
+        if (NonSelectRegex().IsMatch(codePart)) return sql;
+
         // Must start with SELECT
-        if (!SelectStartRegex().IsMatch(sql)) return sql;
+        if (!Regex.IsMatch(codePart, @"^SELECT\s+", RegexOptions.IgnoreCase)) return sql;
 
         // Strip trailing semicolon, append LIMIT
         var trimmed = sql.TrimEnd();
