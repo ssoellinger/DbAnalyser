@@ -71,9 +71,9 @@ export function DataTable<T>({
     : table.getAllColumns().map(() => 'minmax(80px, 1fr)').join(' ');
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3 flex-1 min-h-0">
       {searchable && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <input
             value={globalFilter}
             onChange={(e) => handleFilterChange(e.target.value)}
@@ -99,9 +99,9 @@ export function DataTable<T>({
         </div>
       )}
 
-      <div className="rounded border border-border overflow-hidden">
+      <div className="rounded border border-border overflow-hidden flex flex-col flex-1 min-h-0">
         {/* Header */}
-        <div className="bg-bg-secondary border-b border-border overflow-x-auto">
+        <div className="bg-bg-secondary border-b border-border overflow-x-auto flex-shrink-0">
           {headerGroups.map((hg) => (
             <div
               key={hg.id}
@@ -135,8 +135,7 @@ export function DataTable<T>({
         {/* Virtualized body */}
         <div
           ref={scrollContainerRef}
-          className="overflow-auto"
-          style={{ height: 'calc(100vh - 350px)' }}
+          className="overflow-auto flex-1 min-h-0"
         >
           <div
             style={{

@@ -186,8 +186,8 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
   }, [resultSet, showFeedback]);
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-2 flex-1 min-h-0">
+      <div className="flex items-center gap-2 flex-shrink-0">
         <button
           onClick={copyAllResults}
           className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"

@@ -810,7 +810,7 @@ export function QueryPage() {
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-auto p-3">
+        <div className="flex-1 overflow-hidden p-3 flex flex-col min-h-0">
           {!response && !isExecuting && (
             <div className="flex items-center justify-center h-full text-text-muted text-sm">
               Write a query and press Execute or Ctrl+Enter
