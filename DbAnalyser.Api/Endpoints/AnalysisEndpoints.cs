@@ -155,7 +155,7 @@ public static class AnalysisEndpoints
             if (provider is null)
                 return Results.NotFound(new { error = "Session not found. Connect first." });
 
-            var maxRows = request.MaxRows ?? 1000;
+            var maxRows = request.MaxRows is > 0 ? request.MaxRows.Value : int.MaxValue;
             var timeoutSeconds = request.TimeoutSeconds ?? 30;
             var connStr = sessionService.GetConnectionString(sessionId, request.Database) ?? provider.ConnectionString;
             var activeTxnId = sessionService.GetActiveTransactionId(sessionId);

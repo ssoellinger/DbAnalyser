@@ -273,7 +273,7 @@ export function QueryPage() {
     setResultsView(showPlan ? 'plan' : showStats ? 'performance' : 'results');
 
     try {
-      const result = await api.executeQuery(sessionId, sqlText, maxRows || 1000000, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
+      const result = await api.executeQuery(sessionId, sqlText, maxRows || undefined, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
       setResponse(result);
 
       const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.totalRowsReturned, 0);
