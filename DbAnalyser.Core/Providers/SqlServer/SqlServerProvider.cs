@@ -133,7 +133,8 @@ public class SqlServerProvider : IDbProvider
             await statsCmd.ExecuteNonQueryAsync(ct);
         }
 
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
+        var limitedSql = SqlRowLimiter.ApplyTopForSqlServer(sql, maxRows);
+        await using var cmd = new SqlCommand(limitedSql, conn) { CommandTimeout = timeoutSeconds };
         var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
 

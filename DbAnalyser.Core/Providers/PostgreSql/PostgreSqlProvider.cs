@@ -124,7 +124,8 @@ public class PostgreSqlProvider : IDbProvider
                 messages.Add(e.Notice.MessageText);
         };
 
-        await using var cmd = new NpgsqlCommand(sql, conn) { CommandTimeout = timeoutSeconds };
+        var limitedSql = SqlRowLimiter.ApplyLimitForPostgreSql(sql, maxRows);
+        await using var cmd = new NpgsqlCommand(limitedSql, conn) { CommandTimeout = timeoutSeconds };
         var results = new List<DataTable>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
 
