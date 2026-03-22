@@ -71,13 +71,12 @@ public class PostgreSqlProvider : IDbProvider
         cmd.CommandTimeout = timeoutSeconds;
 
         var results = new List<DataTable>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
 
         do
         {
             var table = new DataTable();
-            for (var i = 0; i < reader.FieldCount; i++)
-                table.Columns.Add(reader.GetName(i), reader.GetFieldType(i) ?? typeof(object));
+            ReaderColumnHelper.AddColumnsFromReader(table, reader);
 
             var rowCount = 0;
             while (rowCount < maxRows && await reader.ReadAsync(ct))
@@ -127,13 +126,12 @@ public class PostgreSqlProvider : IDbProvider
         var limitedSql = SqlRowLimiter.ApplyLimitForPostgreSql(sql, maxRows);
         await using var cmd = new NpgsqlCommand(limitedSql, conn) { CommandTimeout = timeoutSeconds };
         var results = new List<DataTable>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
 
         do
         {
             var table = new DataTable();
-            for (var i = 0; i < reader.FieldCount; i++)
-                table.Columns.Add(reader.GetName(i), reader.GetFieldType(i) ?? typeof(object));
+            ReaderColumnHelper.AddColumnsFromReader(table, reader);
 
             var rowCount = 0;
             while (rowCount < maxRows && await reader.ReadAsync(ct))
@@ -192,13 +190,12 @@ public class PostgreSqlProvider : IDbProvider
 
         await using var cmd = new NpgsqlCommand(sql, entry.Connection, entry.Transaction) { CommandTimeout = timeoutSeconds };
         var results = new List<DataTable>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.KeyInfo, ct);
 
         do
         {
             var table = new DataTable();
-            for (var i = 0; i < reader.FieldCount; i++)
-                table.Columns.Add(reader.GetName(i), reader.GetFieldType(i) ?? typeof(object));
+            ReaderColumnHelper.AddColumnsFromReader(table, reader);
 
             var rowCount = 0;
             while (rowCount < maxRows && await reader.ReadAsync(ct))

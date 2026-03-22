@@ -99,44 +99,45 @@ export function DataTable<T>({
         </div>
       )}
 
-      <div className="rounded border border-border overflow-hidden flex flex-col flex-1 min-h-0">
-        {/* Header */}
-        <div className="bg-bg-secondary border-b border-border overflow-x-auto flex-shrink-0">
-          {headerGroups.map((hg) => (
-            <div
-              key={hg.id}
-              className="grid"
-              style={{ gridTemplateColumns: gridTemplate }}
-            >
-              {hg.headers.map((header) => (
-                <div
-                  key={header.id}
-                  onClick={header.column.getToggleSortingHandler()}
-                  className={`px-3 py-2 text-left text-xs font-medium text-text-secondary cursor-pointer hover:text-text-primary select-none ${enableColumnResizing ? 'relative' : ''}`}
-                >
-                  <div className="flex items-center gap-1">
-                    {flexRender(header.column.columnDef.header, header.getContext())}
-                    {{ asc: ' \u25B2', desc: ' \u25BC' }[header.column.getIsSorted() as string] ?? ''}
+      <div
+        ref={scrollContainerRef}
+        className="rounded border border-border overflow-auto flex-1 min-h-0"
+      >
+        <div style={{ minWidth: enableColumnResizing ? table.getCenterTotalSize() : undefined }}>
+          {/* Sticky header */}
+          <div className="sticky top-0 z-10 bg-bg-secondary border-b border-border">
+            {headerGroups.map((hg) => (
+              <div
+                key={hg.id}
+                className="grid"
+                style={{ gridTemplateColumns: gridTemplate }}
+              >
+                {hg.headers.map((header) => (
+                  <div
+                    key={header.id}
+                    onClick={header.column.getToggleSortingHandler()}
+                    className={`px-3 py-2 text-left text-xs font-medium text-text-secondary cursor-pointer hover:text-text-primary select-none overflow-hidden ${enableColumnResizing ? 'relative' : ''}`}
+                    title={typeof header.column.columnDef.header === 'string' ? header.column.columnDef.header : undefined}
+                  >
+                    <div className="flex items-center gap-1 overflow-hidden">
+                      <span className="truncate">{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                      <span className="flex-shrink-0">{{ asc: '\u25B2', desc: '\u25BC' }[header.column.getIsSorted() as string] ?? ''}</span>
+                    </div>
+                    {enableColumnResizing && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-colors ${header.column.getIsResizing() ? 'bg-accent' : 'hover:bg-accent/50'}`}
+                      />
+                    )}
                   </div>
-                  {enableColumnResizing && (
-                    <div
-                      onMouseDown={header.getResizeHandler()}
-                      onTouchStart={header.getResizeHandler()}
-                      onClick={(e) => e.stopPropagation()}
-                      className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-colors ${header.column.getIsResizing() ? 'bg-accent' : 'hover:bg-accent/50'}`}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+                ))}
+              </div>
+            ))}
+          </div>
 
-        {/* Virtualized body */}
-        <div
-          ref={scrollContainerRef}
-          className="overflow-auto flex-1 min-h-0"
-        >
+          {/* Virtualized body */}
           <div
             style={{
               height: virtualizer.getTotalSize(),
