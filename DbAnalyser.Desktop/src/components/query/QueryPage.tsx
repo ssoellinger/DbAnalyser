@@ -191,6 +191,7 @@ export function QueryPage() {
   const [activeTabId, setActiveTabId] = useState('tab-1');
 
   const [maxRows, setMaxRows] = useState(1000);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(30);
   const [response, setResponse] = useState<QueryResponse | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [activeResultTab, setActiveResultTab] = useState(0);
@@ -273,7 +274,7 @@ export function QueryPage() {
     setResultsView(showPlan ? 'plan' : showStats ? 'performance' : 'results');
 
     try {
-      const result = await api.executeQuery(sessionId, sqlText, maxRows || undefined, 30, selectedDb || undefined, showPlan, showStats, controller.signal);
+      const result = await api.executeQuery(sessionId, sqlText, maxRows || undefined, timeoutSeconds, selectedDb || undefined, showPlan, showStats, controller.signal);
       setResponse(result);
 
       const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.totalRowsReturned, 0);
@@ -298,7 +299,7 @@ export function QueryPage() {
       setExecutionStartTime(null);
       abortRef.current = null;
     }
-  }, [sessionId, isFileSession, maxRows, selectedDb, hKey]);
+  }, [sessionId, isFileSession, maxRows, timeoutSeconds, selectedDb, hKey]);
 
   const executeCurrentStatement = useCallback(() => {
     const view = viewRef.current;
@@ -660,6 +661,14 @@ export function QueryPage() {
             <select value={maxRows} onChange={(e) => setMaxRows(Number(e.target.value))}
               className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary">
               {MAX_ROWS_OPTIONS.map((n) => <option key={n} value={n}>{n === 0 ? 'All' : n.toLocaleString()}</option>)}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+            Timeout:
+            <select value={timeoutSeconds} onChange={(e) => setTimeoutSeconds(Number(e.target.value))}
+              className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary">
+              {[10, 30, 60, 120, 300, 0].map((n) => <option key={n} value={n}>{n === 0 ? 'None' : `${n}s`}</option>)}
             </select>
           </label>
 
