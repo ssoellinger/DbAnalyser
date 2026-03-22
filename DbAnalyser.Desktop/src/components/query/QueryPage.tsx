@@ -17,11 +17,21 @@ import { api } from '../../api/client';
 import type { QueryResponse, QueryHistoryEntry, DatabaseSchema } from '../../api/types';
 
 const MAX_ROWS_OPTIONS = [100, 500, 1000, 5000, 10000];
-const HISTORY_KEY = 'dbanalyser-query-history';
-const SAVED_QUERIES_KEY = 'dbanalyser-saved-queries';
+const HISTORY_KEY_PREFIX = 'dbanalyser-query-history';
+const SAVED_QUERIES_KEY_PREFIX = 'dbanalyser-saved-queries';
 const MAX_HISTORY = 50;
 const MIN_EDITOR_HEIGHT = 80;
 const MIN_RESULTS_HEIGHT = 80;
+
+function historyKey(server: string | null): string {
+  const suffix = server ? `-${server.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+  return `${HISTORY_KEY_PREFIX}${suffix}`;
+}
+
+function savedQueriesKey(server: string | null): string {
+  const suffix = server ? `-${server.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+  return `${SAVED_QUERIES_KEY_PREFIX}${suffix}`;
+}
 
 // ── Types ──
 
@@ -46,26 +56,26 @@ interface PinnedResult {
 
 // ── Persistence helpers ──
 
-function loadHistory(): QueryHistoryEntry[] {
+function loadHistory(key: string): QueryHistoryEntry[] {
   try {
-    const raw = localStorage.getItem(HISTORY_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
-function saveHistory(entries: QueryHistoryEntry[]) {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY))); } catch {}
+function saveHistory(key: string, entries: QueryHistoryEntry[]) {
+  try { localStorage.setItem(key, JSON.stringify(entries.slice(0, MAX_HISTORY))); } catch {}
 }
 
-function loadSavedQueries(): SavedQuery[] {
+function loadSavedQueries(key: string): SavedQuery[] {
   try {
-    const raw = localStorage.getItem(SAVED_QUERIES_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
-function saveSavedQueries(queries: SavedQuery[]) {
-  try { localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(queries)); } catch {}
+function saveSavedQueries(key: string, queries: SavedQuery[]) {
+  try { localStorage.setItem(key, JSON.stringify(queries)); } catch {}
 }
 
 // ── SQL statement splitting ──
@@ -170,6 +180,11 @@ export function QueryPage() {
   const isFileSession = useStore((s) => s.isFileSession);
   const providerType = useStore((s) => s.providerType);
   const dbSchema = useStore((s) => s.result?.schema);
+  const serverName = useStore((s) => s.serverName);
+
+  // Connection-scoped storage keys
+  const hKey = useMemo(() => historyKey(serverName), [serverName]);
+  const sqKey = useMemo(() => savedQueriesKey(serverName), [serverName]);
 
   // Query tabs
   const [tabs, setTabs] = useState<QueryTab[]>([{ id: 'tab-1', title: 'Query 1', sql: '-- Write your SQL query here\n' }]);
@@ -180,12 +195,12 @@ export function QueryPage() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [activeResultTab, setActiveResultTab] = useState(0);
   const [resultsView, setResultsView] = useState<ResultsView>('results');
-  const [history, setHistory] = useState<QueryHistoryEntry[]>(loadHistory);
+  const [history, setHistory] = useState<QueryHistoryEntry[]>(() => loadHistory(hKey));
   const [showHistory, setShowHistory] = useState(false);
   const [databases, setDatabases] = useState<string[]>([]);
   const [selectedDb, setSelectedDb] = useState<string>('');
   const [editorHeightPct, setEditorHeightPct] = useState(40);
-  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(loadSavedQueries);
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(() => loadSavedQueries(sqKey));
   const [showSaved, setShowSaved] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveQueryName, setSaveQueryName] = useState('');
@@ -215,6 +230,12 @@ export function QueryPage() {
       setSelectedDb(currentDatabase ?? '');
     }).catch(() => {});
   }, [sessionId, isFileSession]);
+
+  // Reload history & saved queries when connection changes
+  useEffect(() => {
+    setHistory(loadHistory(hKey));
+    setSavedQueries(loadSavedQueries(sqKey));
+  }, [hKey, sqKey]);
 
   // ── Elapsed timer ──
   useEffect(() => {
@@ -266,7 +287,7 @@ export function QueryPage() {
       };
       setHistory((prev) => {
         const next = [entry, ...prev].slice(0, MAX_HISTORY);
-        saveHistory(next);
+        saveHistory(hKey, next);
         return next;
       });
     } catch (err) {
@@ -277,7 +298,7 @@ export function QueryPage() {
       setExecutionStartTime(null);
       abortRef.current = null;
     }
-  }, [sessionId, isFileSession, maxRows, selectedDb]);
+  }, [sessionId, isFileSession, maxRows, selectedDb, hKey]);
 
   const executeCurrentStatement = useCallback(() => {
     const view = viewRef.current;
@@ -340,7 +361,7 @@ export function QueryPage() {
     const entry: SavedQuery = { name: saveQueryName.trim(), sql: sqlText, savedAt: new Date().toISOString() };
     setSavedQueries((prev) => {
       const next = [entry, ...prev.filter((q) => q.name !== entry.name)];
-      saveSavedQueries(next);
+      saveSavedQueries(sqKey, next);
       return next;
     });
     setShowSaveDialog(false);
@@ -357,7 +378,7 @@ export function QueryPage() {
   const deleteSavedQuery = useCallback((name: string) => {
     setSavedQueries((prev) => {
       const next = prev.filter((q) => q.name !== name);
-      saveSavedQueries(next);
+      saveSavedQueries(sqKey, next);
       return next;
     });
   }, []);
