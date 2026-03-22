@@ -135,34 +135,48 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {(pageCount > 1 || isFiltering) && (
+      {(totalCount > 50 || isFiltering) && (
         <div className="flex items-center justify-between text-xs text-text-secondary">
           <span>
             {isFiltering
               ? `Showing ${rowStart}-${rowEnd} of ${filteredCount} matches (${totalCount} total)`
               : `${filteredCount} row${filteredCount !== 1 ? 's' : ''}`}
           </span>
-          {pageCount > 1 && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-                className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1">
+              Rows:
+              <select
+                value={table.getState().pagination.pageSize}
+                onChange={(e) => table.setPageSize(Number(e.target.value))}
+                className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary"
               >
-                Prev
-              </button>
-              <span>
-                Page {pageIndex + 1} of {pageCount}
-              </span>
-              <button
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-                className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
-              >
-                Next
-              </button>
-            </div>
-          )}
+                {[50, 100, 200, 1000].map((size) => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </label>
+            {pageCount > 1 && (
+              <>
+                <button
+                  onClick={() => table.previousPage()}
+                  disabled={!table.getCanPreviousPage()}
+                  className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+                >
+                  Prev
+                </button>
+                <span>
+                  Page {pageIndex + 1} of {pageCount}
+                </span>
+                <button
+                  onClick={() => table.nextPage()}
+                  disabled={!table.getCanNextPage()}
+                  className="px-2 py-1 rounded border border-border hover:bg-bg-hover disabled:opacity-30 transition-colors"
+                >
+                  Next
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

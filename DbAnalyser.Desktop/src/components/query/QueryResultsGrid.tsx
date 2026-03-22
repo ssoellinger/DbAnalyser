@@ -251,7 +251,7 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
       <DataTable
         data={data}
         columns={columns}
-        pageSize={50}
+        pageSize={200}
         searchable={data.length > 10}
         searchPlaceholder="Filter results..."
         enableColumnResizing
