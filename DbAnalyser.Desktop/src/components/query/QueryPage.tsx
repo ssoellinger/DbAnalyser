@@ -409,7 +409,7 @@ export function QueryPage() {
   const anyTruncated = response?.resultSets.some((rs) => rs.truncated) ?? false;
   const hasSchema = !!dbSchema;
   const hasMessages = (response?.messages?.length ?? 0) > 0;
-  const hasPlan = !!response?.executionPlan;
+  const hasPlan = !!response?.executionPlan || (!!response?.error && resultsView === 'plan');
   const hasIo = hasMessages && hasIoStats(response?.messages ?? []);
 
   return (
@@ -714,7 +714,12 @@ export function QueryPage() {
           )}
 
           {response && resultsView === 'plan' && (
-            <ExecutionPlanView planText={response.executionPlan ?? ''} providerType={providerType} />
+            response.error
+              ? <div className="bg-severity-error/10 border border-severity-error/30 rounded p-4 text-sm text-severity-error">
+                  <div className="font-medium mb-1">Execution Plan Error</div>
+                  <pre className="whitespace-pre-wrap font-mono text-xs">{response.error}</pre>
+                </div>
+              : <ExecutionPlanView planText={response.executionPlan ?? ''} providerType={providerType} />
           )}
 
           {response && resultsView === 'statistics' && !response.error && response.resultSets.length > 0 && (

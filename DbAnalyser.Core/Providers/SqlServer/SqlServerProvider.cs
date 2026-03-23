@@ -75,7 +75,7 @@ public class SqlServerProvider : IDbProvider
     {
         var messages = new List<string>();
 
-        // Plan-only mode: separate connection, return only the plan
+        // Plan-only mode: SET SHOWPLAN_TEXT ON (estimated plan, no execution)
         if (showPlan)
         {
             await using var planConn = new SqlConnection(connectionString);
