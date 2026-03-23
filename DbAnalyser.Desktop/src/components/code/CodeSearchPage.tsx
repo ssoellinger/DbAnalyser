@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef, useEffect, type JSX } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, type JSX } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
@@ -78,6 +79,7 @@ function CodeSearchContent() {
   const result = useStore((s) => s.result);
   const serverName = useStore((s) => s.serverName);
   const databaseName = useStore((s) => s.databaseName);
+  const isServerMode = useStore((s) => s.isServerMode);
   const historyKey = connKey(serverName, databaseName);
   const openTab = useCodeStore((s) => s.openTab);
   const navigate = useNavigate();
@@ -86,6 +88,7 @@ function CodeSearchContent() {
   const [isRegex, setIsRegex] = useState(false);
   const [isCaseSensitive, setIsCaseSensitive] = useState(false);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+  const [dbFilter, setDbFilter] = useState<string>('');
   const [regexError, setRegexError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState(() => loadHistory(historyKey));
@@ -142,22 +145,22 @@ function CodeSearchContent() {
   const allObjects = useMemo(() => {
     if (!result?.schema) return [];
     const schema = result.schema;
-    const items: { objectType: string; fullName: string; label: string; definition: string }[] = [];
+    const items: { objectType: string; fullName: string; label: string; definition: string; databaseName?: string }[] = [];
 
     for (const t of schema.tables) {
-      items.push({ objectType: 'Table', fullName: t.fullName, label: t.tableName, definition: generateTableDdl(t) });
+      items.push({ objectType: 'Table', fullName: t.fullName, label: t.tableName, definition: generateTableDdl(t), databaseName: t.databaseName });
     }
     for (const v of schema.views) {
-      items.push({ objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '' });
+      items.push({ objectType: 'View', fullName: v.fullName, label: v.viewName, definition: v.definition ?? '', databaseName: v.databaseName });
     }
     for (const p of schema.storedProcedures) {
-      items.push({ objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '' });
+      items.push({ objectType: 'Procedure', fullName: p.fullName, label: p.procedureName, definition: p.definition ?? '', databaseName: p.databaseName });
     }
     for (const f of schema.functions) {
-      items.push({ objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '' });
+      items.push({ objectType: 'Function', fullName: f.fullName, label: f.functionName, definition: f.definition ?? '', databaseName: f.databaseName });
     }
     for (const t of schema.triggers) {
-      items.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
+      items.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '', databaseName: t.databaseName });
     }
     for (const j of schema.jobs) {
       items.push({ objectType: 'Job', fullName: j.jobName, label: j.jobName, definition: generateJobDdl(j) });
@@ -165,6 +168,16 @@ function CodeSearchContent() {
 
     return items;
   }, [result]);
+
+  // Available databases (server mode)
+  const databases = useMemo(() => {
+    if (!isServerMode) return [];
+    const dbs = new Set<string>();
+    for (const obj of allObjects) {
+      if (obj.databaseName) dbs.add(obj.databaseName);
+    }
+    return Array.from(dbs).sort();
+  }, [isServerMode, allObjects]);
 
   // Build regex or plain matcher (uses debounced query for performance)
   const matcher = useMemo<{ regex: RegExp | null; error: string | null }>(() => {
@@ -200,6 +213,7 @@ function CodeSearchContent() {
     const matched: SearchResult[] = [];
     for (const obj of allObjects) {
       if (typeFilter.size > 0 && !typeFilter.has(obj.objectType)) continue;
+      if (dbFilter && obj.databaseName !== dbFilter) continue;
       if (!obj.definition) continue;
 
       const lines = obj.definition.split('\n');
@@ -226,16 +240,34 @@ function CodeSearchContent() {
 
     matched.sort((a, b) => b.totalMatches - a.totalMatches);
     return matched;
-  }, [allObjects, matcher.regex, typeFilter]);
+  }, [allObjects, matcher.regex, typeFilter, dbFilter]);
 
-  // Type counts for filter buttons
-  const typeCounts = useMemo(() => {
+  // All available object type counts (for pre-search filter)
+  const allTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const obj of allObjects) {
+      counts[obj.objectType] = (counts[obj.objectType] ?? 0) + 1;
+    }
+    return counts;
+  }, [allObjects]);
+
+  // Type counts from search results
+  const resultTypeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of results) {
       counts[r.objectType] = (counts[r.objectType] ?? 0) + 1;
     }
     return counts;
   }, [results]);
+
+  // Always show all types, but display result counts when searching
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const [type, total] of Object.entries(allTypeCounts)) {
+      counts[type] = query.trim() && !regexError ? (resultTypeCounts[type] ?? 0) : total;
+    }
+    return counts;
+  }, [allTypeCounts, resultTypeCounts, query, regexError]);
 
   const totalMatches = useMemo(
     () => results.reduce((sum, r) => sum + r.totalMatches, 0),
@@ -400,8 +432,25 @@ function CodeSearchContent() {
           </div>
         )}
 
+        {/* Database filter (server mode) */}
+        {isServerMode && databases.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-text-muted uppercase tracking-wider">Database:</span>
+            <select
+              value={dbFilter}
+              onChange={(e) => setDbFilter(e.target.value)}
+              className="bg-bg-card border border-border rounded px-2 py-1 text-xs text-text-primary"
+            >
+              <option value="">All databases</option>
+              {databases.map((db) => (
+                <option key={db} value={db}>{db}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Type filter chips */}
-        {query && !regexError && Object.keys(typeCounts).length > 0 && (
+        {Object.keys(typeCounts).length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] text-text-muted uppercase tracking-wider">Filter:</span>
             {Object.entries(typeCounts).map(([type, count]) => {
@@ -418,7 +467,7 @@ function CodeSearchContent() {
                   }`}
                 >
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-                  {type} ({count})
+                  {type}{count > 0 ? ` (${count})` : ''}
                 </button>
               );
             })}
@@ -427,31 +476,94 @@ function CodeSearchContent() {
       </div>
 
       {/* Results */}
-      <div className="flex-1 overflow-y-auto">
-        {!query.trim() && (
-          <div className="flex items-center justify-center h-full text-text-muted text-sm">
-            <div className="text-center space-y-2">
-              <div className="text-2xl">&#128270;</div>
-              <p>Search across all stored procedures, functions, views, and triggers</p>
-              <p className="text-[11px]">
-                Toggle <span className="font-mono bg-bg-card px-1 rounded">.*</span> for regex,{' '}
-                <span className="font-mono bg-bg-card px-1 rounded">Aa</span> for case-sensitive.
-                {history.length > 0 && ' Recent searches shown on focus.'}
-              </p>
-            </div>
-          </div>
-        )}
+      <ResultsList
+        results={results}
+        query={query}
+        regexError={regexError}
+        historyCount={history.length}
+        highlightCode={highlightCode}
+        openInCode={openInCode}
+      />
+    </div>
+  );
+}
 
-        {query.trim() && !regexError && results.length === 0 && (
-          <div className="flex items-center justify-center h-48 text-text-muted text-sm">
-            No matches found for "{query}"
-          </div>
-        )}
+// ── Virtualized results list ──
 
-        {results.map((item) => {
+function ResultsList({
+  results,
+  query,
+  regexError,
+  historyCount,
+  highlightCode,
+  openInCode,
+}: {
+  results: SearchResult[];
+  query: string;
+  regexError: string | null;
+  historyCount: number;
+  highlightCode: (text: string) => JSX.Element | string;
+  openInCode: (item: SearchResult, lineNum?: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Estimate row height: header (40px) + matchLines * 24px + overflow line
+  const getItemSize = useCallback((index: number) => {
+    const item = results[index];
+    const lines = Math.min(item.matchLines.length, 10);
+    const overflow = item.matchLines.length < item.totalMatches ? 24 : 0;
+    return 40 + lines * 24 + overflow;
+  }, [results]);
+
+  const virtualizer = useVirtualizer({
+    count: results.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: getItemSize,
+    overscan: 5,
+  });
+
+  if (!query.trim()) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
+        <div className="text-center space-y-2">
+          <div className="text-2xl">&#128270;</div>
+          <p>Search across all stored procedures, functions, views, triggers, and jobs</p>
+          <p className="text-[11px]">
+            Toggle <span className="font-mono bg-bg-card px-1 rounded">.*</span> for regex,{' '}
+            <span className="font-mono bg-bg-card px-1 rounded">Aa</span> for case-sensitive.
+            {historyCount > 0 && ' Recent searches shown on focus.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!regexError && results.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center h-48 text-text-muted text-sm">
+        No matches found for &ldquo;{query}&rdquo;
+      </div>
+    );
+  }
+
+  return (
+    <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const item = results[virtualRow.index];
           const color = OBJECT_TYPE_COLORS[item.objectType] ?? '#666';
           return (
-            <div key={item.fullName} className="border-b border-border/50">
+            <div
+              key={item.fullName}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+              className="border-b border-border/50"
+            >
               {/* Object header */}
               <div className="flex items-center gap-3 px-4 py-2.5 bg-bg-secondary/50">
                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
@@ -470,7 +582,7 @@ function CodeSearchContent() {
 
               {/* Matching lines */}
               <div className="bg-bg-primary">
-                {item.matchLines.map((ml, i) => (
+                {item.matchLines.slice(0, 10).map((ml, i) => (
                   <div
                     key={i}
                     className="flex items-start gap-3 px-4 py-1 hover:bg-bg-hover/30 transition-colors cursor-pointer"
