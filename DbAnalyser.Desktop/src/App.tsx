@@ -16,6 +16,7 @@ import { AiPage } from './components/ai/AiPage';
 import { CodePage } from './components/code/CodePage';
 import { CodeSearchPage } from './components/code/CodeSearchPage';
 import { QueryPage } from './components/query/QueryPage';
+import { DependencyExplorerPage } from './components/dependencies/DependencyExplorerPage';
 
 export default function App() {
   const sessionId = useStore((s) => s.sessionId);
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/dependencies" element={<DependenciesPage />} />
+        <Route path="/dep-explorer" element={<DependencyExplorerPage />} />
         <Route path="/erd" element={<ErdPage />} />
         <Route path="/lineage" element={<LineagePage />} />
         <Route path="/schema" element={<SchemaPage />} />

@@ -5,6 +5,7 @@ import type { AnalyzerName, AnalyzerStatus } from '../../api/types';
 const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: AnalyzerName }[] = [
   { path: '/dashboard', label: 'Dashboard', icon: '⊞' },
   { path: '/dependencies', label: 'Dependencies', icon: '⊶', analyzer: 'relationships' },
+  { path: '/dep-explorer', label: 'Dep Explorer', icon: '⊛', analyzer: 'relationships' },
   { path: '/erd', label: 'ERD', icon: '⊡', analyzer: 'schema' },
   { path: '/lineage', label: 'Lineage', icon: '⇢', analyzer: 'relationships' },
   { path: '/schema', label: 'Schema', icon: '⊟', analyzer: 'schema' },
