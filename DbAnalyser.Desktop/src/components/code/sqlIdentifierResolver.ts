@@ -1,5 +1,5 @@
 import type { DatabaseSchema } from '../../api/types';
-import { generateSynonymDdl } from './tableDdlGenerator';
+import { generateSynonymDdl, generateJobDdl } from './tableDdlGenerator';
 
 export interface ResolvedObject {
   objectType: string;  // Table, View, Procedure, Function, Trigger
@@ -129,6 +129,18 @@ export function buildIdentifierMap(schema: DatabaseSchema | null): Map<string, R
       definition: generateSynonymDdl(s),
     };
     addAllVariants(s.fullName, s.schemaName, s.synonymName, s.databaseName, obj);
+  }
+
+  // Jobs — server-level, no schema prefix
+  for (const j of schema.jobs) {
+    const obj: ResolvedObject = {
+      objectType: 'Job',
+      fullName: j.jobName,
+      label: j.jobName,
+      definition: generateJobDdl(j),
+    };
+    add(j.jobName, obj);
+    add(`[${j.jobName}]`, obj);
   }
 
   return map;

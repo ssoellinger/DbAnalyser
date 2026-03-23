@@ -4,7 +4,7 @@ import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import { useCodeStore } from './useCodeStore';
-import { generateTableDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl } from './tableDdlGenerator';
 import { useNavigate } from 'react-router-dom';
 
 interface SearchResult {
@@ -158,6 +158,9 @@ function CodeSearchContent() {
     }
     for (const t of schema.triggers) {
       items.push({ objectType: 'Trigger', fullName: t.fullName, label: t.triggerName, definition: t.definition ?? '' });
+    }
+    for (const j of schema.jobs) {
+      items.push({ objectType: 'Job', fullName: j.jobName, label: j.jobName, definition: generateJobDdl(j) });
     }
 
     return items;

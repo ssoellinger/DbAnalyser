@@ -34,7 +34,7 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
     const viewDeps = result?.relationships?.viewDependencies;
     if (!deps) return { callers: [] as ChainNode[], callees: [] as ChainNode[], hasCycles: false };
 
-    const procTypes = new Set(['Procedure', 'Function']);
+    const procTypes = new Set(['Procedure', 'Function', 'Job']);
 
     // Track external (cross-database) objects we discover
     const externalObjects = new Map<string, { objectType: string; database: string | null }>();

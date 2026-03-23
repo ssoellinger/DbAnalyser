@@ -1,5 +1,5 @@
 import type { DatabaseSchema } from '../../api/types';
-import { generateTableDdl } from './tableDdlGenerator';
+import { generateTableDdl, generateJobDdl } from './tableDdlGenerator';
 
 export interface SchemaObject {
   objectType: string;
@@ -49,6 +49,11 @@ export function buildObjectLookup(schema: DatabaseSchema | null): Map<string, Sc
     add(t.fullName, obj);
     add(t.fullName.toLowerCase(), obj);
     add(t.triggerName.toLowerCase(), obj);
+  }
+  for (const j of schema.jobs) {
+    const obj: SchemaObject = { objectType: 'Job', fullName: j.jobName, label: j.jobName, definition: generateJobDdl(j) };
+    add(j.jobName, obj);
+    add(j.jobName.toLowerCase(), obj);
   }
 
   return map;
