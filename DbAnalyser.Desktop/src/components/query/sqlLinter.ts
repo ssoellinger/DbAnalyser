@@ -172,6 +172,129 @@ export function sqlSemanticLinter(schema: SQLNamespace) {
       }
     }
 
+    // Syntax checks (run even without schema)
+    syntaxCheck(doc, diagnostics);
+
     return diagnostics;
   }, { delay: 500 });
+}
+
+// ── Syntax checks ──
+
+// Common keyword typos → suggested correction
+const KEYWORD_TYPOS: Record<string, string> = {
+  'selec': 'SELECT', 'slect': 'SELECT', 'selet': 'SELECT', 'selcet': 'SELECT',
+  'form': 'FROM', 'fom': 'FROM', 'frome': 'FROM', 'frm': 'FROM',
+  'wehre': 'WHERE', 'whre': 'WHERE', 'wher': 'WHERE', 'were': 'WHERE',
+  'jion': 'JOIN', 'jon': 'JOIN', 'joing': 'JOIN',
+  'isert': 'INSERT', 'inser': 'INSERT', 'insrt': 'INSERT', 'insret': 'INSERT',
+  'udpate': 'UPDATE', 'upate': 'UPDATE', 'updte': 'UPDATE', 'upadte': 'UPDATE',
+  'delte': 'DELETE', 'deleet': 'DELETE', 'delet': 'DELETE',
+  'gruop': 'GROUP', 'gropu': 'GROUP', 'goup': 'GROUP',
+  'oder': 'ORDER', 'orde': 'ORDER', 'ordr': 'ORDER',
+  'hvng': 'HAVING', 'havin': 'HAVING', 'havng': 'HAVING',
+  'distint': 'DISTINCT', 'distnct': 'DISTINCT', 'distict': 'DISTINCT',
+  'valus': 'VALUES', 'vaules': 'VALUES', 'vlues': 'VALUES',
+  'crate': 'CREATE', 'creat': 'CREATE', 'craete': 'CREATE',
+  'atler': 'ALTER', 'latr': 'ALTER',
+  'tabel': 'TABLE', 'tabke': 'TABLE',
+  'porcedure': 'PROCEDURE', 'procedur': 'PROCEDURE', 'proceudre': 'PROCEDURE',
+  'fuction': 'FUNCTION', 'fucntion': 'FUNCTION', 'funtion': 'FUNCTION',
+  'bigin': 'BEGIN', 'begn': 'BEGIN',
+  'comit': 'COMMIT', 'commti': 'COMMIT',
+  'roolback': 'ROLLBACK', 'rolback': 'ROLLBACK',
+  'trasaction': 'TRANSACTION', 'transction': 'TRANSACTION',
+  'excec': 'EXEC', 'exce': 'EXEC',
+  'declre': 'DECLARE', 'decalre': 'DECLARE', 'delcare': 'DECLARE',
+  'retrun': 'RETURN', 'reutrn': 'RETURN',
+};
+
+function syntaxCheck(doc: string, diagnostics: Diagnostic[]) {
+  // Strip comments and strings for analysis
+  const masked = doc
+    .replace(/'[^']*'/g, (m) => ' '.repeat(m.length))
+    .replace(/--[^\n]*/g, (m) => ' '.repeat(m.length))
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length));
+
+  // 1. Keyword typo detection
+  const wordRe = /\b([a-zA-Z_]\w*)\b/g;
+  let match;
+  while ((match = wordRe.exec(masked)) !== null) {
+    const word = match[1];
+    const lower = word.toLowerCase();
+    const suggestion = KEYWORD_TYPOS[lower];
+    if (suggestion) {
+      diagnostics.push({
+        from: match.index,
+        to: match.index + word.length,
+        severity: 'error',
+        message: `Did you mean ${suggestion}?`,
+      });
+    }
+  }
+
+  // 2. Unmatched parentheses
+  let parenDepth = 0;
+  let lastOpenParen = -1;
+  for (let i = 0; i < masked.length; i++) {
+    if (masked[i] === '(') {
+      if (parenDepth === 0) lastOpenParen = i;
+      parenDepth++;
+    } else if (masked[i] === ')') {
+      parenDepth--;
+      if (parenDepth < 0) {
+        diagnostics.push({
+          from: i,
+          to: i + 1,
+          severity: 'error',
+          message: 'Unmatched closing parenthesis',
+        });
+        parenDepth = 0;
+      }
+    }
+  }
+  if (parenDepth > 0 && lastOpenParen >= 0) {
+    diagnostics.push({
+      from: lastOpenParen,
+      to: lastOpenParen + 1,
+      severity: 'error',
+      message: `Unmatched opening parenthesis (${parenDepth} unclosed)`,
+    });
+  }
+
+  // 3. Unclosed string literals (check original doc, not masked)
+  let inString = false;
+  let stringStart = 0;
+  for (let i = 0; i < doc.length; i++) {
+    // Skip comments
+    if (!inString && doc[i] === '-' && doc[i + 1] === '-') {
+      while (i < doc.length && doc[i] !== '\n') i++;
+      continue;
+    }
+    if (!inString && doc[i] === '/' && doc[i + 1] === '*') {
+      i += 2;
+      while (i + 1 < doc.length && !(doc[i] === '*' && doc[i + 1] === '/')) i++;
+      i++;
+      continue;
+    }
+
+    if (doc[i] === '\'') {
+      if (inString) {
+        // Check for escaped quote ''
+        if (i + 1 < doc.length && doc[i + 1] === '\'') { i++; continue; }
+        inString = false;
+      } else {
+        inString = true;
+        stringStart = i;
+      }
+    }
+  }
+  if (inString) {
+    diagnostics.push({
+      from: stringStart,
+      to: stringStart + 1,
+      severity: 'error',
+      message: 'Unclosed string literal',
+    });
+  }
 }
