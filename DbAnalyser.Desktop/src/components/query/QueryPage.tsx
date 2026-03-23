@@ -43,6 +43,7 @@ export function QueryPage() {
   const providerType = useStore((s) => s.providerType);
   const dbSchema = useStore((s) => s.result?.schema);
   const serverName = useStore((s) => s.serverName);
+  const disconnect = useStore((s) => s.disconnect);
 
   // Connection-scoped storage keys
   const hKey = useMemo(() => historyKey(serverName), [serverName]);
@@ -71,6 +72,7 @@ export function QueryPage() {
   const [elapsedDisplay, setElapsedDisplay] = useState('');
   const [pinnedResults, setPinnedResults] = useState<PinnedResult[]>([]);
   const [transactionState, setTransactionState] = useState<'none' | 'active'>('none');
+  const [sessionLost, setSessionLost] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -181,7 +183,13 @@ export function QueryPage() {
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
-      setResponse({ resultSets: [], elapsedMs: 0, error: err instanceof Error ? err.message : 'Query failed' });
+      const msg = err instanceof Error ? err.message : 'Query failed';
+      if (msg.toLowerCase().includes('session not found') || msg.toLowerCase().includes('connect first')) {
+        setResponse({ resultSets: [], elapsedMs: 0, error: 'Session expired. Please reconnect.' });
+        setSessionLost(true);
+      } else {
+        setResponse({ resultSets: [], elapsedMs: 0, error: msg });
+      }
     } finally {
       setIsExecuting(false);
       setExecutionStartTime(null);
@@ -449,10 +457,23 @@ export function QueryPage() {
   return (
     <div className="flex flex-col h-full" ref={splitContainerRef}>
       {/* Warning banner */}
-      <div className="bg-amber-900/30 border-b border-amber-700/50 px-4 py-1.5 text-xs text-amber-300 flex items-center gap-2">
-        <span>&#9888;</span>
-        <span>Queries execute directly against the database. Use caution with UPDATE, DELETE, and DROP statements.</span>
-      </div>
+      {sessionLost ? (
+        <div className="bg-severity-error/20 border-b border-severity-error/50 px-4 py-2 text-xs text-severity-error flex items-center gap-3">
+          <span>&#9888;</span>
+          <span>Session expired. The connection to the database was lost.</span>
+          <button
+            onClick={disconnect}
+            className="px-3 py-1 rounded border border-severity-error/50 hover:bg-severity-error/20 transition-colors font-medium"
+          >
+            Reconnect
+          </button>
+        </div>
+      ) : (
+        <div className="bg-amber-900/30 border-b border-amber-700/50 px-4 py-1.5 text-xs text-amber-300 flex items-center gap-2">
+          <span>&#9888;</span>
+          <span>Queries execute directly against the database. Use caution with UPDATE, DELETE, and DROP statements.</span>
+        </div>
+      )}
 
       {/* Editor section */}
       <div className="flex-shrink-0" style={{ height: `${editorHeightPct}%`, minHeight: MIN_EDITOR_HEIGHT }}>
