@@ -40,6 +40,9 @@ public class SqlRowLimiterTests
     [InlineData("SELECT a.*, b.Name FROM Users a JOIN Roles b ON a.RoleId = b.Id", 1000, "SELECT TOP(1000) a.*, b.Name FROM Users a JOIN Roles b ON a.RoleId = b.Id")]
     // SELECT INTO
     [InlineData("SELECT * INTO #temp FROM Users", 1000, "SELECT TOP(1000) * INTO #temp FROM Users")]
+    // Multi-statement — should NOT inject TOP (multiple statements)
+    [InlineData("SELECT * FROM A;\nSELECT * FROM B;", 1000, "SELECT * FROM A;\nSELECT * FROM B;")]
+    [InlineData("-- comment\nSELECT * FROM A;\nSELECT * FROM B;", 1000, "-- comment\nSELECT * FROM A;\nSELECT * FROM B;")]
     public void ApplyTopForSqlServer_Works(string input, int maxRows, string expected)
     {
         var result = SqlRowLimiter.ApplyTopForSqlServer(input, maxRows);

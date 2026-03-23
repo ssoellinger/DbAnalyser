@@ -139,6 +139,32 @@ export function QueryPage() {
       const result = await api.executeQuery(sessionId, sqlText, maxRows || undefined, timeoutSeconds, selectedDb || undefined, showPlan, showStats, controller.signal);
       setResponse(result);
 
+      // Jump to error location if possible
+      if (result.error) {
+        const view = viewRef.current;
+        if (view) {
+          const doc = view.state.doc.toString();
+          // Try explicit "Line N" from SQL Server
+          const lm = result.error.match(/\bLine\s+(\d+)\b/i);
+          if (lm) {
+            const lineNum = Math.min(parseInt(lm[1]), view.state.doc.lines);
+            const lineInfo = view.state.doc.line(lineNum);
+            view.dispatch({ selection: { anchor: lineInfo.from }, scrollIntoView: true });
+          } else {
+            // Fallback: find the object name mentioned in the error
+            const objMatch = result.error.match(/(?:Invalid object name|Invalid column name|Could not find)\s+'([^']+)'/i)
+              ?? result.error.match(/object\s+'([^']+)'/i);
+            if (objMatch) {
+              const name = objMatch[1];
+              const idx = doc.toLowerCase().indexOf(name.toLowerCase());
+              if (idx >= 0) {
+                view.dispatch({ selection: { anchor: idx, head: idx + name.length }, scrollIntoView: true });
+              }
+            }
+          }
+        }
+      }
+
       const totalRows = result.resultSets.reduce((sum, rs) => sum + rs.totalRowsReturned, 0);
       const entry: QueryHistoryEntry = {
         sql: sqlText.length > 500 ? sqlText.slice(0, 500) + '...' : sqlText,
@@ -738,12 +764,49 @@ export function QueryPage() {
             <IoStatsView messages={response.messages ?? []} />
           )}
 
-          {response && response.error && resultsView === 'results' && (
-            <div className="bg-severity-error/10 border border-severity-error/30 rounded p-4 text-sm text-severity-error">
-              <div className="font-medium mb-1">Query Error</div>
-              <pre className="whitespace-pre-wrap font-mono text-xs">{response.error}</pre>
-            </div>
-          )}
+          {response && response.error && resultsView === 'results' && (() => {
+            const error = response.error!;
+            // Parse line number from SQL Server error
+            const lineMatch = error.match(/\bLine\s+(\d+)\b/i);
+            // Fallback: find object name in error
+            const objMatch = !lineMatch
+              ? (error.match(/(?:Invalid object name|Invalid column name|Could not find)\s+'([^']+)'/i)
+                ?? error.match(/object\s+'([^']+)'/i))
+              : null;
+
+            const goToError = () => {
+              const view = viewRef.current;
+              if (!view) return;
+              if (lineMatch) {
+                const lineInfo = view.state.doc.line(Math.min(parseInt(lineMatch[1]), view.state.doc.lines));
+                view.dispatch({ selection: { anchor: lineInfo.from }, scrollIntoView: true });
+              } else if (objMatch) {
+                const idx = view.state.doc.toString().toLowerCase().indexOf(objMatch[1].toLowerCase());
+                if (idx >= 0) view.dispatch({ selection: { anchor: idx, head: idx + objMatch[1].length }, scrollIntoView: true });
+              }
+              view.focus();
+            };
+
+            const hasLocation = !!lineMatch || !!objMatch;
+
+            return (
+              <div className="bg-severity-error/10 border border-severity-error/30 rounded p-4 text-sm text-severity-error">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-medium">Query Error</span>
+                  {hasLocation && (
+                    <button
+                      onClick={goToError}
+                      className="px-1.5 py-0.5 text-xs rounded border border-severity-error/40 hover:bg-severity-error/20 transition-colors"
+                      title="Jump to error location"
+                    >
+                      {lineMatch ? `Line ${lineMatch[1]}` : `Go to ${objMatch![1]}`}
+                    </button>
+                  )}
+                </div>
+                <pre className="whitespace-pre-wrap font-mono text-xs">{error}</pre>
+              </div>
+            );
+          })()}
 
           {/* Pinned results */}
           {pinnedResults.length > 0 && (

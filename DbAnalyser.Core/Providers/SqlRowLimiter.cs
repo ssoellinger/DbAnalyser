@@ -59,6 +59,48 @@ public static partial class SqlRowLimiter
     }
 
     /// <summary>
+    /// Check if SQL contains multiple statements (semicolon followed by another statement keyword).
+    /// Ignores semicolons inside strings, comments, and at the very end.
+    /// </summary>
+    private static bool IsMultiStatement(string sql)
+    {
+        var i = 0;
+        var foundSemicolon = false;
+
+        while (i < sql.Length)
+        {
+            var ch = sql[i];
+
+            // Skip string literals
+            if (ch == '\'') { i++; while (i < sql.Length && sql[i] != '\'') i++; i++; continue; }
+            // Skip line comments
+            if (ch == '-' && i + 1 < sql.Length && sql[i + 1] == '-') { while (i < sql.Length && sql[i] != '\n') i++; continue; }
+            // Skip block comments
+            if (ch == '/' && i + 1 < sql.Length && sql[i + 1] == '*') { i += 2; while (i + 1 < sql.Length && !(sql[i] == '*' && sql[i + 1] == '/')) i++; i += 2; continue; }
+
+            if (ch == ';')
+            {
+                foundSemicolon = true;
+                i++;
+                continue;
+            }
+
+            // After a semicolon, check if there's a real statement keyword
+            if (foundSemicolon && char.IsLetter(ch))
+            {
+                var rest = sql[i..];
+                if (Regex.IsMatch(rest, @"^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXEC|EXECUTE|WITH|MERGE|TRUNCATE|DECLARE|SET|IF|WHILE|BEGIN)\b", RegexOptions.IgnoreCase))
+                    return true;
+                foundSemicolon = false;
+            }
+
+            i++;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Find the position of the outermost SELECT keyword — the one that's NOT inside parentheses.
     /// For CTEs (WITH ... AS (...) SELECT ...), this finds the final SELECT after all CTE definitions.
     /// Returns -1 if no outer SELECT found.
@@ -138,6 +180,9 @@ public static partial class SqlRowLimiter
 
         var codePart = sql[codeStart..];
 
+        // Skip multi-statement batches — don't inject TOP when there are multiple statements
+        if (IsMultiStatement(codePart)) return sql;
+
         // Skip non-SELECT/non-WITH statements
         if (NonSelectRegex().IsMatch(codePart)) return sql;
 
@@ -184,6 +229,9 @@ public static partial class SqlRowLimiter
         if (codeStart >= sql.Length) return sql;
 
         var codePart = sql[codeStart..];
+
+        // Skip multi-statement batches
+        if (IsMultiStatement(codePart)) return sql;
 
         // Skip non-SELECT/non-WITH statements
         if (NonSelectRegex().IsMatch(codePart)) return sql;
