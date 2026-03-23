@@ -32,6 +32,26 @@ Available as a **desktop app** (Electron) with interactive visualizations or as 
 - Encrypted credential storage via OS keychain
 - Connection history
 
+### Query Engine
+
+- **SQL editor** with schema-aware IntelliSense, syntax highlighting, and SQL formatting
+- **Multiple query tabs** with independent state
+- Execute full query (Ctrl+Enter) or single statement at cursor (Ctrl+D)
+- **Database switching** dropdown for cross-database queries
+- **Configurable max rows** (100–10,000 or All) with smart `TOP`/`LIMIT` injection
+- **Configurable timeout** (10s–300s or None)
+- **Execution plan** tree view with color-coded operators and scan warnings
+- **STATISTICS IO** (opt-in) with structured table showing logical/physical reads per table
+- **Column statistics** tab — min, max, avg, distinct count, null % per column
+- **Export results** as CSV, JSON, or SQL INSERT (download or clipboard)
+- **Virtual scrolling** with paginated results (50/100/200/1000 rows per page)
+- **Search & filter** results with match count and text highlighting
+- **Transaction support** — BEGIN, COMMIT, ROLLBACK with visual indicator
+- **Query history** scoped per connection with database name
+- **Save & load** named queries per connection
+- **Pin results** for side-by-side comparison (up to 3)
+- Duplicate column resolution for JOINs (shows `Table.Column`)
+
 ### CLI
 
 - Console output with formatted tables (Spectre.Console)
@@ -51,7 +71,8 @@ Available as a **desktop app** (Electron) with interactive visualizations or as 
 | API | ASP.NET Core Web API, SignalR, Serilog |
 | Desktop | Electron 40, React 19, TypeScript 5, Vite 7, Tailwind CSS 4 |
 | State | Zustand 5 |
-| Visualizations | React Flow 12 (ERD), Dagre 2 (force graph), TanStack React Table 8 |
+| Visualizations | React Flow 12 (ERD), Dagre 2 (force graph), TanStack React Table 8, TanStack Virtual 3 |
+| Editor | CodeMirror 6 (SQL syntax, autocomplete), sql-formatter |
 | CLI | System.CommandLine, Spectre.Console |
 
 ## Project Structure
