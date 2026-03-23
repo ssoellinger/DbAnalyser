@@ -7,6 +7,8 @@ import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } 
 import { search, highlightSelectionMatches } from '@codemirror/search';
 import { defaultKeymap, history as cmHistory, historyKeymap } from '@codemirror/commands';
 import { format as formatSql } from 'sql-formatter';
+import { lintGutter } from '@codemirror/lint';
+import { sqlSemanticLinter } from './sqlLinter';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from '../code/codemirrorTheme';
 import { QueryResultsGrid } from './QueryResultsGrid';
 import { ExecutionPlanView } from './ExecutionPlanView';
@@ -24,6 +26,7 @@ import {
 } from './queryHelpers';
 
 const sqlCompartment = new Compartment();
+const lintCompartment = new Compartment();
 
 interface PinnedResult {
   id: string;
@@ -325,6 +328,8 @@ export function QueryPage() {
     highlightSelectionMatches(),
     autocompletion({ defaultKeymap: true, activateOnTyping: true }),
     sqlCompartment.of(sql({ dialect: sqlDialect, schema: sqlSchema })),
+    lintCompartment.of(sqlSemanticLinter(sqlSchema)),
+    lintGutter(),
     dbAnalyserEditorTheme,
     dbAnalyserHighlighting,
     keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap, ...completionKeymap]),
@@ -345,7 +350,10 @@ export function QueryPage() {
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    view.dispatch({ effects: sqlCompartment.reconfigure(sql({ dialect: sqlDialect, schema: sqlSchema })) });
+    view.dispatch({ effects: [
+      sqlCompartment.reconfigure(sql({ dialect: sqlDialect, schema: sqlSchema })),
+      lintCompartment.reconfigure(sqlSemanticLinter(sqlSchema)),
+    ] });
   }, [sqlSchema, sqlDialect]);
 
   // ── Keyboard shortcuts ──
