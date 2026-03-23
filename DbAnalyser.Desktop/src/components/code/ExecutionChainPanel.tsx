@@ -17,6 +17,8 @@ interface ChainNode {
   depth: number;
   children: ChainNode[];
   isCycle?: boolean;
+  isExternal?: boolean;
+  externalDatabase?: string;
 }
 
 export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPanelProps) {
@@ -34,33 +36,47 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
 
     const procTypes = new Set(['Procedure', 'Function']);
 
+    // Track external (cross-database) objects we discover
+    const externalObjects = new Map<string, { objectType: string; database: string | null }>();
+
     // Build adjacency: who calls whom (filtered to procs/functions only)
-    const callsMap = new Map<string, Set<string>>(); // from -> calls (dependsOn, filtered to procs/funcs)
+    const callsMap = new Map<string, Set<string>>(); // from -> calls
     const calledByMap = new Map<string, Set<string>>(); // to -> called by
 
     for (const dep of deps) {
       if (!procTypes.has(dep.objectType)) continue;
       for (const target of dep.dependsOn) {
         const targetObj = objectLookup.get(target);
-        if (!targetObj || !procTypes.has(targetObj.objectType)) continue;
-        if (!callsMap.has(dep.fullName)) callsMap.set(dep.fullName, new Set());
-        callsMap.get(dep.fullName)!.add(target);
-        if (!calledByMap.has(target)) calledByMap.set(target, new Set());
-        calledByMap.get(target)!.add(dep.fullName);
+        if (targetObj && procTypes.has(targetObj.objectType)) {
+          if (!callsMap.has(dep.fullName)) callsMap.set(dep.fullName, new Set());
+          callsMap.get(dep.fullName)!.add(target);
+          if (!calledByMap.has(target)) calledByMap.set(target, new Set());
+          calledByMap.get(target)!.add(dep.fullName);
+        }
       }
     }
 
-    // Also use viewDependencies for more complete picture
+    // Also use viewDependencies for more complete picture (including cross-database)
     if (viewDeps) {
       for (const od of viewDeps) {
         if (!procTypes.has(od.fromType)) continue;
-        const targetObj = objectLookup.get(od.toFullName);
-        if (!targetObj || !procTypes.has(targetObj.objectType)) continue;
         const from = od.fromFullName;
-        if (!callsMap.has(from)) callsMap.set(from, new Set());
-        callsMap.get(from)!.add(od.toFullName);
-        if (!calledByMap.has(od.toFullName)) calledByMap.set(od.toFullName, new Set());
-        calledByMap.get(od.toFullName)!.add(from);
+        const targetObj = objectLookup.get(od.toFullName);
+
+        if (targetObj && procTypes.has(targetObj.objectType)) {
+          // Local proc/function
+          if (!callsMap.has(from)) callsMap.set(from, new Set());
+          callsMap.get(from)!.add(od.toFullName);
+          if (!calledByMap.has(od.toFullName)) calledByMap.set(od.toFullName, new Set());
+          calledByMap.get(od.toFullName)!.add(from);
+        } else if (!targetObj && (od.isCrossDatabase || od.toDatabase)) {
+          // Cross-database object — include as external
+          if (!callsMap.has(from)) callsMap.set(from, new Set());
+          callsMap.get(from)!.add(od.toFullName);
+          if (!calledByMap.has(od.toFullName)) calledByMap.set(od.toFullName, new Set());
+          calledByMap.get(od.toFullName)!.add(from);
+          externalObjects.set(od.toFullName, { objectType: od.toType ?? 'Procedure', database: od.toDatabase });
+        }
       }
     }
 
@@ -93,19 +109,40 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
       const nodes: ChainNode[] = [];
       for (const name of neighbors) {
         const obj = objectLookup.get(name);
-        if (!obj) continue;
+        const ext = externalObjects.get(name);
+
+        if (!obj && !ext) continue;
+
         const isCycle = seen.has(name);
         const newSeen = new Set(seen);
         newSeen.add(name);
-        nodes.push({
-          fullName: name,
-          objectType: obj.objectType,
-          label: obj.label,
-          definition: obj.definition,
-          depth: depth + 1,
-          children: isCycle ? [] : buildTree(name, adj, depth + 1, newSeen),
-          isCycle,
-        });
+
+        if (obj) {
+          nodes.push({
+            fullName: name,
+            objectType: obj.objectType,
+            label: obj.label,
+            definition: obj.definition,
+            depth: depth + 1,
+            children: isCycle ? [] : buildTree(name, adj, depth + 1, newSeen),
+            isCycle,
+          });
+        } else if (ext) {
+          // Extract short label from full name
+          const parts = name.split('.');
+          const label = parts.length > 1 ? parts.slice(-2).join('.') : name;
+          nodes.push({
+            fullName: name,
+            objectType: ext.objectType,
+            label,
+            definition: '',
+            depth: depth + 1,
+            children: isCycle ? [] : buildTree(name, adj, depth + 1, newSeen),
+            isCycle,
+            isExternal: true,
+            externalDatabase: ext.database ?? undefined,
+          });
+        }
       }
       return nodes.sort((a, b) => a.fullName.localeCompare(b.fullName));
     }
@@ -121,6 +158,7 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
   if (total === 0) return null;
 
   function handleClick(node: ChainNode) {
+    if (node.isExternal) return; // Can't navigate to external objects
     openTab({
       objectType: node.objectType,
       fullName: node.fullName,
@@ -131,17 +169,26 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
 
   function renderTree(nodes: ChainNode[]): React.ReactNode {
     return nodes.map((node) => {
-      const color = OBJECT_TYPE_COLORS[node.objectType] ?? '#666';
+      const color = node.isExternal
+        ? OBJECT_TYPE_COLORS['External'] ?? '#ff6b6b'
+        : OBJECT_TYPE_COLORS[node.objectType] ?? '#666';
       return (
         <div key={node.fullName} className="ml-3">
           <button
             onClick={() => handleClick(node)}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-text-secondary hover:text-text-primary hover:bg-bg-hover/50 transition-colors"
-            title={`${node.fullName} (${node.objectType})`}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+              node.isExternal
+                ? 'text-text-muted cursor-default'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover/50 cursor-pointer'
+            }`}
+            title={`${node.fullName} (${node.objectType}${node.isExternal ? ` — ${node.externalDatabase ?? 'external'}` : ''})`}
           >
             <span className="text-text-muted">{'\u251C'}</span>
             <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-            <span>{node.label}</span>
+            <span className={node.isExternal ? 'italic' : ''}>{node.label}</span>
+            {node.isExternal && (
+              <span className="text-[9px] text-text-muted">({node.externalDatabase ?? 'ext'})</span>
+            )}
             {node.isCycle && <span className="text-severity-warning text-[9px]">(cycle)</span>}
           </button>
           {node.children.length > 0 && renderTree(node.children)}
