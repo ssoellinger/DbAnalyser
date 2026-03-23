@@ -327,36 +327,44 @@ export function ObjectExplorer() {
       <div className="flex-1 overflow-y-auto py-1">
         {databases ? (
           /* Server mode: Database > Type > Objects */
-          databases.map((db) => {
-            const dbKey = `db:${db}`;
-            const isDbCollapsed = collapsed[dbKey];
-            const dbItemCount = Object.values(filteredGroups).reduce(
-              (sum, items) => sum + items.filter((i) => i.databaseName === db).length, 0
-            );
-            if (dbItemCount === 0) return null;
+          <>
+            {databases.map((db) => {
+              const dbKey = `db:${db}`;
+              const isDbCollapsed = collapsed[dbKey];
+              const dbItemCount = Object.values(filteredGroups).reduce(
+                (sum, items) => sum + items.filter((i) => i.databaseName === db).length, 0
+              );
+              if (dbItemCount === 0) return null;
 
-            return (
-              <div key={db}>
-                <button
-                  onClick={() => toggleGroup(dbKey)}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors font-medium"
-                >
-                  <span className="text-[10px] text-text-muted w-3">{isDbCollapsed ? '▸' : '▾'}</span>
-                  <span className="text-accent">⊛</span>
-                  <span>{db}</span>
-                  <span className="ml-auto text-[10px] text-text-muted">{dbItemCount}</span>
-                </button>
+              return (
+                <div key={db}>
+                  <button
+                    onClick={() => toggleGroup(dbKey)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors font-medium"
+                  >
+                    <span className="text-[10px] text-text-muted w-3">{isDbCollapsed ? '▸' : '▾'}</span>
+                    <span className="text-accent">⊛</span>
+                    <span>{db}</span>
+                    <span className="ml-auto text-[10px] text-text-muted">{dbItemCount}</span>
+                  </button>
 
-                {!isDbCollapsed &&
-                  GROUP_ORDER.map((group) => {
-                    const dbItems = (filteredGroups[group] ?? []).filter((i) => i.databaseName === db);
-                    if (dbItems.length === 0) return null;
-                    return renderTypeGroup(`${dbKey}:${group}`, group, dbItems, 24);
-                  })
-                }
-              </div>
-            );
-          })
+                  {!isDbCollapsed &&
+                    GROUP_ORDER.map((group) => {
+                      const dbItems = (filteredGroups[group] ?? []).filter((i) => i.databaseName === db);
+                      if (dbItems.length === 0) return null;
+                      return renderTypeGroup(`${dbKey}:${group}`, group, dbItems, 24);
+                    })
+                  }
+                </div>
+              );
+            })}
+            {/* Server-level objects (Jobs) — no databaseName */}
+            {GROUP_ORDER.map((group) => {
+              const serverItems = (filteredGroups[group] ?? []).filter((i) => !i.databaseName);
+              if (serverItems.length === 0) return null;
+              return renderTypeGroup(`server:${group}`, group, serverItems, 12);
+            })}
+          </>
         ) : (
           /* Single DB mode: Type > Objects */
           GROUP_ORDER.filter((g) => filteredGroups[g]?.length).map((group) =>
