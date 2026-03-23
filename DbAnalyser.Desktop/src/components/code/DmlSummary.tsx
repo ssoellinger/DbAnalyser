@@ -165,6 +165,9 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
           {regularEntries.map((entry) => {
             const resolved = objectLookup.get(entry.tableName.toLowerCase());
             const isClickable = !!resolved;
+            const parts = entry.tableName.split('.');
+            const isCrossDb = parts.length >= 3;
+            const dbName = isCrossDb ? parts[0] : null;
             const displayName = resolved ? resolved.fullName : entry.tableName;
 
             return (
@@ -178,8 +181,13 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
                     {displayName}
                   </button>
                 ) : (
-                  <span className="text-text-secondary font-medium" title={entry.tableName}>
+                  <span className={`font-medium ${isCrossDb ? 'text-text-muted italic' : 'text-text-secondary'}`} title={entry.tableName}>
                     {displayName}
+                  </span>
+                )}
+                {isCrossDb && (
+                  <span className="px-1 py-px rounded text-[8px] font-bold" style={{ backgroundColor: '#ff6b6b20', color: '#ff6b6b' }}>
+                    {dbName}
                   </span>
                 )}
                 <span className="flex gap-0.5">

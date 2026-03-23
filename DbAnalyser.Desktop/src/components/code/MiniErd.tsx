@@ -139,15 +139,36 @@ function MiniErdInner({ fullName, onClose, onNavigate }: MiniErdProps) {
     for (const name of neighborNames) {
       if (name === fullName) continue;
       const table = tableMap.get(name);
-      if (!table) continue;
-      nodes.push({
-        id: table.fullName,
-        type: 'miniTableNode',
-        position: { x: 0, y: 0 },
-        data: { table, color: OBJECT_TYPE_COLORS.Table, isCenter: false },
-        width: 220,
-        height: 32 + Math.min(table.columns.length, 9) * 20,
-      });
+      if (table) {
+        nodes.push({
+          id: table.fullName,
+          type: 'miniTableNode',
+          position: { x: 0, y: 0 },
+          data: { table, color: OBJECT_TYPE_COLORS.Table, isCenter: false },
+          width: 220,
+          height: 32 + Math.min(table.columns.length, 9) * 20,
+        });
+      } else {
+        // Cross-database or unresolved table — create placeholder node
+        const parts = name.split('.');
+        const placeholderTable: TableInfo = {
+          schemaName: parts.length >= 2 ? parts[parts.length - 2] : '',
+          tableName: parts[parts.length - 1],
+          fullName: name,
+          columns: [],
+          indexes: [],
+          foreignKeys: [],
+          databaseName: parts.length >= 3 ? parts[0] : undefined,
+        };
+        nodes.push({
+          id: name,
+          type: 'miniTableNode',
+          position: { x: 0, y: 0 },
+          data: { table: placeholderTable, color: OBJECT_TYPE_COLORS.External ?? '#ff6b6b', isCenter: false },
+          width: 220,
+          height: 32,
+        });
+      }
     }
 
     const nodeSet = new Set(nodes.map((n) => n.id));
@@ -204,15 +225,14 @@ function MiniErdInner({ fullName, onClose, onNavigate }: MiniErdProps) {
   const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
     if (!schema) return;
     const table = schema.tables.find((t) => t.fullName === node.id);
-    if (table) {
-      onNavigate({
-        objectType: 'Table',
-        fullName: table.fullName,
-        label: table.tableName,
-        definition: generateTableDdl(table),
-      });
-      onClose();
-    }
+    if (!table) return; // External/cross-db table — can't navigate
+    onNavigate({
+      objectType: 'Table',
+      fullName: table.fullName,
+      label: table.tableName,
+      definition: generateTableDdl(table),
+    });
+    onClose();
   }, [schema, onNavigate, onClose]);
 
   return (

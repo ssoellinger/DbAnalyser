@@ -316,7 +316,7 @@ function ErdGraphInner() {
 
     const nodeSet = new Set(nodes.map((n) => n.id));
 
-    // FK edges (solid)
+    // FK edges (solid) — add placeholder nodes for cross-db targets
     if (rels) {
       rels.explicitRelationships.forEach((fk, i) => {
         const from = fk.fromDatabase
@@ -325,13 +325,27 @@ function ErdGraphInner() {
         const to = fk.toDatabase
           ? `${fk.toDatabase}.${fk.toSchema}.${fk.toTable}`
           : `${fk.toSchema}.${fk.toTable}`;
+
+        // Add external placeholder node if FK target isn't in the graph
+        if (nodeSet.has(from) && !nodeSet.has(to) && fk.toDatabase) {
+          nodes.push({
+            id: to,
+            type: 'compactNode',
+            position: { x: 0, y: 0 },
+            data: { label: `${fk.toSchema}.${fk.toTable}`, type: 'EXT', detail: fk.toDatabase, color: OBJECT_TYPE_COLORS.External ?? '#ff6b6b' },
+            width: 180,
+            height: 46,
+          });
+          nodeSet.add(to);
+        }
+
         if (nodeSet.has(from) && nodeSet.has(to)) {
           edges.push({
             id: `erd-fk-${i}`,
             source: from,
             target: to,
             type: 'crowsfoot',
-            style: { stroke: '#4fc3f7', strokeWidth: 1.5 },
+            style: { stroke: fk.toDatabase ? '#ff6b6b' : '#4fc3f7', strokeWidth: 1.5, ...(fk.toDatabase ? { strokeDasharray: '5,3' } : {}) },
             label: fk.name.length > 30 ? '' : fk.name,
             labelStyle: { fontSize: 9, fill: '#888' },
           });
