@@ -64,4 +64,29 @@ public class SqlRowLimiterTests
         var result = SqlRowLimiter.ApplyLimitForPostgreSql(input, maxRows);
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    // Basic SELECT
+    [InlineData("SELECT * FROM users", 1000, "SELECT * FROM users OFFSET 0 ROWS FETCH NEXT 1000 ROWS ONLY")]
+    [InlineData("SELECT * FROM users;", 1000, "SELECT * FROM users OFFSET 0 ROWS FETCH NEXT 1000 ROWS ONLY")]
+    // Already has FETCH — don't touch
+    [InlineData("SELECT * FROM users FETCH FIRST 10 ROWS ONLY", 1000, "SELECT * FROM users FETCH FIRST 10 ROWS ONLY")]
+    // Already has ROWNUM — don't touch
+    [InlineData("SELECT * FROM users WHERE ROWNUM <= 10", 1000, "SELECT * FROM users WHERE ROWNUM <= 10")]
+    // Non-SELECT — don't touch
+    [InlineData("INSERT INTO users VALUES (1)", 1000, "INSERT INTO users VALUES (1)")]
+    [InlineData("UPDATE users SET name='x'", 1000, "UPDATE users SET name='x'")]
+    // maxRows=0 — no limit
+    [InlineData("SELECT * FROM users", 0, "SELECT * FROM users")]
+    // Leading comments
+    [InlineData("-- comment\nSELECT * FROM users", 1000, "-- comment\nSELECT * FROM users OFFSET 0 ROWS FETCH NEXT 1000 ROWS ONLY")]
+    // CTE
+    [InlineData("WITH cte AS (SELECT * FROM users) SELECT * FROM cte", 1000, "WITH cte AS (SELECT * FROM users) SELECT * FROM cte OFFSET 0 ROWS FETCH NEXT 1000 ROWS ONLY")]
+    // Multi-statement — don't touch
+    [InlineData("SELECT * FROM a;\nSELECT * FROM b;", 1000, "SELECT * FROM a;\nSELECT * FROM b;")]
+    public void ApplyRowLimitForOracle_Works(string input, int maxRows, string expected)
+    {
+        var result = SqlRowLimiter.ApplyRowLimitForOracle(input, maxRows);
+        Assert.Equal(expected, result);
+    }
 }

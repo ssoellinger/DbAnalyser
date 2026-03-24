@@ -127,11 +127,64 @@ describe('generateColumnList', () => {
 });
 
 describe('generateTableRef', () => {
-  it('generates [schema].[table] reference', () => {
+  it('generates [schema].[table] reference for SQL Server', () => {
     expect(generateTableRef(table())).toBe('[dbo].[Orders]');
   });
 
-  it('handles non-dbo schema', () => {
-    expect(generateTableRef(table('inventory', 'Stock'))).toBe('[inventory].[Stock]');
+  it('generates "schema"."table" reference for Oracle', () => {
+    expect(generateTableRef(table(), 'oracle')).toBe('"dbo"."Orders"');
+  });
+
+  it('generates "schema"."table" reference for PostgreSQL', () => {
+    expect(generateTableRef(table(), 'postgresql')).toBe('"dbo"."Orders"');
+  });
+});
+
+// ── Oracle-specific tests ──
+
+describe('Oracle SQL generation', () => {
+  it('generateSelectTop uses FETCH FIRST for Oracle', () => {
+    const result = generateSelectTop(table(), 1000, 'oracle');
+    expect(result).toContain('FETCH');
+    expect(result).toContain('1000 ROWS ONLY');
+    expect(result).not.toContain('TOP');
+    expect(result).toContain('"dbo"."Orders"');
+  });
+
+  it('generateSelectTop uses LIMIT for PostgreSQL', () => {
+    const result = generateSelectTop(table(), 500, 'postgresql');
+    expect(result).toContain('LIMIT 500');
+    expect(result).not.toContain('TOP');
+  });
+
+  it('generateSelectCount uses double quotes for Oracle', () => {
+    const result = generateSelectCount(table(), 'oracle');
+    expect(result).toContain('"dbo"."Orders"');
+    expect(result).not.toContain('[');
+  });
+
+  it('generateInsertTemplate uses SYSDATE for Oracle', () => {
+    const t = table('dbo', 'Users', [
+      { name: 'CreatedAt', dataType: 'timestamp' },
+    ]);
+    const result = generateInsertTemplate(t, 'oracle');
+    expect(result).toContain('SYSDATE');
+    expect(result).not.toContain('GETDATE');
+  });
+
+  it('generateInsertTemplate uses NOW() for PostgreSQL', () => {
+    const t = table('dbo', 'Users', [
+      { name: 'CreatedAt', dataType: 'date' },
+    ]);
+    const result = generateInsertTemplate(t, 'postgresql');
+    expect(result).toContain('NOW()');
+  });
+
+  it('generateColumnList uses double quotes for Oracle', () => {
+    const t = table('dbo', 'Users', [
+      { name: 'Id', dataType: 'int' },
+      { name: 'Name', dataType: 'varchar' },
+    ]);
+    expect(generateColumnList(t, 'oracle')).toBe('"Id", "Name"');
   });
 });
