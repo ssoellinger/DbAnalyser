@@ -314,6 +314,10 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
       const isCollapsed = collapsed[collapseKey];
       const color = OBJECT_TYPE_COLORS[items[0]?.type] ?? '#666';
 
+      // Check if there are multiple schemas — if so, sub-group by schema
+      const schemas = new Set(items.map((i) => i.schemaName).filter(Boolean));
+      const useSchemaGroups = schemas.size > 1;
+
       return (
         <div key={collapseKey}>
           <button
@@ -326,7 +330,39 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
             <span className="font-medium">{typeName}</span>
             <span className="ml-auto pr-2 text-[9px] text-text-muted">{items.length}</span>
           </button>
-          {!isCollapsed && items.map((item) => renderItem(item, indent + 16))}
+          {!isCollapsed && (useSchemaGroups
+            ? renderSchemaGroups(items, indent + 16, `${collapseKey}:`)
+            : items.map((item) => renderItem(item, indent + 16))
+          )}
+        </div>
+      );
+    });
+  }
+
+  function renderSchemaGroups(items: TreeItem[], indent: number, keyPrefix: string) {
+    const bySchema = new Map<string, TreeItem[]>();
+    for (const item of items) {
+      const schema = item.schemaName || 'dbo';
+      if (!bySchema.has(schema)) bySchema.set(schema, []);
+      bySchema.get(schema)!.push(item);
+    }
+
+    return Array.from(bySchema.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([schemaName, schemaItems]) => {
+      const collapseKey = `${keyPrefix}${schemaName}`;
+      const isCollapsed = collapsed[collapseKey];
+
+      return (
+        <div key={collapseKey}>
+          <button
+            onClick={() => toggleGroup(collapseKey)}
+            className="w-full flex items-center gap-1.5 py-0.5 text-[10px] text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors"
+            style={{ paddingLeft: indent }}
+          >
+            <span className="text-[9px] w-3">{isCollapsed ? '\u25B8' : '\u25BE'}</span>
+            <span className="font-medium">{schemaName}</span>
+            <span className="ml-auto pr-2 text-[9px]">{schemaItems.length}</span>
+          </button>
+          {!isCollapsed && schemaItems.map((item) => renderItem(item, indent + 12))}
         </div>
       );
     });
