@@ -313,7 +313,7 @@ public class SqlServerCatalogQueries : ICatalogQueries
     {
         try
         {
-            var data = await provider.ExecuteQueryAsync($"""
+            var data = await provider.ExecuteQueryAsync("""
                 SELECT
                     j.name AS JobName,
                     ISNULL(j.description, '') AS Description,
@@ -341,10 +341,10 @@ public class SqlServerCatalogQueries : ICatalogQueries
                     WHERE step_id = 0
                     GROUP BY job_id
                 ) jh ON j.job_id = jh.job_id
-                WHERE js.database_name = '{databaseName.Replace("'", "''")}'
-                   OR js.command LIKE '%{databaseName.Replace("'", "''").Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]")}%'
+                WHERE js.database_name = @dbName
+                   OR js.command LIKE '%' + @dbName + '%'
                 ORDER BY j.name, js.step_id
-                """, ct);
+                """, new Dictionary<string, object> { ["@dbName"] = databaseName }, ct);
 
             var jobs = new Dictionary<string, (JobRow Job, List<JobStepRow> Steps)>(
                 StringComparer.OrdinalIgnoreCase);

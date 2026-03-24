@@ -118,8 +118,8 @@ public class PostgreSqlProvider : IDbProvider
 
     public async Task<string> BeginTransactionAsync(string connectionString, CancellationToken ct = default)
     {
-        await using var ds = NpgsqlDataSource.Create(connectionString);
-        var conn = await ds.OpenConnectionAsync(ct);
+        var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
         var txn = await conn.BeginTransactionAsync(ct);
         var txnId = Guid.NewGuid().ToString("N")[..12];
         _transactions[txnId] = (conn, txn);

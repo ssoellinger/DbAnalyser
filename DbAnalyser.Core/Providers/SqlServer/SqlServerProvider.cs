@@ -42,6 +42,22 @@ public class SqlServerProvider : IDbProvider
         return table;
     }
 
+    public async Task<DataTable> ExecuteQueryAsync(string sql, Dictionary<string, object> parameters, CancellationToken ct = default)
+    {
+        if (_connection is null)
+            throw new InvalidOperationException("Not connected. Call ConnectAsync first.");
+
+        await using var cmd = new SqlCommand(sql, _connection);
+        cmd.CommandTimeout = 300;
+        foreach (var (key, value) in parameters)
+            cmd.Parameters.AddWithValue(key, value);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var table = new DataTable();
+        table.Load(reader);
+        return table;
+    }
+
     public async Task<object?> ExecuteScalarAsync(string sql, CancellationToken ct = default)
     {
         if (_connection is null)

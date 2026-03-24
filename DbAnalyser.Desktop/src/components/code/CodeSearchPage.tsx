@@ -307,8 +307,8 @@ function CodeSearchContent() {
         const flags = isCaseSensitive ? 'g' : 'gi';
         const re = new RegExp(q, flags);
         return { regex: re, error: null };
-      } catch (e: any) {
-        return { regex: null, error: e.message ?? 'Invalid regex' };
+      } catch (e: unknown) {
+        return { regex: null, error: e instanceof Error ? e.message : 'Invalid regex' };
       }
     }
 

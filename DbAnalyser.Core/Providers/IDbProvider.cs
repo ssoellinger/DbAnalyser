@@ -12,6 +12,10 @@ public interface IDbProvider : IAsyncDisposable
     Task ConnectAsync(string connectionString, CancellationToken ct = default);
     Task ChangeDatabaseAsync(string databaseName, CancellationToken ct = default);
     Task<DataTable> ExecuteQueryAsync(string sql, CancellationToken ct = default);
+    Task<DataTable> ExecuteQueryAsync(string sql, Dictionary<string, object> parameters, CancellationToken ct = default)
+    {
+        return ExecuteQueryAsync(sql, ct);
+    }
     Task<object?> ExecuteScalarAsync(string sql, CancellationToken ct = default);
 
     /// <summary>
