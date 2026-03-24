@@ -46,10 +46,11 @@ interface ContextMenuState {
   item: TreeItem;
 }
 
-function ContextMenu({ menu, onAction, onClose }: {
+function ContextMenu({ menu, onAction, onClose, providerType }: {
   menu: ContextMenuState;
   onAction: (text: string, database?: string) => void;
   onClose: () => void;
+  providerType: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -70,7 +71,8 @@ function ContextMenu({ menu, onAction, onClose }: {
   const item = menu.item;
   const isTableLike = item.type === 'Table' || item.type === 'View';
   const isExecutable = item.type === 'Procedure' || item.type === 'Function';
-  const ref2 = `[${item.schemaName}].[${item.label}]`;
+  const qt = (name: string) => providerType === 'oracle' || providerType === 'postgresql' ? `"${name}"` : `[${name}]`;
+  const ref2 = `${qt(item.schemaName)}.${qt(item.label)}`;
 
   return (
     <div
@@ -83,16 +85,21 @@ function ContextMenu({ menu, onAction, onClose }: {
       </div>
       {isTableLike && item.tableInfo && (
         <>
-          <MenuItem label="SELECT TOP 1000" onClick={() => { onAction(generateSelectTop(item.tableInfo!), db); onClose(); }} />
-          <MenuItem label="SELECT COUNT(*)" onClick={() => { onAction(generateSelectCount(item.tableInfo!), db); onClose(); }} />
-          <MenuItem label="INSERT template" onClick={() => { onAction(generateInsertTemplate(item.tableInfo!), db); onClose(); }} />
-          <MenuItem label="Column list" onClick={() => { onAction(generateColumnList(item.tableInfo!)); onClose(); }} />
+          <MenuItem label={providerType === 'oracle' ? 'SELECT FIRST 1000' : 'SELECT TOP 1000'} onClick={() => { onAction(generateSelectTop(item.tableInfo!, 1000, providerType), db); onClose(); }} />
+          <MenuItem label="SELECT COUNT(*)" onClick={() => { onAction(generateSelectCount(item.tableInfo!, providerType), db); onClose(); }} />
+          <MenuItem label="INSERT template" onClick={() => { onAction(generateInsertTemplate(item.tableInfo!, providerType), db); onClose(); }} />
+          <MenuItem label="Column list" onClick={() => { onAction(generateColumnList(item.tableInfo!, providerType)); onClose(); }} />
           <MenuItem label="Script as CREATE" onClick={() => { onAction(generateTableDdl(item.tableInfo!)); onClose(); }} />
         </>
       )}
       {isExecutable && (
         <>
-          <MenuItem label="EXEC" onClick={() => { onAction(`EXEC ${ref2};\n`, db); onClose(); }} />
+          <MenuItem label={providerType === 'oracle' ? 'CALL' : 'EXEC'} onClick={() => {
+            const execSql = providerType === 'oracle'
+              ? `BEGIN ${ref2}; END;\n/\n`
+              : `EXEC ${ref2};\n`;
+            onAction(execSql, db); onClose();
+          }} />
           <MenuItem label="Script definition" onClick={() => { onAction(item.definition ?? ''); onClose(); }} />
         </>
       )}
@@ -118,6 +125,7 @@ function ContextMenu({ menu, onAction, onClose }: {
 export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerProps) {
   const schema = useStore((s) => s.result?.schema);
   const isServerMode = useStore((s) => s.isServerMode);
+  const providerType = useStore((s) => s.providerType);
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
@@ -281,13 +289,14 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
   }
 
   function handleItemClick(item: TreeItem) {
-    const ref = `[${item.schemaName}].[${item.label}]`;
+    const ref = generateTableRef(item.tableInfo ?? { schemaName: item.schemaName, tableName: item.label, fullName: item.fullName, columns: [], indexes: [], foreignKeys: [] }, providerType);
     if (item.type === 'Table' || item.type === 'View') {
-      if (insertMode === 'newtab') onOpenInNewTab(`SELECT TOP 1000 *\nFROM ${ref};\n`, item.databaseName);
+      if (insertMode === 'newtab' && item.tableInfo) onOpenInNewTab(generateSelectTop(item.tableInfo, 1000, providerType), item.databaseName);
       else onInsertText(ref);
     } else if (item.type === 'Procedure' || item.type === 'Function') {
-      if (insertMode === 'newtab') onOpenInNewTab(`EXEC ${ref};\n`, item.databaseName);
-      else onInsertText(`EXEC ${ref}`);
+      const execSql = providerType === 'oracle' ? `BEGIN ${ref}; END;\n/\n` : `EXEC ${ref};\n`;
+      if (insertMode === 'newtab') onOpenInNewTab(execSql, item.databaseName);
+      else onInsertText(ref);
     } else {
       onInsertText(ref);
     }
@@ -513,6 +522,7 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
       {contextMenu && (
         <ContextMenu
           menu={contextMenu}
+          providerType={providerType}
           onAction={(text, db) => {
             if (insertMode === 'newtab') onOpenInNewTab(text, db);
             else onInsertText(text, db);

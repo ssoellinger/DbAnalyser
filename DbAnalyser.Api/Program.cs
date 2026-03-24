@@ -7,6 +7,7 @@ using DbAnalyser.Api.Hubs;
 using DbAnalyser.Api.Services;
 using DbAnalyser.Providers;
 using DbAnalyser.Providers.PostgreSql;
+using DbAnalyser.Providers.Oracle;
 using DbAnalyser.Providers.SqlServer;
 using Microsoft.AspNetCore.RateLimiting;
 using Serilog;
@@ -88,6 +89,7 @@ try
     // Provider bundles
     builder.Services.AddSingleton<IProviderBundle, SqlServerBundle>();
     builder.Services.AddSingleton<IProviderBundle, PostgreSqlBundle>();
+    builder.Services.AddSingleton<IProviderBundle, OracleBundle>();
     builder.Services.AddSingleton<ProviderRegistry>();
 
     // Analyzers

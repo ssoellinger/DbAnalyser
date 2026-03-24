@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
-import { sql, MSSQL, PostgreSQL } from '@codemirror/lang-sql';
+import { sql, MSSQL, PostgreSQL, PLSQL } from '@codemirror/lang-sql';
 import { bracketMatching } from '@codemirror/language';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { search, highlightSelectionMatches } from '@codemirror/search';
@@ -308,7 +308,7 @@ export function QueryPage() {
     const currentSql = view.state.doc.toString();
     if (!currentSql.trim()) return;
     try {
-      const language = providerType === 'postgresql' ? 'postgresql' as const : 'tsql' as const;
+      const language = providerType === 'postgresql' ? 'postgresql' as const : providerType === 'oracle' ? 'plsql' as const : 'tsql' as const;
       const formatted = formatSql(currentSql, { language, tabWidth: 2, keywordCase: 'upper' });
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } });
     } catch {}
@@ -457,7 +457,7 @@ export function QueryPage() {
 
   // ── CodeMirror setup ──
   const sqlSchema = useMemo(() => buildSqlSchema(dbSchema, selectedDb), [dbSchema, selectedDb]);
-  const sqlDialect = providerType === 'postgresql' ? PostgreSQL : MSSQL;
+  const sqlDialect = providerType === 'postgresql' ? PostgreSQL : providerType === 'oracle' ? PLSQL : MSSQL;
 
   const extensions = useMemo(() => [
     lineNumbers(),

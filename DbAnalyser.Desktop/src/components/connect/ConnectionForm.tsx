@@ -34,6 +34,17 @@ export function buildConnectionString(f: ConnectionFields, providerType = 'sqlse
     return parts.join(';');
   }
 
+  if (providerType === 'oracle') {
+    const port = f.port || '1521';
+    const dataSource = f.database.trim()
+      ? `${f.server}:${port}/${f.database}`
+      : `${f.server}:${port}`;
+    const parts: string[] = [`Data Source=${dataSource}`];
+    if (f.username.trim()) parts.push(`User Id=${f.username}`);
+    if (f.password) parts.push(`Password=${f.password}`);
+    return parts.join(';');
+  }
+
   const parts: string[] = [`Server=${f.server}`];
   if (f.database.trim()) parts.push(`Database=${f.database}`);
   if (f.authMode === 'windows') {

@@ -251,4 +251,44 @@ public static partial class SqlRowLimiter
 
         return $"{trimmed} LIMIT {maxRows}";
     }
+
+    /// <summary>
+    /// Append FETCH FIRST n ROWS ONLY to an Oracle SELECT query (12c+).
+    /// Returns the original SQL unchanged if not applicable.
+    /// </summary>
+    public static string ApplyRowLimitForOracle(string sql, int maxRows)
+    {
+        if (maxRows <= 0 || maxRows == int.MaxValue) return sql;
+
+        // Already has FETCH or ROWNUM
+        if (Regex.IsMatch(sql, @"\bFETCH\s+(FIRST|NEXT)\b", RegexOptions.IgnoreCase)) return sql;
+        if (Regex.IsMatch(sql, @"\bROWNUM\b", RegexOptions.IgnoreCase)) return sql;
+
+        // Skip leading comments/whitespace
+        var codeStart = SkipLeadingCommentsAndWhitespace(sql);
+        if (codeStart >= sql.Length) return sql;
+
+        var codePart = sql[codeStart..];
+
+        // Skip multi-statement batches
+        if (IsMultiStatement(codePart)) return sql;
+
+        // Skip non-SELECT/non-WITH statements
+        if (NonSelectRegex().IsMatch(codePart)) return sql;
+
+        // Must start with SELECT or WITH
+        var isSelect = codePart.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) &&
+                       (codePart.Length <= 6 || !char.IsLetterOrDigit(codePart[6]));
+        var isWith = codePart.StartsWith("WITH", StringComparison.OrdinalIgnoreCase) &&
+                     (codePart.Length <= 4 || !char.IsLetterOrDigit(codePart[4]));
+
+        if (!isSelect && !isWith) return sql;
+
+        // Strip trailing semicolon, append FETCH FIRST
+        var trimmed = sql.TrimEnd();
+        if (trimmed.EndsWith(';'))
+            trimmed = trimmed[..^1].TrimEnd();
+
+        return $"{trimmed} OFFSET 0 ROWS FETCH NEXT {maxRows} ROWS ONLY";
+    }
 }

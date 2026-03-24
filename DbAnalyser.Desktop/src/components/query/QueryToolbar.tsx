@@ -104,7 +104,7 @@ export function QueryToolbar({
         Plan
       </button>
 
-      {providerType !== 'postgresql' && (
+      {providerType === 'sqlserver' && (
         <button onClick={onExecuteIoStats} disabled={isExecuting}
           className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
           title="Execute with STATISTICS IO (shows table read counts)">

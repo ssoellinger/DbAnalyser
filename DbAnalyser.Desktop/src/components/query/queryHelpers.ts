@@ -175,30 +175,44 @@ export function buildSqlSchema(schema: DatabaseSchema | null | undefined, databa
 import type { TableInfo } from '../../api/types';
 import { formatColumnType } from '../shared/formatColumnType';
 
-export function generateSelectTop(table: TableInfo, n = 1000): string {
-  return `SELECT TOP ${n} *\nFROM [${table.schemaName}].[${table.tableName}];\n`;
+// Provider-aware identifier quoting
+function q(name: string, provider?: string): string {
+  if (provider === 'oracle' || provider === 'postgresql') return `"${name}"`;
+  return `[${name}]`;
 }
 
-export function generateSelectCount(table: TableInfo): string {
-  return `SELECT COUNT(*) AS [Count]\nFROM [${table.schemaName}].[${table.tableName}];\n`;
+function tableRef(table: TableInfo, provider?: string): string {
+  return `${q(table.schemaName, provider)}.${q(table.tableName, provider)}`;
 }
 
-export function generateInsertTemplate(table: TableInfo): string {
+export function generateSelectTop(table: TableInfo, n = 1000, provider?: string): string {
+  const ref = tableRef(table, provider);
+  if (provider === 'oracle') return `SELECT *\nFROM ${ref}\nOFFSET 0 ROWS FETCH NEXT ${n} ROWS ONLY\n`;
+  if (provider === 'postgresql') return `SELECT *\nFROM ${ref}\nLIMIT ${n};\n`;
+  return `SELECT TOP ${n} *\nFROM ${ref};\n`;
+}
+
+export function generateSelectCount(table: TableInfo, provider?: string): string {
+  return `SELECT COUNT(*) AS "Count"\nFROM ${tableRef(table, provider)};\n`;
+}
+
+export function generateInsertTemplate(table: TableInfo, provider?: string): string {
   const cols = table.columns.filter((c) => !c.isIdentity && !c.isComputed);
-  const colNames = cols.map((c) => `[${c.name}]`).join(', ');
+  const colNames = cols.map((c) => q(c.name, provider)).join(', ');
+  const dateFn = provider === 'oracle' ? 'SYSDATE' : provider === 'postgresql' ? 'NOW()' : 'GETDATE()';
   const values = cols.map((c) => {
     if (c.dataType.toLowerCase().includes('char') || c.dataType.toLowerCase().includes('text')) return `''`;
-    if (c.dataType.toLowerCase().includes('date')) return `GETDATE()`;
+    if (c.dataType.toLowerCase().includes('date') || c.dataType.toLowerCase().includes('timestamp')) return dateFn;
     if (c.isNullable) return 'NULL';
     return '0';
   }).join(', ');
-  return `INSERT INTO [${table.schemaName}].[${table.tableName}] (${colNames})\nVALUES (${values});\n`;
+  return `INSERT INTO ${tableRef(table, provider)} (${colNames})\nVALUES (${values});\n`;
 }
 
-export function generateColumnList(table: TableInfo): string {
-  return table.columns.map((c) => `[${c.name}]`).join(', ');
+export function generateColumnList(table: TableInfo, provider?: string): string {
+  return table.columns.map((c) => q(c.name, provider)).join(', ');
 }
 
-export function generateTableRef(table: TableInfo): string {
-  return `[${table.schemaName}].[${table.tableName}]`;
+export function generateTableRef(table: TableInfo, provider?: string): string {
+  return tableRef(table, provider);
 }

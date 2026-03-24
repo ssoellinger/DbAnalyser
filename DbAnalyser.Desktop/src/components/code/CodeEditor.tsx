@@ -1,7 +1,8 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
-import { sql, MSSQL } from '@codemirror/lang-sql';
+import { sql, MSSQL, PostgreSQL, PLSQL } from '@codemirror/lang-sql';
+import { useStore } from '../../hooks/useStore';
 import { foldGutter, bracketMatching } from '@codemirror/language';
 import { search, highlightSelectionMatches } from '@codemirror/search';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -31,6 +32,12 @@ const indentGuidesCompartment = new Compartment();
 const bracketColorsCompartment = new Compartment();
 const highlightOccurrencesCompartment = new Compartment();
 
+function getSqlDialect(providerType: string) {
+  if (providerType === 'postgresql') return PostgreSQL;
+  if (providerType === 'oracle') return PLSQL;
+  return MSSQL;
+}
+
 export function CodeEditor({
   code,
   scrollPos,
@@ -43,6 +50,8 @@ export function CodeEditor({
   resolveTooltip,
   visualSettings,
 }: CodeEditorProps) {
+  const providerType = useStore((s) => s.providerType);
+  const dialect = getSqlDialect(providerType);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const codeRef = useRef(code);
@@ -59,7 +68,7 @@ export function CodeEditor({
       history(),
       search(),
       highlightSelectionMatches(),
-      sql({ dialect: MSSQL }),
+      sql({ dialect }),
       dbAnalyserEditorTheme,
       dbAnalyserHighlighting,
       EditorState.readOnly.of(true),
