@@ -290,6 +290,9 @@ export const useCodeStore = create<CodeState>((set, get) => ({
     set({ connectionKey: connKey });
 
     const saved = loadSession(connKey);
+    const currentTabs = get().tabs;
+    const currentActiveId = get().activeTabId;
+
     if (saved && saved.tabs.length > 0) {
       const restoredTabs: CodeTab[] = saved.tabs
         .map((t) => ({
@@ -300,12 +303,21 @@ export const useCodeStore = create<CodeState>((set, get) => ({
         }))
         .filter((t) => t.definition);
 
-      const restoredActiveId = restoredTabs.find((t) => t.id === saved.activeTabId)?.id ?? restoredTabs[0]?.id ?? null;
-      const restoredSplitId = saved.splitTabId && restoredTabs.find((t) => t.id === saved.splitTabId) ? saved.splitTabId : null;
+      // Merge: keep any tabs that were opened before restore (e.g. from search navigation)
+      const restoredIds = new Set(restoredTabs.map((t) => t.id));
+      const extraTabs = currentTabs.filter((t) => !restoredIds.has(t.id));
+      const mergedTabs = [...restoredTabs, ...extraTabs];
+
+      // Prefer the current activeTabId if it exists in merged (was just opened), otherwise use saved
+      const mergedIds = new Set(mergedTabs.map((t) => t.id));
+      const activeId = (currentActiveId && mergedIds.has(currentActiveId))
+        ? currentActiveId
+        : restoredTabs.find((t) => t.id === saved.activeTabId)?.id ?? restoredTabs[0]?.id ?? null;
+      const restoredSplitId = saved.splitTabId && mergedIds.has(saved.splitTabId) ? saved.splitTabId : null;
 
       set({
-        tabs: restoredTabs,
-        activeTabId: restoredActiveId,
+        tabs: mergedTabs,
+        activeTabId: activeId,
         splitTabId: restoredSplitId,
         explorerCollapsed: saved.explorerCollapsed ?? {},
         explorerSort: saved.explorerSort ?? 'name',
