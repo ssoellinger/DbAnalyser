@@ -83,6 +83,7 @@ function CodeSearchContent() {
   const historyKey = connKey(serverName, databaseName);
   const openTab = useCodeStore((s) => s.openTab);
   const navigate = useNavigate();
+  const [searchMode, setSearchMode] = useState<'text' | 'column'>('text');
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [isRegex, setIsRegex] = useState(false);
@@ -90,6 +91,9 @@ function CodeSearchContent() {
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [dbFilter, setDbFilter] = useState<string>('');
   const [regexError, setRegexError] = useState<string | null>(null);
+  // Column usage mode
+  const [selectedTable, setSelectedTable] = useState('');
+  const [selectedColumn, setSelectedColumn] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState(() => loadHistory(historyKey));
   const inputRef = useRef<HTMLInputElement>(null);
@@ -178,6 +182,120 @@ function CodeSearchContent() {
     }
     return Array.from(dbs).sort();
   }, [isServerMode, allObjects]);
+
+  // Tables with columns for column usage picker
+  const tablesWithColumns = useMemo(() => {
+    if (!result?.schema) return [];
+    return [...result.schema.tables, ...result.schema.views.map((v) => ({
+      fullName: v.fullName,
+      tableName: v.viewName,
+      schemaName: v.schemaName,
+      databaseName: v.databaseName,
+      columns: v.columns,
+    }))].sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [result?.schema]);
+
+  const selectedTableColumns = useMemo(() => {
+    const table = tablesWithColumns.find((t) => t.fullName === selectedTable);
+    return table?.columns.map((c) => c.name).sort() ?? [];
+  }, [tablesWithColumns, selectedTable]);
+
+  // Column usage search results — only matches where both table AND column are referenced
+  const columnResults = useMemo<SearchResult[]>(() => {
+    if (searchMode !== 'column' || !selectedColumn || !selectedTable) return [];
+
+    const colEscaped = selectedColumn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tableParts = selectedTable.split('.');
+    const shortTable = tableParts[tableParts.length - 1];
+    const schemaTable = tableParts.length >= 2 ? `${tableParts[tableParts.length - 2]}.${shortTable}` : shortTable;
+
+    // Table name variants to search for (case-insensitive)
+    const tableVariants = [
+      shortTable.toLowerCase(),
+      schemaTable.toLowerCase(),
+      `[${shortTable}]`.toLowerCase(),
+      `[${tableParts[tableParts.length - 2] ?? ''}].[${shortTable}]`.toLowerCase(),
+    ];
+
+    const matched: SearchResult[] = [];
+    for (const obj of allObjects) {
+      if (typeFilter.size > 0 && !typeFilter.has(obj.objectType)) continue;
+      if (dbFilter && obj.databaseName !== dbFilter) continue;
+      if (!obj.definition) continue;
+      if (obj.fullName === selectedTable) continue;
+      // Skip table definitions (CREATE TABLE DDL only defines columns, doesn't reference others)
+      if (obj.objectType === 'Table') continue;
+
+      const defLower = obj.definition.toLowerCase();
+
+      // Step 1: Check if this object references the source table at all
+      const refsTable = tableVariants.some((v) => defLower.includes(v));
+      if (!refsTable) continue;
+
+      // Step 2: Find aliases for the source table
+      // Matches: FROM TableName alias, FROM TableName AS alias, JOIN TableName alias
+      const aliases = new Set<string>();
+      const aliasRe = new RegExp(
+        `\\b(?:FROM|JOIN)\\s+(?:\\[?\\w+\\]?\\.)?\\[?${shortTable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]?\\s+(?:AS\\s+)?(\\[?\\w+\\]?)\\b`,
+        'gi'
+      );
+      let aliasMatch;
+      while ((aliasMatch = aliasRe.exec(obj.definition)) !== null) {
+        const alias = aliasMatch[1].replace(/\[/g, '').replace(/\]/g, '').toLowerCase();
+        if (alias && !['on', 'where', 'set', 'inner', 'left', 'right', 'outer', 'cross', 'with', 'nolock'].includes(alias)) {
+          aliases.add(alias);
+        }
+      }
+
+      // Step 3: Search for column usage with table/alias prefix or standalone
+      const lines = obj.definition.split('\n');
+      const matchLines: { lineNum: number; text: string }[] = [];
+      let totalMatches = 0;
+
+      // Build pattern: only alias.Column or table.Column (prefixed matches only)
+      const prefixes = [shortTable, ...aliases].map((p) =>
+        p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      );
+      const patterns = prefixes.map((p) =>
+        new RegExp(`\\b${p}\\.\\[?${colEscaped}\\]?\\b`, 'gi')
+      );
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Strip strings and comments
+        const cleaned = line
+          .replace(/'[^']*'/g, (m) => ' '.repeat(m.length))
+          .replace(/--.*$/, (m) => ' '.repeat(m.length));
+
+        let lineMatched = false;
+        for (const re of patterns) {
+          re.lastIndex = 0;
+          const matches = cleaned.match(re);
+          if (matches) {
+            totalMatches += matches.length;
+            lineMatched = true;
+            break; // don't double-count from multiple patterns
+          }
+        }
+        if (lineMatched && matchLines.length < 8) {
+          matchLines.push({ lineNum: i + 1, text: line });
+        }
+      }
+
+      if (totalMatches > 0) {
+        matched.push({
+          objectType: obj.objectType,
+          fullName: obj.fullName,
+          label: obj.label,
+          definition: obj.definition,
+          matchLines,
+          totalMatches,
+        });
+      }
+    }
+
+    return matched.sort((a, b) => b.totalMatches - a.totalMatches);
+  }, [searchMode, selectedColumn, selectedTable, allObjects, typeFilter, dbFilter]);
 
   // Build regex or plain matcher (uses debounced query for performance)
   const matcher = useMemo<{ regex: RegExp | null; error: string | null }>(() => {
@@ -294,16 +412,16 @@ function CodeSearchContent() {
     navigate('/code');
   }
 
-  function highlightCode(text: string): JSX.Element {
-    if (!matcher.regex) return <>{text}</>;
+  function highlightWithRegex(text: string, regex: RegExp | null): JSX.Element {
+    if (!regex) return <>{text}</>;
     const parts: (string | JSX.Element)[] = [];
-    const re = new RegExp(matcher.regex.source, matcher.regex.flags);
+    const re = new RegExp(regex.source, regex.flags);
     let lastIdx = 0;
     let match: RegExpExecArray | null;
     let key = 0;
     re.lastIndex = 0;
     while ((match = re.exec(text)) !== null) {
-      if (match[0].length === 0) { re.lastIndex++; continue; } // prevent infinite loop on zero-length match
+      if (match[0].length === 0) { re.lastIndex++; continue; }
       if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
       parts.push(
         <span key={key++} className="bg-accent/30 text-accent rounded px-0.5">
@@ -316,10 +434,69 @@ function CodeSearchContent() {
     return <>{parts}</>;
   }
 
+  // Column usage highlight regex — skip @parameters
+  const columnHighlightRegex = useMemo(() => {
+    if (searchMode !== 'column' || !selectedColumn) return null;
+    const escaped = selectedColumn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<!@)\\b${escaped}\\b`, 'gi');
+  }, [searchMode, selectedColumn]);
+
+  const highlightCode = useCallback((text: string): JSX.Element => {
+    if (searchMode === 'column') return highlightWithRegex(text, columnHighlightRegex);
+    return highlightWithRegex(text, matcher.regex);
+  }, [searchMode, columnHighlightRegex, matcher.regex]);
+
   return (
     <div className="h-full flex flex-col">
       {/* Search header */}
       <div className="p-4 border-b border-border space-y-3">
+        {/* Mode toggle */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSearchMode('text')}
+            className={`px-3 py-1 text-xs rounded transition-colors ${searchMode === 'text' ? 'bg-accent/15 text-accent border border-accent/30' : 'text-text-secondary hover:text-text-primary border border-transparent'}`}
+          >
+            Text Search
+          </button>
+          <button
+            onClick={() => setSearchMode('column')}
+            className={`px-3 py-1 text-xs rounded transition-colors ${searchMode === 'column' ? 'bg-accent/15 text-accent border border-accent/30' : 'text-text-secondary hover:text-text-primary border border-transparent'}`}
+          >
+            Column Usage
+          </button>
+        </div>
+
+        {searchMode === 'column' ? (
+          /* Column usage picker */
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedTable}
+              onChange={(e) => { setSelectedTable(e.target.value); setSelectedColumn(''); }}
+              className="flex-1 max-w-xs bg-bg-card border border-border rounded px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+            >
+              <option value="">Select a table or view...</option>
+              {tablesWithColumns.map((t) => (
+                <option key={t.fullName} value={t.fullName}>{t.fullName}</option>
+              ))}
+            </select>
+            <select
+              value={selectedColumn}
+              onChange={(e) => setSelectedColumn(e.target.value)}
+              disabled={!selectedTable}
+              className="flex-1 max-w-xs bg-bg-card border border-border rounded px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none disabled:opacity-50"
+            >
+              <option value="">Select a column...</option>
+              {selectedTableColumns.map((col) => (
+                <option key={col} value={col}>{col}</option>
+              ))}
+            </select>
+            {selectedColumn && (
+              <span className="text-xs text-text-secondary">
+                {columnResults.length} object{columnResults.length !== 1 ? 's' : ''} reference this column
+              </span>
+            )}
+          </div>
+        ) : (
         <div className="flex items-center gap-3">
           <div className="relative flex-1 max-w-xl" ref={historyRef}>
             <input
@@ -424,6 +601,7 @@ function CodeSearchContent() {
             </span>
           )}
         </div>
+        )}
 
         {/* Regex error */}
         {regexError && (
@@ -477,9 +655,9 @@ function CodeSearchContent() {
 
       {/* Results */}
       <ResultsList
-        results={results}
-        query={query}
-        regexError={regexError}
+        results={searchMode === 'column' ? columnResults : results}
+        query={searchMode === 'column' ? selectedColumn : query}
+        regexError={searchMode === 'column' ? null : regexError}
         historyCount={history.length}
         highlightCode={highlightCode}
         openInCode={openInCode}
