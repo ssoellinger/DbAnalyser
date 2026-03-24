@@ -4,7 +4,7 @@ const NO_LENGTH_TYPES = new Set(['int', 'bigint', 'smallint', 'tinyint', 'bit', 
 
 export function formatColumnType(c: ColumnInfo): string {
   let t = c.dataType;
-  if (c.maxLength !== null && c.maxLength > 0 && !NO_LENGTH_TYPES.has(c.dataType.toLowerCase()))
+  if (c.maxLength !== null && (c.maxLength > 0 || c.maxLength === -1) && !NO_LENGTH_TYPES.has(c.dataType.toLowerCase()))
     t += `(${c.maxLength === -1 ? 'max' : c.maxLength})`;
   if (c.precision !== null && c.scale !== null && ['decimal', 'numeric'].includes(c.dataType.toLowerCase()))
     t += `(${c.precision},${c.scale})`;
