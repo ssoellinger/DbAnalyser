@@ -111,9 +111,15 @@ export function QueryPage() {
     if (!sessionId || isFileSession) return;
     api.getQueryDatabases(sessionId).then(({ databases: dbs, currentDatabase }) => {
       setDatabases(dbs);
-      setSelectedDb(currentDatabase ?? '');
+      // Only set default db if the active tab doesn't have a saved database
+      const activeTab = tabs.find((t) => t.id === activeTabId);
+      if (activeTab?.database && dbs.includes(activeTab.database)) {
+        setSelectedDb(activeTab.database);
+      } else {
+        setSelectedDb(currentDatabase ?? '');
+      }
     }).catch(() => {});
-  }, [sessionId, isFileSession]);
+  }, [sessionId, isFileSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reload history & saved queries when connection changes
   useEffect(() => {
