@@ -16,6 +16,7 @@ import { QueryToolbar } from './QueryToolbar';
 import { QueryExplorer } from './QueryExplorer';
 import { ExecutionPlanView } from './ExecutionPlanView';
 import { ColumnStats } from './ColumnStats';
+import { QueryChart } from './QueryChart';
 import { IoStatsView, hasIoStats } from './IoStatsView';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../api/client';
@@ -712,6 +713,12 @@ export function QueryPage() {
                 Statistics
               </button>
             )}
+            {response.resultSets.length > 0 && !response.error && (
+              <button onClick={() => setResultsView('chart')}
+                className={`px-3 py-1.5 border-b-2 transition-colors ${resultsView === 'chart' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
+                Chart
+              </button>
+            )}
             {hasIo && (
               <button onClick={() => setResultsView('performance')}
                 className={`px-3 py-1.5 border-b-2 transition-colors ${resultsView === 'performance' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
@@ -801,6 +808,10 @@ export function QueryPage() {
 
           {response && resultsView === 'statistics' && !response.error && response.resultSets.length > 0 && (
             <ColumnStats resultSet={response.resultSets[activeResultTab]} />
+          )}
+
+          {response && resultsView === 'chart' && !response.error && response.resultSets.length > 0 && (
+            <QueryChart resultSet={response.resultSets[activeResultTab]} />
           )}
 
           {response && resultsView === 'performance' && hasIo && (

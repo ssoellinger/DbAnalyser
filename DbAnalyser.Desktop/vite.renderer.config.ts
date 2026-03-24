@@ -28,6 +28,7 @@ export default defineConfig({
       '@tanstack/react-table',
       '@microsoft/signalr',
       'sql-formatter',
+      'recharts',
     ],
   },
 });

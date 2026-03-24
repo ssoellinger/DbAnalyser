@@ -24,7 +24,7 @@ export interface SavedQuery {
   savedAt: string;
 }
 
-export type ResultsView = 'results' | 'messages' | 'plan' | 'statistics' | 'performance';
+export type ResultsView = 'results' | 'messages' | 'plan' | 'statistics' | 'performance' | 'chart';
 
 // ── Storage key helpers ──
 
