@@ -3,7 +3,7 @@ import { useStore } from '../../hooks/useStore';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { TableInfo, ViewInfo, ColumnInfo } from '../../api/types';
 import { formatColumnType } from '../shared/formatColumnType';
-import { generateTableDdl } from '../code/tableDdlGenerator';
+import { generateTableDdl, generateJobDdl, generateSequenceDdl, generateUdtDdl, generateSynonymDdl } from '../code/tableDdlGenerator';
 import {
   generateSelectTop, generateSelectCount,
   generateInsertTemplate, generateColumnList, generateTableRef,
@@ -14,13 +14,16 @@ interface QueryExplorerProps {
   onOpenInNewTab: (text: string, database?: string) => void;
 }
 
+type ObjectKind = 'Table' | 'View' | 'Procedure' | 'Function' | 'Trigger' | 'Synonym' | 'Sequence' | 'Type' | 'Job';
+
 interface TreeItem {
   fullName: string;
   label: string;
   schemaName: string;
-  type: 'Table' | 'View';
+  type: ObjectKind;
   columns: ColumnInfo[];
-  tableInfo: TableInfo; // for DDL generation
+  tableInfo?: TableInfo; // for tables/views DDL generation
+  definition?: string; // for procs/functions/triggers
   databaseName?: string;
 }
 
@@ -64,7 +67,10 @@ function ContextMenu({ menu, onAction, onClose }: {
   }, [onClose]);
 
   const db = menu.item.databaseName;
-  const t = menu.item.tableInfo;
+  const item = menu.item;
+  const isTableLike = item.type === 'Table' || item.type === 'View';
+  const isExecutable = item.type === 'Procedure' || item.type === 'Function';
+  const ref2 = `[${item.schemaName}].[${item.label}]`;
 
   return (
     <div
@@ -73,14 +79,36 @@ function ContextMenu({ menu, onAction, onClose }: {
       style={{ left: menu.x, top: menu.y }}
     >
       <div className="px-3 py-1 text-[10px] text-text-muted border-b border-border/50 truncate">
-        {menu.item.fullName}
+        {item.fullName}
       </div>
-      <MenuItem label="SELECT TOP 1000" onClick={() => { onAction(generateSelectTop(t), db); onClose(); }} />
-      <MenuItem label="SELECT COUNT(*)" onClick={() => { onAction(generateSelectCount(t), db); onClose(); }} />
-      <MenuItem label="INSERT template" onClick={() => { onAction(generateInsertTemplate(t), db); onClose(); }} />
-      <MenuItem label="Column list" onClick={() => { onAction(generateColumnList(t)); onClose(); }} />
-      <MenuItem label="Script as CREATE" onClick={() => { onAction(generateTableDdl(t)); onClose(); }} />
-      <MenuItem label="Insert table name" onClick={() => { onAction(generateTableRef(t)); onClose(); }} />
+      {isTableLike && item.tableInfo && (
+        <>
+          <MenuItem label="SELECT TOP 1000" onClick={() => { onAction(generateSelectTop(item.tableInfo!), db); onClose(); }} />
+          <MenuItem label="SELECT COUNT(*)" onClick={() => { onAction(generateSelectCount(item.tableInfo!), db); onClose(); }} />
+          <MenuItem label="INSERT template" onClick={() => { onAction(generateInsertTemplate(item.tableInfo!), db); onClose(); }} />
+          <MenuItem label="Column list" onClick={() => { onAction(generateColumnList(item.tableInfo!)); onClose(); }} />
+          <MenuItem label="Script as CREATE" onClick={() => { onAction(generateTableDdl(item.tableInfo!)); onClose(); }} />
+        </>
+      )}
+      {isExecutable && (
+        <>
+          <MenuItem label="EXEC" onClick={() => { onAction(`EXEC ${ref2};\n`, db); onClose(); }} />
+          <MenuItem label="Script definition" onClick={() => { onAction(item.definition ?? ''); onClose(); }} />
+        </>
+      )}
+      {item.type === 'Trigger' && (
+        <MenuItem label="Script definition" onClick={() => { onAction(item.definition ?? ''); onClose(); }} />
+      )}
+      {item.type === 'Job' && (
+        <>
+          <MenuItem label="EXEC (sp_start_job)" onClick={() => { onAction(`EXEC msdb.dbo.sp_start_job @job_name = '${item.label}';\n`, db); onClose(); }} />
+          <MenuItem label="Script definition" onClick={() => { onAction(item.definition ?? ''); onClose(); }} />
+        </>
+      )}
+      {(item.type === 'Synonym' || item.type === 'Sequence' || item.type === 'Type') && (
+        <MenuItem label="Script definition" onClick={() => { onAction(item.definition ?? ''); onClose(); }} />
+      )}
+      <MenuItem label="Insert name" onClick={() => { onAction(ref2); onClose(); }} />
     </div>
   );
 }
@@ -132,6 +160,82 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
         databaseName: v.databaseName,
       });
     }
+    for (const p of schema.storedProcedures) {
+      list.push({
+        fullName: p.fullName,
+        label: p.procedureName,
+        schemaName: p.schemaName,
+        type: 'Procedure',
+        columns: [],
+        definition: p.definition ?? '',
+        databaseName: p.databaseName,
+      });
+    }
+    for (const f of schema.functions) {
+      list.push({
+        fullName: f.fullName,
+        label: f.functionName,
+        schemaName: f.schemaName,
+        type: 'Function',
+        columns: [],
+        definition: f.definition ?? '',
+        databaseName: f.databaseName,
+      });
+    }
+    for (const t of schema.triggers) {
+      list.push({
+        fullName: t.fullName,
+        label: t.triggerName,
+        schemaName: t.schemaName,
+        type: 'Trigger',
+        columns: [],
+        definition: t.definition ?? '',
+        databaseName: t.databaseName,
+      });
+    }
+    for (const s of schema.synonyms) {
+      list.push({
+        fullName: s.fullName,
+        label: s.synonymName,
+        schemaName: s.schemaName,
+        type: 'Synonym',
+        columns: [],
+        definition: generateSynonymDdl(s),
+        databaseName: s.databaseName,
+      });
+    }
+    for (const seq of schema.sequences) {
+      list.push({
+        fullName: seq.fullName,
+        label: seq.sequenceName,
+        schemaName: seq.schemaName,
+        type: 'Sequence',
+        columns: [],
+        definition: generateSequenceDdl(seq),
+        databaseName: seq.databaseName,
+      });
+    }
+    for (const udt of schema.userDefinedTypes) {
+      list.push({
+        fullName: udt.fullName,
+        label: udt.typeName,
+        schemaName: udt.schemaName,
+        type: 'Type',
+        columns: [],
+        definition: generateUdtDdl(udt),
+        databaseName: udt.databaseName,
+      });
+    }
+    for (const j of schema.jobs) {
+      list.push({
+        fullName: j.jobName,
+        label: j.jobName,
+        schemaName: '',
+        type: 'Job',
+        columns: [],
+        definition: generateJobDdl(j),
+      });
+    }
 
     return list.sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [schema]);
@@ -143,32 +247,50 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
     return items.filter((i) => i.fullName.toLowerCase().includes(q) || i.label.toLowerCase().includes(q));
   }, [items, filter]);
 
-  // Group by type (and database in server mode)
-  const groups = useMemo(() => {
-    if (isServerMode) {
-      const byDb = new Map<string, TreeItem[]>();
-      for (const item of filtered) {
-        const db = item.databaseName ?? 'Unknown';
-        if (!byDb.has(db)) byDb.set(db, []);
-        byDb.get(db)!.push(item);
-      }
-      return byDb;
-    }
-    // Single DB: group by type
+  const TYPE_ORDER: [string, ObjectKind][] = [
+    ['Tables', 'Table'], ['Views', 'View'], ['Procedures', 'Procedure'],
+    ['Functions', 'Function'], ['Triggers', 'Trigger'], ['Synonyms', 'Synonym'],
+    ['Sequences', 'Sequence'], ['Types', 'Type'], ['Jobs', 'Job'],
+  ];
+
+  function groupByType(items: TreeItem[]): Map<string, TreeItem[]> {
     const byType = new Map<string, TreeItem[]>();
-    byType.set('Tables', filtered.filter((i) => i.type === 'Table'));
-    byType.set('Views', filtered.filter((i) => i.type === 'View'));
+    for (const [label, kind] of TYPE_ORDER) {
+      const group = items.filter((i) => i.type === kind);
+      if (group.length > 0) byType.set(label, group);
+    }
     return byType;
+  }
+
+  // In server mode: databases → type groups. In single DB: just type groups.
+  const databases = useMemo(() => {
+    if (!isServerMode) return null;
+    const byDb = new Map<string, TreeItem[]>();
+    for (const item of filtered) {
+      const db = item.databaseName ?? 'Unknown';
+      if (!byDb.has(db)) byDb.set(db, []);
+      byDb.get(db)!.push(item);
+    }
+    return byDb;
   }, [filtered, isServerMode]);
+
+  const typeGroups = useMemo(() => groupByType(filtered), [filtered]);
 
   function toggleGroup(key: string) {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
   function handleItemClick(item: TreeItem) {
-    const text = generateTableRef(item.tableInfo);
-    if (insertMode === 'newtab') onOpenInNewTab(`SELECT TOP 1000 *\nFROM ${text};\n`, item.databaseName);
-    else onInsertText(text);
+    const ref = `[${item.schemaName}].[${item.label}]`;
+    if (item.type === 'Table' || item.type === 'View') {
+      if (insertMode === 'newtab') onOpenInNewTab(`SELECT TOP 1000 *\nFROM ${ref};\n`, item.databaseName);
+      else onInsertText(ref);
+    } else if (item.type === 'Procedure' || item.type === 'Function') {
+      if (insertMode === 'newtab') onOpenInNewTab(`EXEC ${ref};\n`, item.databaseName);
+      else onInsertText(`EXEC ${ref}`);
+    } else {
+      onInsertText(ref);
+    }
   }
 
   function handleContextMenu(e: React.MouseEvent, item: TreeItem) {
@@ -178,6 +300,83 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
 
   function handleColumnClick(col: ColumnInfo) {
     onInsertText(`[${col.name}]`);
+  }
+
+  const GROUP_ICONS: Record<string, string> = {
+    Tables: '\u229F', Views: '\u22A1', Procedures: '\u229E',
+    Functions: '\u0192', Triggers: '\u26A1', Synonyms: '\u2194',
+    Sequences: '\u2116', Types: '\u2B25', Jobs: '\u23F1',
+  };
+
+  function renderTypeGroups(groups: Map<string, TreeItem[]>, indent: number, keyPrefix: string) {
+    return Array.from(groups.entries()).map(([typeName, items]) => {
+      const collapseKey = `${keyPrefix}${typeName}`;
+      const isCollapsed = collapsed[collapseKey];
+      const color = OBJECT_TYPE_COLORS[items[0]?.type] ?? '#666';
+
+      return (
+        <div key={collapseKey}>
+          <button
+            onClick={() => toggleGroup(collapseKey)}
+            className="w-full flex items-center gap-1.5 py-1 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+            style={{ paddingLeft: indent + 8 }}
+          >
+            <span className="text-[9px] text-text-muted w-3">{isCollapsed ? '\u25B8' : '\u25BE'}</span>
+            <span style={{ color }}>{GROUP_ICONS[typeName] ?? '\u25CF'}</span>
+            <span className="font-medium">{typeName}</span>
+            <span className="ml-auto pr-2 text-[9px] text-text-muted">{items.length}</span>
+          </button>
+          {!isCollapsed && items.map((item) => renderItem(item, indent + 16))}
+        </div>
+      );
+    });
+  }
+
+  function renderItem(item: TreeItem, indent: number) {
+    const color = OBJECT_TYPE_COLORS[item.type] ?? '#666';
+    const isExpanded = expandedTable === item.fullName;
+    const hasColumns = item.columns.length > 0;
+
+    return (
+      <div key={item.fullName}>
+        <div
+          className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer hover:bg-bg-hover transition-colors group"
+          style={{ paddingLeft: indent + 8 }}
+          onClick={() => handleItemClick(item)}
+          onContextMenu={(e) => handleContextMenu(e, item)}
+        >
+          {hasColumns ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpandedTable(isExpanded ? null : item.fullName); }}
+              className="text-[9px] text-text-muted w-3 flex-shrink-0"
+            >
+              {isExpanded ? '\u25BE' : '\u25B8'}
+            </button>
+          ) : (
+            <span className="w-3 flex-shrink-0" />
+          )}
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+          <span className="text-text-secondary group-hover:text-text-primary truncate">{item.label}</span>
+        </div>
+
+        {hasColumns && isExpanded && (
+          <div style={{ marginLeft: indent + 24 }} className="border-l border-border/40 pl-1">
+            {item.columns.map((col) => (
+              <button
+                key={col.name}
+                onClick={() => handleColumnClick(col)}
+                className="w-full flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text-secondary hover:bg-bg-hover/50 transition-colors"
+                title={`${col.name} ${formatColumnType(col)}${col.isPrimaryKey ? ' (PK)' : ''}${col.isNullable ? ' NULL' : ' NOT NULL'}`}
+              >
+                {col.isPrimaryKey && <span className="text-[7px] px-0.5 rounded bg-accent/20 text-accent">PK</span>}
+                <span className="truncate">{col.name}</span>
+                <span className="ml-auto text-[9px] text-text-muted">{formatColumnType(col)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -194,68 +393,33 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
 
       {/* Tree */}
       <div className="flex-1 overflow-y-auto py-1">
-        {Array.from(groups.entries()).map(([groupName, groupItems]) => {
-          if (groupItems.length === 0) return null;
-          const isGroupCollapsed = collapsed[groupName];
-
-          return (
-            <div key={groupName}>
-              <button
-                onClick={() => toggleGroup(groupName)}
-                className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-              >
-                <span className="text-[9px] text-text-muted w-3">{isGroupCollapsed ? '\u25B8' : '\u25BE'}</span>
-                <span className="font-medium">{groupName}</span>
-                <span className="ml-auto text-[9px] text-text-muted">{groupItems.length}</span>
-              </button>
-
-              {!isGroupCollapsed && groupItems.map((item) => {
-                const color = OBJECT_TYPE_COLORS[item.type] ?? '#666';
-                const isExpanded = expandedTable === item.fullName;
-
-                return (
-                  <div key={item.fullName}>
-                    <div
-                      className="flex items-center gap-1.5 px-2 py-0.5 ml-3 text-[11px] cursor-pointer hover:bg-bg-hover transition-colors group"
-                      onClick={() => handleItemClick(item)}
-                      onContextMenu={(e) => handleContextMenu(e, item)}
-                    >
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedTable(isExpanded ? null : item.fullName); }}
-                        className="text-[9px] text-text-muted w-3 flex-shrink-0"
-                      >
-                        {isExpanded ? '\u25BE' : '\u25B8'}
-                      </button>
-                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                      <span className="text-text-secondary group-hover:text-text-primary truncate">{item.label}</span>
-                      <span className="ml-auto text-[9px] text-text-muted opacity-0 group-hover:opacity-100">
-                        {item.type === 'View' ? 'V' : ''}
-                      </span>
-                    </div>
-
-                    {/* Expanded columns */}
-                    {isExpanded && (
-                      <div className="ml-8 border-l border-border/40 pl-1">
-                        {item.columns.map((col) => (
-                          <button
-                            key={col.name}
-                            onClick={() => handleColumnClick(col)}
-                            className="w-full flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text-secondary hover:bg-bg-hover/50 transition-colors"
-                            title={`${col.name} ${formatColumnType(col)}${col.isPrimaryKey ? ' (PK)' : ''}${col.isNullable ? ' NULL' : ' NOT NULL'}`}
-                          >
-                            {col.isPrimaryKey && <span className="text-[7px] px-0.5 rounded bg-accent/20 text-accent">PK</span>}
-                            <span className="truncate">{col.name}</span>
-                            <span className="ml-auto text-[9px] text-text-muted">{formatColumnType(col)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+        {isServerMode && databases ? (
+          // Server mode: Database → Type → Items
+          <>
+            {Array.from(databases.entries()).map(([dbName, dbItems]) => {
+              const isDbCollapsed = collapsed[`db:${dbName}`];
+              return (
+                <div key={dbName}>
+                  <button
+                    onClick={() => toggleGroup(`db:${dbName}`)}
+                    className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-primary font-medium hover:bg-bg-hover transition-colors"
+                  >
+                    <span className="text-[9px] text-text-muted w-3">{isDbCollapsed ? '\u25B8' : '\u25BE'}</span>
+                    <span className="text-accent">&#x229B;</span>
+                    <span>{dbName}</span>
+                    <span className="ml-auto text-[9px] text-text-muted">{dbItems.length}</span>
+                  </button>
+                  {!isDbCollapsed && renderTypeGroups(groupByType(dbItems), 12, `db:${dbName}:`)}
+                </div>
+              );
+            })}
+            {/* Server-level objects (Jobs) */}
+            {renderTypeGroups(groupByType(filtered.filter((i) => !i.databaseName)), 0, 'server:')}
+          </>
+        ) : (
+          // Single DB: Type → Items
+          renderTypeGroups(typeGroups, 0, '')
+        )}
 
         {filtered.length === 0 && (
           <div className="px-3 py-4 text-[11px] text-text-muted text-center">
