@@ -25,6 +25,7 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
   const result = useStore((s) => s.result);
   const openTab = useCodeStore((s) => s.openTab);
   const [expanded, setExpanded] = useState(false);
+  const [chainDepth, setChainDepth] = useState(5);
 
   const objectLookup = useMemo(() => buildObjectLookup(result?.schema ?? null), [result?.schema]);
 
@@ -99,7 +100,7 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
     if (detectCycle(fullName)) hasCycles = true;
 
     // Build tree (BFS with depth limit)
-    const maxDepth = 3;
+    const maxDepth = chainDepth;
 
     function buildTree(start: string, adj: Map<string, Set<string>>, depth: number, seen: Set<string>): ChainNode[] {
       if (depth >= maxDepth) return [];
@@ -152,7 +153,7 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
     const callees = buildTree(fullName, callsMap, 0, rootSeen);
 
     return { callers, callees, hasCycles };
-  }, [fullName, result?.relationships?.dependencies, result?.relationships?.viewDependencies, objectLookup]);
+  }, [fullName, result?.relationships?.dependencies, result?.relationships?.viewDependencies, objectLookup, chainDepth]);
 
   const total = callers.length + callees.length;
   if (total === 0) return null;
@@ -216,6 +217,21 @@ export function ExecutionChainPanel({ fullName, objectType }: ExecutionChainPane
 
       {expanded && (
         <div className="px-3 pb-2 space-y-1">
+          <div className="flex items-center gap-2 mb-1">
+            <label className="flex items-center gap-1 text-[10px] text-text-muted">
+              Depth:
+              <select
+                value={chainDepth}
+                onChange={(e) => { e.stopPropagation(); setChainDepth(Number(e.target.value)); }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-bg-primary border border-border rounded px-1 py-0.5 text-[10px] text-text-primary"
+              >
+                {[1, 2, 3, 5, 7, 10].map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           {callers.length > 0 && (
             <div>
               <div className="text-[9px] text-text-muted uppercase tracking-wider mb-0.5">Callers (upstream)</div>
