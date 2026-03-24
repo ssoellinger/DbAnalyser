@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useStore } from '../../hooks/useStore';
 import type { AnalyzerName, AnalyzerStatus } from '../../api/types';
+import iconSvg from '/icon.svg?url';
 
 const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: AnalyzerName }[] = [
   { path: '/dashboard', label: 'Dashboard', icon: '⊞' },
@@ -54,7 +55,7 @@ export function Sidebar() {
       }`}
     >
       <div className="flex items-center h-14 px-4 border-b border-border">
-        <img src="/icon.svg" alt="DbAnalyser" className="w-10 h-10 flex-shrink-0" />
+        <img src={iconSvg} alt="DbAnalyser" className="w-10 h-10 flex-shrink-0" />
         {!collapsed && (
           <span className="text-accent font-semibold text-sm truncate ml-2">
             {isServerMode ? `Server: ${serverName}` : (databaseName ?? 'DbAnalyser')}
