@@ -19,8 +19,9 @@ Available as a **desktop app** (Electron) with interactive visualizations or as 
 
 ### Desktop App
 
-- Interactive **Entity-Relationship Diagram** (drag, zoom, color-coded by schema)
+- Interactive **Entity-Relationship Diagram** (drag, zoom, color-coded by schema, cross-database FK support)
 - **Force-directed dependency graph** with database clustering, hulls, and cross-database edges
+- **Dependency Explorer** — search for any object, see its dependency neighborhood as a force graph with depth control (1–5 hops) and importance/impact stats
 - **Dashboard** with stat cards and largest-table chart
 - Tabbed schema browser with inline SQL definitions
 - Data profiling with sortable column statistics
@@ -31,6 +32,7 @@ Available as a **desktop app** (Electron) with interactive visualizations or as 
 - Real-time progress via SignalR
 - Encrypted credential storage via OS keychain
 - Connection history
+- **Cross-database support** — procedure calls, dependencies, DML references, and FK edges shown across databases
 
 ### Query Engine
 
@@ -51,6 +53,20 @@ Available as a **desktop app** (Electron) with interactive visualizations or as 
 - **Save & load** named queries per connection
 - **Pin results** for side-by-side comparison (up to 3)
 - Duplicate column resolution for JOINs (shows `Table.Column`)
+- **Semantic error marking** — unknown table/view names underlined, keyword typo detection
+- **Error line jump** — auto-jumps editor to error location with clickable button
+- Session expired detection with reconnect banner
+
+### Code Intelligence
+
+- **Code Search** — full-text search across all SQL definitions with regex, case-sensitive, and history
+- **Column Usage** search — pick a table + column, find all objects that reference it (alias-aware, no false positives)
+- **Object Explorer** with type/database filters, usage indicators, and sort by name/modified
+- **Execution chain** — procedure call hierarchy with cross-database support
+- **DML Summary** — table operations at a glance (SELECT/INSERT/UPDATE/DELETE)
+- **Mini ERD** — FK graph popup from any table
+- **Ctrl+Click navigation** — click identifiers to jump to definitions
+- **Flow-order Outline** — SELECT, INSERT, UPDATE, DELETE, EXEC, IF/WHILE, RETURN, THROW
 
 ### CLI
 
@@ -72,7 +88,7 @@ Available as a **desktop app** (Electron) with interactive visualizations or as 
 | Desktop | Electron 40, React 19, TypeScript 5, Vite 7, Tailwind CSS 4 |
 | State | Zustand 5 |
 | Visualizations | React Flow 12 (ERD), Dagre 2 (force graph), TanStack React Table 8, TanStack Virtual 3 |
-| Editor | CodeMirror 6 (SQL syntax, autocomplete), sql-formatter |
+| Editor | CodeMirror 6 (SQL syntax, autocomplete, lint), sql-formatter |
 | CLI | System.CommandLine, Spectre.Console |
 
 ## Project Structure
