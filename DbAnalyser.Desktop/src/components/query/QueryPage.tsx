@@ -103,8 +103,8 @@ export function QueryPage() {
     const view = viewRef.current;
     if (!view) return;
     const currentSql = view.state.doc.toString();
-    setTabs((prev) => prev.map((t) => t.id === activeTabId ? { ...t, sql: currentSql } : t));
-  }, [activeTabId]);
+    setTabs((prev) => prev.map((t) => t.id === activeTabId ? { ...t, sql: currentSql, database: selectedDb } : t));
+  }, [activeTabId, selectedDb]);
 
   // Fetch available databases on mount
   useEffect(() => {
@@ -121,21 +121,30 @@ export function QueryPage() {
     setSavedQueries(loadSavedQueries(sqKey));
   }, [hKey, sqKey]);
 
+  // Save tabs to localStorage (immediate)
+  const saveTabsNow = useCallback(() => {
+    const view = viewRef.current;
+    if (view) {
+      const currentSql = view.state.doc.toString();
+      const updatedTabs = tabs.map((t) => t.id === activeTabId ? { ...t, sql: currentSql } : t);
+      saveQueryTabs(qtKey, updatedTabs, activeTabId);
+    } else {
+      saveQueryTabs(qtKey, tabs, activeTabId);
+    }
+  }, [tabs, activeTabId, qtKey]);
+
   // Auto-save query tabs (debounced)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      // Save current editor content before persisting
-      const view = viewRef.current;
-      if (view) {
-        const currentSql = view.state.doc.toString();
-        const updatedTabs = tabs.map((t) => t.id === activeTabId ? { ...t, sql: currentSql } : t);
-        saveQueryTabs(qtKey, updatedTabs, activeTabId);
-      } else {
-        saveQueryTabs(qtKey, tabs, activeTabId);
-      }
-    }, 500);
+    const timer = setTimeout(saveTabsNow, 500);
     return () => clearTimeout(timer);
-  }, [tabs, activeTabId, qtKey]);
+  }, [saveTabsNow]);
+
+  // Save on unmount via ref to avoid stale closures
+  const saveTabsRef = useRef(saveTabsNow);
+  saveTabsRef.current = saveTabsNow;
+  useEffect(() => {
+    return () => saveTabsRef.current();
+  }, []);
 
   // ── Elapsed timer ──
   useEffect(() => {
@@ -302,21 +311,22 @@ export function QueryPage() {
   const addTab = useCallback(() => {
     saveCurrentTabSql();
     tabCounter++;
-    const newTab: QueryTab = { id: `tab-${Date.now()}`, title: `Query ${tabCounter}`, sql: '' };
+    const newTab: QueryTab = { id: `tab-${Date.now()}`, title: `Query ${tabCounter}`, sql: '', database: selectedDb };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newTab.id);
     setResponse(null);
-  }, [saveCurrentTabSql]);
+  }, [saveCurrentTabSql, selectedDb]);
 
   const openInNewTab = useCallback((text: string, database?: string) => {
     saveCurrentTabSql();
     tabCounter++;
-    const newTab: QueryTab = { id: `tab-${Date.now()}`, title: `Query ${tabCounter}`, sql: text };
+    const db = database && databases.includes(database) ? database : selectedDb;
+    const newTab: QueryTab = { id: `tab-${Date.now()}`, title: `Query ${tabCounter}`, sql: text, database: db };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newTab.id);
     setResponse(null);
-    if (database && databases.includes(database)) setSelectedDb(database);
-  }, [saveCurrentTabSql, databases]);
+    if (db !== selectedDb) setSelectedDb(db);
+  }, [saveCurrentTabSql, databases, selectedDb]);
 
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
@@ -335,7 +345,10 @@ export function QueryPage() {
     saveCurrentTabSql();
     setActiveTabId(id);
     setResponse(null);
-  }, [activeTabId, saveCurrentTabSql]);
+    // Restore the target tab's database
+    const targetTab = tabs.find((t) => t.id === id);
+    if (targetTab?.database) setSelectedDb(targetTab.database);
+  }, [activeTabId, saveCurrentTabSql, tabs]);
 
   // ── Save/Load queries ──
   const saveCurrentQuery = useCallback(() => {
