@@ -32,6 +32,7 @@ interface QueryToolbarProps {
   onBeginTransaction: () => void;
   onCommitTransaction: () => void;
   onRollbackTransaction: () => void;
+  onAiExplain?: () => void;
 }
 
 export function QueryToolbar({
@@ -42,6 +43,7 @@ export function QueryToolbar({
   onSave, onToggleSaved, onLoadQuery, onDeleteSavedQuery,
   onToggleHistory, onRestoreHistory,
   onBeginTransaction, onCommitTransaction, onRollbackTransaction,
+  onAiExplain,
 }: QueryToolbarProps) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border">
@@ -103,6 +105,14 @@ export function QueryToolbar({
         title="Format SQL">
         Format
       </button>
+
+      {onAiExplain && (
+        <button onClick={onAiExplain}
+          className="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-accent hover:bg-bg-hover transition-colors"
+          title="Send query to AI for explanation">
+          AI Explain
+        </button>
+      )}
 
       <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-1">
         Max:

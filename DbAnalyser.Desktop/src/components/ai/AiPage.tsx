@@ -23,6 +23,10 @@ export function AiPage() {
   const result = useStore((s) => s.result);
   const serverName = useStore((s) => s.serverName);
   const analyzerStatus = useStore((s) => s.analyzerStatus);
+  const aiPendingPrompt = useStore((s) => s.aiPendingPrompt);
+  const setAiPendingPrompt = useStore((s) => s.setAiPendingPrompt);
+  const aiExplainEnabled = useStore((s) => s.aiExplainEnabled);
+  const toggleAiExplain = useStore((s) => s.toggleAiExplain);
 
   const [config, setConfig] = useState<AiProviderConfig | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
@@ -44,6 +48,16 @@ export function AiPage() {
       setConfigLoaded(true);
     });
   }, []);
+
+  // Auto-send pending prompt (from "Explain this" in Code/Query page)
+  useEffect(() => {
+    if (aiPendingPrompt && configLoaded && config && result && !streaming) {
+      const prompt = aiPendingPrompt;
+      setAiPendingPrompt(null);
+      // Small delay to ensure component is fully mounted
+      setTimeout(() => sendMessage(prompt), 100);
+    }
+  }, [aiPendingPrompt, configLoaded, config, result, streaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -209,6 +223,15 @@ export function AiPage() {
           >
             &#x2699;
           </button>
+          <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-2 cursor-pointer" title="Show 'AI Explain' buttons in Code and Query pages">
+            <input
+              type="checkbox"
+              checked={aiExplainEnabled}
+              onChange={toggleAiExplain}
+              className="accent-accent"
+            />
+            AI Explain
+          </label>
         </div>
       </div>
 

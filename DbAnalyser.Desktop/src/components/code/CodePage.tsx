@@ -23,6 +23,7 @@ import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ColumnInfo } from '../../api/types';
 import type { ResolvedObject } from './sqlIdentifierResolver';
 import type { TooltipInfo } from './codemirrorTooltip';
+import { useNavigate } from 'react-router-dom';
 
 export function CodePage() {
   const { status, error, progress, refresh, cancel } = useAnalyzer('schema');
@@ -79,6 +80,9 @@ function CodeContent() {
   const result = useStore((s) => s.result);
   const databaseName = useStore((s) => s.databaseName);
   const serverName = useStore((s) => s.serverName);
+  const setAiPendingPrompt = useStore((s) => s.setAiPendingPrompt);
+  const aiExplainEnabled = useStore((s) => s.aiExplainEnabled);
+  const navigate = useNavigate();
   const tabs = useCodeStore((s) => s.tabs);
   const activeTabId = useCodeStore((s) => s.activeTabId);
   const splitTabId = useCodeStore((s) => s.splitTabId);
@@ -498,6 +502,20 @@ function CodeContent() {
                   title="Show FK relationship graph for this table"
                 >
                   FK Graph
+                </button>
+              )}
+              {aiExplainEnabled && activeTab && ['Procedure', 'Function', 'View', 'Trigger'].includes(activeTab.objectType) && (
+                <button
+                  onClick={() => {
+                    const def = activeTab.definition?.slice(0, 3000) ?? '';
+                    const prompt = `Explain this ${activeTab.objectType.toLowerCase()} "${activeTab.fullName}":\n\n\`\`\`sql\n${def}\n\`\`\`\n\nWhat does it do? Highlight any potential issues, performance concerns, or improvements.`;
+                    setAiPendingPrompt(prompt);
+                    navigate('/ai');
+                  }}
+                  className="text-text-secondary hover:text-accent transition-colors"
+                  title="Send to AI for explanation"
+                >
+                  AI Explain
                 </button>
               )}
               {activeTab && activeTab.objectType === 'Synonym' && result?.schema && (() => {

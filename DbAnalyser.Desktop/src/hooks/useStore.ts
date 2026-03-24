@@ -62,6 +62,8 @@ interface AppState {
   searchOpen: boolean;
   detailPanelObject: string | null;
   detailPanelObjectType: string | null;
+  aiPendingPrompt: string | null;
+  aiExplainEnabled: boolean;
 
   // History
   connectionHistory: ConnectionHistoryEntry[];
@@ -83,6 +85,8 @@ interface AppState {
   toggleSearch: () => void;
   openDetailPanel: (fullName: string, objectType: string) => void;
   closeDetailPanel: () => void;
+  setAiPendingPrompt: (prompt: string | null) => void;
+  toggleAiExplain: () => void;
   addToHistory: (fields: { server: string; port: string; database: string; authMode: 'windows' | 'sql'; username: string; password: string }, providerType: string) => Promise<void>;
   loadHistory: () => void;
 }
@@ -109,6 +113,8 @@ export const useStore = create<AppState>((set, get) => ({
   searchOpen: false,
   detailPanelObject: null,
   detailPanelObjectType: null,
+  aiPendingPrompt: null,
+  aiExplainEnabled: false,
   connectionHistory: [],
 
   initSignalR: async () => {
@@ -138,8 +144,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setConnecting: (isConnecting) => set({ isConnecting, connectionError: null }),
-  setConnected: (sessionId, databaseName, isServerMode = false, serverName = null, providerType = 'sqlserver') =>
-    set({ sessionId, databaseName, isServerMode, serverName, providerType, isConnecting: false, connectionError: null }),
+  setConnected: (sessionId, databaseName, isServerMode = false, serverName = null, providerType = 'sqlserver') => {
+    const key = `dbanalyser-ai-explain-${(serverName ?? '').replace(/[^a-zA-Z0-9]/g, '_')}`;
+    let aiExplainEnabled = false;
+    try { const raw = localStorage.getItem(key); if (raw) aiExplainEnabled = JSON.parse(raw); } catch {}
+    set({ sessionId, databaseName, isServerMode, serverName, providerType, isConnecting: false, connectionError: null, aiExplainEnabled });
+  },
   setConnectionError: (error) => set({ connectionError: error, isConnecting: false }),
   setAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
   setProgress: (progress) => set({ progress }),
@@ -293,6 +303,14 @@ export const useStore = create<AppState>((set, get) => ({
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   openDetailPanel: (fullName, objectType) => set({ detailPanelObject: fullName, detailPanelObjectType: objectType }),
   closeDetailPanel: () => set({ detailPanelObject: null, detailPanelObjectType: null }),
+  setAiPendingPrompt: (prompt) => set({ aiPendingPrompt: prompt }),
+  toggleAiExplain: () => {
+    const { aiExplainEnabled, serverName } = get();
+    const next = !aiExplainEnabled;
+    const key = `dbanalyser-ai-explain-${(serverName ?? '').replace(/[^a-zA-Z0-9]/g, '_')}`;
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch {}
+    set({ aiExplainEnabled: next });
+  },
 
   addToHistory: async (fields, providerType) => {
     // Encrypt credentials via Electron's safeStorage (OS credential store)

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
 import { sql, MSSQL, PostgreSQL } from '@codemirror/lang-sql';
@@ -45,6 +46,9 @@ export function QueryPage() {
   const dbSchema = useStore((s) => s.result?.schema);
   const serverName = useStore((s) => s.serverName);
   const disconnect = useStore((s) => s.disconnect);
+  const setAiPendingPrompt = useStore((s) => s.setAiPendingPrompt);
+  const aiExplainEnabled = useStore((s) => s.aiExplainEnabled);
+  const navigateTo = useNavigate();
 
   // Connection-scoped storage keys
   const hKey = useMemo(() => historyKey(serverName), [serverName]);
@@ -541,6 +545,14 @@ export function QueryPage() {
           onBeginTransaction={beginTransaction}
           onCommitTransaction={commitTransaction}
           onRollbackTransaction={rollbackTransaction}
+          onAiExplain={aiExplainEnabled ? () => {
+            const view = viewRef.current;
+            if (!view) return;
+            const sqlText = view.state.doc.toString().slice(0, 3000);
+            if (!sqlText.trim()) return;
+            setAiPendingPrompt(`Explain this SQL query:\n\n\`\`\`sql\n${sqlText}\n\`\`\`\n\nWhat does it do? Are there any performance concerns or improvements?`);
+            navigateTo('/ai');
+          } : undefined}
         />
 
         {/* Editor */}
