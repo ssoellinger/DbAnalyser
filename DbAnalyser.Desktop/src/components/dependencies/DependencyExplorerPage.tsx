@@ -142,6 +142,15 @@ function ExplorerInner() {
     };
   }, [selected, neighborhood, forwardAdj, deps]);
 
+  const openDetailPanel = useStore((s) => s.openDetailPanel);
+
+  const handleNodeClick = useCallback((node: GraphNode) => {
+    if (!schema) return;
+    const fullName = node.id;
+    if (schema.tables.some((t) => t.fullName === fullName)) openDetailPanel(fullName, 'Table');
+    else if (schema.views.some((v) => v.fullName === fullName)) openDetailPanel(fullName, 'View');
+  }, [schema, openDetailPanel]);
+
   const handleNodeDoubleClick = useCallback((node: GraphNode) => {
     if (!schema) return;
     const fullName = node.id;
@@ -237,6 +246,7 @@ function ExplorerInner() {
           <ForceGraph
             nodes={graphNodes}
             edges={graphEdges}
+            onNodeClick={handleNodeClick}
             onNodeDoubleClick={handleNodeDoubleClick}
           />
         </div>

@@ -137,6 +137,13 @@ function ErdGraphInner() {
   const isServerMode = useStore((s) => s.isServerMode);
   const navigate = useNavigate();
   const openTab = useCodeStore((s) => s.openTab);
+  const openDetailPanel = useStore((s) => s.openDetailPanel);
+
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    const fullName = node.id;
+    if (schema.tables.some((t) => t.fullName === fullName)) openDetailPanel(fullName, 'Table');
+    else if (schema.views.some((v) => v.fullName === fullName)) openDetailPanel(fullName, 'View');
+  }, [schema, openDetailPanel]);
 
   const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
     const fullName = node.id;
@@ -524,6 +531,7 @@ function ErdGraphInner() {
           edgeTypes={edgeTypes}
           onInit={handleInit}
           onViewportChange={handleViewportChange}
+          onNodeClick={handleNodeClick}
           onNodeDoubleClick={handleNodeDoubleClick}
           fitView={false}
           minZoom={0.05}

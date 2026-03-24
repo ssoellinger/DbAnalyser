@@ -23,6 +23,7 @@ export interface GraphEdge {
 interface ForceGraphProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
 }
 
@@ -126,7 +127,7 @@ interface CachedLayout {
 let layoutCache: CachedLayout | null = null;
 let layoutCacheKey = '';
 
-export function ForceGraph({ nodes, edges, onNodeDoubleClick }: ForceGraphProps) {
+export function ForceGraph({ nodes, edges, onNodeClick, onNodeDoubleClick }: ForceGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const simNodesRef = useRef<SimNode[]>([]);
@@ -673,6 +674,21 @@ export function ForceGraph({ nodes, edges, onNodeDoubleClick }: ForceGraphProps)
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onWheel={handleWheel}
+        onClick={(e) => {
+          if (!onNodeClick) return;
+          const rect = svgRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const sx = e.clientX - rect.left;
+          const sy = e.clientY - rect.top;
+          const { x: mx, y: my } = screenToWorld(sx, sy);
+          const simNodes = simNodesRef.current;
+          for (const n of simNodes) {
+            if (Math.hypot(mx - n.x, my - n.y) < n.radius + 5) {
+              onNodeClick(n);
+              break;
+            }
+          }
+        }}
         onDoubleClick={(e) => {
           if (!onNodeDoubleClick) return;
           const rect = svgRef.current?.getBoundingClientRect();

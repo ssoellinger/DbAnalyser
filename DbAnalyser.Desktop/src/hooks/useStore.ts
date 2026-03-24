@@ -60,6 +60,8 @@ interface AppState {
   // UI
   sidebarCollapsed: boolean;
   searchOpen: boolean;
+  detailPanelObject: string | null;
+  detailPanelObjectType: string | null;
 
   // History
   connectionHistory: ConnectionHistoryEntry[];
@@ -79,6 +81,8 @@ interface AppState {
   disconnect: () => void;
   toggleSidebar: () => void;
   toggleSearch: () => void;
+  openDetailPanel: (fullName: string, objectType: string) => void;
+  closeDetailPanel: () => void;
   addToHistory: (fields: { server: string; port: string; database: string; authMode: 'windows' | 'sql'; username: string; password: string }, providerType: string) => Promise<void>;
   loadHistory: () => void;
 }
@@ -103,6 +107,8 @@ export const useStore = create<AppState>((set, get) => ({
   loadedFilePath: null,
   sidebarCollapsed: false,
   searchOpen: false,
+  detailPanelObject: null,
+  detailPanelObjectType: null,
   connectionHistory: [],
 
   initSignalR: async () => {
@@ -285,6 +291,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
+  openDetailPanel: (fullName, objectType) => set({ detailPanelObject: fullName, detailPanelObjectType: objectType }),
+  closeDetailPanel: () => set({ detailPanelObject: null, detailPanelObjectType: null }),
 
   addToHistory: async (fields, providerType) => {
     // Encrypt credentials via Electron's safeStorage (OS credential store)

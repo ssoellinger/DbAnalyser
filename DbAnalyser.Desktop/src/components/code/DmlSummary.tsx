@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useStore } from '../../hooks/useStore';
-import { useCodeStore } from './useCodeStore';
 import { buildObjectLookup } from './schemaLookup';
 
 interface DmlSummaryProps {
@@ -128,7 +127,7 @@ function parseDmlOperations(definition: string): Map<string, DmlEntry> {
 
 export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps) {
   const result = useStore((s) => s.result);
-  const openTab = useCodeStore((s) => s.openTab);
+  const openDetailPanel = useStore((s) => s.openDetailPanel);
 
   const { regularEntries, tempEntries } = useMemo(() => {
     if (objectType !== 'Procedure' && objectType !== 'Function') return { regularEntries: [], tempEntries: [] };
@@ -148,7 +147,7 @@ export function DmlSummary({ definition, objectType, fullName }: DmlSummaryProps
   function handleClick(tableName: string) {
     const obj = objectLookup.get(tableName.toLowerCase());
     if (obj) {
-      openTab(obj);
+      openDetailPanel(obj.fullName, obj.objectType);
     }
   }
 

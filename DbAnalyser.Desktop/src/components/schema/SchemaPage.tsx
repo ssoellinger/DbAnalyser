@@ -268,6 +268,8 @@ function SchemaTabContent({
   onSelectView: (name: string) => void;
   onToggleDef: (name: string) => void;
 }) {
+  const openDetailPanel = useStore((s) => s.openDetailPanel);
+
   // Build lookup maps once
   const rowCountMap = useMemo(() => {
     if (!profiles) return new Map<string, number>();
@@ -294,7 +296,7 @@ function SchemaTabContent({
           accessorKey: 'fullName',
           cell: ({ row }) => (
             <button
-              onClick={() => onSelectTable(row.original.fullName)}
+              onClick={() => openDetailPanel(row.original.fullName, 'Table')}
               className="text-accent hover:text-accent-hover transition-colors"
             >
               {row.original.fullName}
@@ -327,7 +329,7 @@ function SchemaTabContent({
           accessorKey: 'fullName',
           cell: ({ row }) => (
             <button
-              onClick={() => onSelectView(row.original.fullName)}
+              onClick={() => openDetailPanel(row.original.fullName, 'View')}
               className="text-accent hover:text-accent-hover transition-colors"
             >
               {row.original.fullName}

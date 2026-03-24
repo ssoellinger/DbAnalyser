@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { SearchDialog } from '../shared/SearchDialog';
+import { TableDetailPanel } from '../shared/TableDetailPanel';
 import { useStore } from '../../hooks/useStore';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -17,6 +18,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <SearchDialog />
+      <TableDetailPanel />
     </div>
   );
 }
