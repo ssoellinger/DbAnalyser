@@ -48,7 +48,7 @@ export function QueryToolbar({
   onAiExplain, showExplorer, onToggleExplorer,
 }: QueryToolbarProps) {
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border">
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border overflow-x-auto scrollbar-none flex-shrink-0">
       {onToggleExplorer && (
         <button onClick={onToggleExplorer}
           className={`px-2 py-1 text-xs rounded border transition-colors ${showExplorer ? 'border-accent text-accent bg-accent/10' : 'border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover'}`}
@@ -123,7 +123,7 @@ export function QueryToolbar({
         </button>
       )}
 
-      <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-1">
+      <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-1 flex-shrink-0">
         Max:
         <select value={maxRows} onChange={(e) => onSetMaxRows(Number(e.target.value))}
           className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary">
@@ -131,7 +131,7 @@ export function QueryToolbar({
         </select>
       </label>
 
-      <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+      <label className="flex items-center gap-1.5 text-xs text-text-secondary flex-shrink-0">
         Timeout:
         <select value={timeoutSeconds} onChange={(e) => onSetTimeout(Number(e.target.value))}
           className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary">
@@ -140,7 +140,7 @@ export function QueryToolbar({
       </label>
 
       {databases.length > 0 && (
-        <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-1">
+        <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-1 flex-shrink-0">
           DB:
           <select value={selectedDb} onChange={(e) => onSetSelectedDb(e.target.value)}
             className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary max-w-[150px]">
@@ -201,9 +201,8 @@ export function QueryToolbar({
         )}
       </div>
 
-      <span className="ml-auto text-xs text-text-muted flex items-center gap-2">
+      <span className="ml-auto text-xs text-text-muted flex items-center gap-2 flex-shrink-0 whitespace-nowrap">
         {hasSchema && <span className="text-green-400" title="Autocomplete active">&#10003;</span>}
-        <span>Ctrl+Enter run &middot; Ctrl+D statement &middot; Ctrl+S save</span>
       </span>
     </div>
   );

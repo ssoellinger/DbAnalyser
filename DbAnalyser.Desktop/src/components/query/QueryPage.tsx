@@ -69,7 +69,7 @@ export function QueryPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [databases, setDatabases] = useState<string[]>([]);
   const [selectedDb, setSelectedDb] = useState<string>('');
-  const [editorHeightPct, setEditorHeightPct] = useState(40);
+  const [editorHeightPct, setEditorHeightPct] = useState(35);
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(() => loadSavedQueries(sqKey));
   const [showSaved, setShowSaved] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -530,7 +530,7 @@ export function QueryPage() {
       )}
 
       {/* Main content */}
-      <div className="flex flex-col flex-1 min-w-0" ref={splitContainerRef}>
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden" ref={splitContainerRef}>
       {/* Warning banner */}
       {sessionLost ? (
         <div className="bg-severity-error/20 border-b border-severity-error/50 px-4 py-2 text-xs text-severity-error flex items-center gap-3">
@@ -551,7 +551,7 @@ export function QueryPage() {
       )}
 
       {/* Editor section */}
-      <div className="flex-shrink-0" style={{ height: `${editorHeightPct}%`, minHeight: MIN_EDITOR_HEIGHT }}>
+      <div className="flex-none overflow-hidden" style={{ height: `${editorHeightPct}%`, minHeight: MIN_EDITOR_HEIGHT, maxHeight: `calc(100% - ${MIN_RESULTS_HEIGHT}px)` }}>
         {/* Query tabs */}
         <div className="flex items-center bg-bg-secondary border-b border-border px-1">
           {tabs.map((tab) => (
@@ -642,7 +642,7 @@ export function QueryPage() {
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {/* Results view selector + status */}
         {response && (
-          <div className="flex items-center bg-bg-secondary border-b border-border text-xs">
+          <div className="flex items-center bg-bg-secondary border-b border-border text-xs overflow-x-auto scrollbar-none flex-shrink-0">
             <button onClick={() => setResultsView('results')}
               className={`px-3 py-1.5 border-b-2 transition-colors ${resultsView === 'results' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
               Results
@@ -670,7 +670,7 @@ export function QueryPage() {
               </button>
             )}
 
-            <div className="ml-auto px-3 py-1.5 flex items-center gap-3">
+            <div className="ml-auto px-3 py-1.5 flex items-center gap-3 flex-shrink-0 whitespace-nowrap">
               {response.error ? (
                 <span className="text-severity-error">Error</span>
               ) : (
