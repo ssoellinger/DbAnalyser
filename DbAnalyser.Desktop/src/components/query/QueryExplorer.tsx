@@ -11,6 +11,7 @@ import {
 
 interface QueryExplorerProps {
   onInsertText: (text: string, database?: string) => void;
+  onOpenInNewTab: (text: string, database?: string) => void;
 }
 
 interface TreeItem {
@@ -21,6 +22,17 @@ interface TreeItem {
   columns: ColumnInfo[];
   tableInfo: TableInfo; // for DDL generation
   databaseName?: string;
+}
+
+function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+    >
+      {label}
+    </button>
+  );
 }
 
 // ── Context menu ──
@@ -52,46 +64,37 @@ function ContextMenu({ menu, onAction, onClose }: {
   }, [onClose]);
 
   const db = menu.item.databaseName;
-  const actions = [
-    { label: 'SELECT TOP 1000', fn: () => onAction(generateSelectTop(menu.item.tableInfo), db) },
-    { label: 'SELECT COUNT(*)', fn: () => onAction(generateSelectCount(menu.item.tableInfo), db) },
-    { label: 'INSERT template', fn: () => onAction(generateInsertTemplate(menu.item.tableInfo), db) },
-    { label: 'Column list', fn: () => onAction(generateColumnList(menu.item.tableInfo)) },
-    { label: 'Script as CREATE', fn: () => onAction(generateTableDdl(menu.item.tableInfo)) },
-    { label: 'Insert table name', fn: () => onAction(generateTableRef(menu.item.tableInfo)) },
-  ];
+  const t = menu.item.tableInfo;
 
   return (
     <div
       ref={ref}
-      className="fixed bg-bg-secondary border border-border rounded shadow-xl z-50 py-1 min-w-[160px]"
+      className="fixed bg-bg-secondary border border-border rounded shadow-xl z-50 py-1 min-w-[180px]"
       style={{ left: menu.x, top: menu.y }}
     >
       <div className="px-3 py-1 text-[10px] text-text-muted border-b border-border/50 truncate">
         {menu.item.fullName}
       </div>
-      {actions.map((a) => (
-        <button
-          key={a.label}
-          onClick={() => { a.fn(); onClose(); }}
-          className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
-        >
-          {a.label}
-        </button>
-      ))}
+      <MenuItem label="SELECT TOP 1000" onClick={() => { onAction(generateSelectTop(t), db); onClose(); }} />
+      <MenuItem label="SELECT COUNT(*)" onClick={() => { onAction(generateSelectCount(t), db); onClose(); }} />
+      <MenuItem label="INSERT template" onClick={() => { onAction(generateInsertTemplate(t), db); onClose(); }} />
+      <MenuItem label="Column list" onClick={() => { onAction(generateColumnList(t)); onClose(); }} />
+      <MenuItem label="Script as CREATE" onClick={() => { onAction(generateTableDdl(t)); onClose(); }} />
+      <MenuItem label="Insert table name" onClick={() => { onAction(generateTableRef(t)); onClose(); }} />
     </div>
   );
 }
 
 // ── Main component ──
 
-export function QueryExplorer({ onInsertText }: QueryExplorerProps) {
+export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerProps) {
   const schema = useStore((s) => s.result?.schema);
   const isServerMode = useStore((s) => s.isServerMode);
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [insertMode, setInsertMode] = useState<'cursor' | 'newtab'>('newtab');
 
   // Build tree items
   const items = useMemo(() => {
@@ -163,7 +166,9 @@ export function QueryExplorer({ onInsertText }: QueryExplorerProps) {
   }
 
   function handleItemClick(item: TreeItem) {
-    onInsertText(generateTableRef(item.tableInfo));
+    const text = generateTableRef(item.tableInfo);
+    if (insertMode === 'newtab') onOpenInNewTab(`SELECT TOP 1000 *\nFROM ${text};\n`, item.databaseName);
+    else onInsertText(text);
   }
 
   function handleContextMenu(e: React.MouseEvent, item: TreeItem) {
@@ -260,15 +265,32 @@ export function QueryExplorer({ onInsertText }: QueryExplorerProps) {
       </div>
 
       {/* Footer */}
-      <div className="px-2 py-1 border-t border-border text-[9px] text-text-muted">
-        Right-click for actions
+      <div className="px-2 py-1.5 border-t border-border flex items-center gap-1">
+        <button
+          onClick={() => setInsertMode('cursor')}
+          className={`px-1.5 py-0.5 text-[9px] rounded transition-colors ${insertMode === 'cursor' ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-secondary'}`}
+          title="Insert SQL at cursor position"
+        >
+          At cursor
+        </button>
+        <button
+          onClick={() => setInsertMode('newtab')}
+          className={`px-1.5 py-0.5 text-[9px] rounded transition-colors ${insertMode === 'newtab' ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-secondary'}`}
+          title="Open SQL in a new query tab"
+        >
+          New tab
+        </button>
       </div>
 
       {/* Context menu */}
       {contextMenu && (
         <ContextMenu
           menu={contextMenu}
-          onAction={(text, db) => { onInsertText(text, db); setContextMenu(null); }}
+          onAction={(text, db) => {
+            if (insertMode === 'newtab') onOpenInNewTab(text, db);
+            else onInsertText(text, db);
+            setContextMenu(null);
+          }}
           onClose={() => setContextMenu(null)}
         />
       )}

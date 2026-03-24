@@ -281,6 +281,16 @@ export function QueryPage() {
     setResponse(null);
   }, [saveCurrentTabSql]);
 
+  const openInNewTab = useCallback((text: string, database?: string) => {
+    saveCurrentTabSql();
+    tabCounter++;
+    const newTab: QueryTab = { id: `tab-${Date.now()}`, title: `Query ${tabCounter}`, sql: text };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+    setResponse(null);
+    if (database && databases.includes(database)) setSelectedDb(database);
+  }, [saveCurrentTabSql, databases]);
+
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
       if (prev.length <= 1) return prev;
@@ -510,7 +520,7 @@ export function QueryPage() {
       {showExplorer && dbSchema && (
         <>
           <div style={{ width: explorerWidth, minWidth: explorerWidth }} className="flex-shrink-0">
-            <QueryExplorer onInsertText={insertTextAtCursor} />
+            <QueryExplorer onInsertText={insertTextAtCursor} onOpenInNewTab={openInNewTab} />
           </div>
           <div
             onMouseDown={handleExplorerResize}
