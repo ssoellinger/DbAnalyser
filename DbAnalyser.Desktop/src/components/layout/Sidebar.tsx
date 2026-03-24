@@ -4,6 +4,9 @@ import type { AnalyzerName, AnalyzerStatus } from '../../api/types';
 
 const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: AnalyzerName }[] = [
   { path: '/dashboard', label: 'Dashboard', icon: '⊞' },
+  { path: '/query', label: 'Query', icon: '▷' },
+  { path: '/code-search', label: 'Code Search', icon: '⌕', analyzer: 'schema' },
+  { path: '/code', label: 'Code', icon: '{ }', analyzer: 'schema' },
   { path: '/dependencies', label: 'Dependencies', icon: '⊶', analyzer: 'relationships' },
   { path: '/dep-explorer', label: 'Dep Explorer', icon: '⊛', analyzer: 'relationships' },
   { path: '/erd', label: 'ERD', icon: '⊡', analyzer: 'schema' },
@@ -14,9 +17,6 @@ const NAV_ITEMS: { path: string; label: string; icon: string; analyzer?: Analyze
   { path: '/quality', label: 'Quality', icon: '⚑', analyzer: 'quality' },
   { path: '/indexing', label: 'Indexing', icon: '⊕', analyzer: 'indexing' },
   { path: '/usage', label: 'Usage', icon: '◎', analyzer: 'usage' },
-  { path: '/code', label: 'Code', icon: '{ }', analyzer: 'schema' },
-  { path: '/code-search', label: 'Code Search', icon: '⌕', analyzer: 'schema' },
-  { path: '/query', label: 'Query', icon: '▷' },
   { path: '/ai', label: 'AI Insights', icon: '✦' },
 ];
 
