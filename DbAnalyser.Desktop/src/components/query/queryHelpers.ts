@@ -146,3 +146,36 @@ export function buildSqlSchema(schema: DatabaseSchema | null | undefined, databa
   }
   return ns;
 }
+
+// ── SQL generation helpers for Query Explorer ──
+
+import type { TableInfo } from '../../api/types';
+import { formatColumnType } from '../shared/formatColumnType';
+
+export function generateSelectTop(table: TableInfo, n = 1000): string {
+  return `SELECT TOP ${n} *\nFROM [${table.schemaName}].[${table.tableName}];\n`;
+}
+
+export function generateSelectCount(table: TableInfo): string {
+  return `SELECT COUNT(*) AS [Count]\nFROM [${table.schemaName}].[${table.tableName}];\n`;
+}
+
+export function generateInsertTemplate(table: TableInfo): string {
+  const cols = table.columns.filter((c) => !c.isIdentity && !c.isComputed);
+  const colNames = cols.map((c) => `[${c.name}]`).join(', ');
+  const values = cols.map((c) => {
+    if (c.dataType.toLowerCase().includes('char') || c.dataType.toLowerCase().includes('text')) return `''`;
+    if (c.dataType.toLowerCase().includes('date')) return `GETDATE()`;
+    if (c.isNullable) return 'NULL';
+    return '0';
+  }).join(', ');
+  return `INSERT INTO [${table.schemaName}].[${table.tableName}] (${colNames})\nVALUES (${values});\n`;
+}
+
+export function generateColumnList(table: TableInfo): string {
+  return table.columns.map((c) => `[${c.name}]`).join(', ');
+}
+
+export function generateTableRef(table: TableInfo): string {
+  return `[${table.schemaName}].[${table.tableName}]`;
+}

@@ -33,6 +33,8 @@ interface QueryToolbarProps {
   onCommitTransaction: () => void;
   onRollbackTransaction: () => void;
   onAiExplain?: () => void;
+  showExplorer?: boolean;
+  onToggleExplorer?: () => void;
 }
 
 export function QueryToolbar({
@@ -43,10 +45,17 @@ export function QueryToolbar({
   onSave, onToggleSaved, onLoadQuery, onDeleteSavedQuery,
   onToggleHistory, onRestoreHistory,
   onBeginTransaction, onCommitTransaction, onRollbackTransaction,
-  onAiExplain,
+  onAiExplain, showExplorer, onToggleExplorer,
 }: QueryToolbarProps) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border">
+      {onToggleExplorer && (
+        <button onClick={onToggleExplorer}
+          className={`px-2 py-1 text-xs rounded border transition-colors ${showExplorer ? 'border-accent text-accent bg-accent/10' : 'border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover'}`}
+          title={showExplorer ? 'Hide Object Explorer' : 'Show Object Explorer'}>
+          &#9776;
+        </button>
+      )}
       <button onClick={onExecute} disabled={isExecuting}
         className="px-3 py-1 text-xs font-medium rounded bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors flex items-center gap-1.5">
         {isExecuting ? <><span className="animate-spin">&#9696;</span> Running...</> : <>&#9655; Execute</>}

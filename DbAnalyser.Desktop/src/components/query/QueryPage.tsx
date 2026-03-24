@@ -13,6 +13,7 @@ import { sqlSemanticLinter } from './sqlLinter';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from '../code/codemirrorTheme';
 import { QueryResultsGrid } from './QueryResultsGrid';
 import { QueryToolbar } from './QueryToolbar';
+import { QueryExplorer } from './QueryExplorer';
 import { ExecutionPlanView } from './ExecutionPlanView';
 import { ColumnStats } from './ColumnStats';
 import { IoStatsView, hasIoStats } from './IoStatsView';
@@ -78,6 +79,8 @@ export function QueryPage() {
   const [pinnedResults, setPinnedResults] = useState<PinnedResult[]>([]);
   const [transactionState, setTransactionState] = useState<'none' | 'active'>('none');
   const [sessionLost, setSessionLost] = useState(false);
+  const [showExplorer, setShowExplorer] = useState(true);
+  const [explorerWidth, setExplorerWidth] = useState(240);
 
   const abortRef = useRef<AbortController | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -212,6 +215,48 @@ export function QueryPage() {
   }, [executeQuery]);
 
   const cancelQuery = useCallback(() => { abortRef.current?.abort(); setIsExecuting(false); }, []);
+
+  const insertTextAtCursor = useCallback((text: string, database?: string) => {
+    const view = viewRef.current;
+    if (!view) return;
+
+    // Switch DB dropdown if a database is specified
+    if (database && databases.includes(database) && database !== selectedDb) {
+      setSelectedDb(database);
+    }
+
+    // Check if editor is empty (ignoring comments and whitespace)
+    const content = view.state.doc.toString();
+    const stripped = content.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    if (!stripped) {
+      // Replace entire content
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    } else {
+      // Insert at cursor
+      const pos = view.state.selection.main.head;
+      view.dispatch({ changes: { from: pos, to: pos, insert: text } });
+    }
+    view.focus();
+  }, [databases, selectedDb]);
+
+  const handleExplorerResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = explorerWidth;
+    const onMove = (ev: MouseEvent) => {
+      setExplorerWidth(Math.max(150, Math.min(400, startWidth + ev.clientX - startX)));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [explorerWidth]);
   const clearResults = useCallback(() => { setResponse(null); setActiveResultTab(0); }, []);
 
   const formatQuery = useCallback(() => {
@@ -460,7 +505,22 @@ export function QueryPage() {
   const hasIo = hasMessages && hasIoStats(response?.messages ?? []);
 
   return (
-    <div className="flex flex-col h-full" ref={splitContainerRef}>
+    <div className="flex h-full overflow-hidden">
+      {/* Object Explorer */}
+      {showExplorer && dbSchema && (
+        <>
+          <div style={{ width: explorerWidth, minWidth: explorerWidth }} className="flex-shrink-0">
+            <QueryExplorer onInsertText={insertTextAtCursor} />
+          </div>
+          <div
+            onMouseDown={handleExplorerResize}
+            className="w-1 cursor-col-resize bg-border hover:bg-accent/40 transition-colors flex-shrink-0"
+          />
+        </>
+      )}
+
+      {/* Main content */}
+      <div className="flex flex-col flex-1 min-w-0" ref={splitContainerRef}>
       {/* Warning banner */}
       {sessionLost ? (
         <div className="bg-severity-error/20 border-b border-severity-error/50 px-4 py-2 text-xs text-severity-error flex items-center gap-3">
@@ -553,6 +613,8 @@ export function QueryPage() {
             setAiPendingPrompt(`Explain this SQL query:\n\n\`\`\`sql\n${sqlText}\n\`\`\`\n\nWhat does it do? Are there any performance concerns or improvements?`);
             navigateTo('/ai');
           } : undefined}
+          showExplorer={showExplorer}
+          onToggleExplorer={() => setShowExplorer(!showExplorer)}
         />
 
         {/* Editor */}
@@ -788,6 +850,7 @@ export function QueryPage() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }
