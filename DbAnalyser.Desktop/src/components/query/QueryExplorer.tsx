@@ -418,13 +418,40 @@ export function QueryExplorer({ onInsertText, onOpenInNewTab }: QueryExplorerPro
   return (
     <div className="flex flex-col h-full bg-bg-secondary border-r border-border">
       {/* Header */}
-      <div className="px-2 py-2 border-b border-border">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter..."
-          className="w-full bg-bg-primary border border-border rounded px-2 py-1 text-[11px] text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-        />
+      <div className="px-2 py-2 border-b border-border space-y-1.5">
+        <div className="flex items-center gap-1">
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter..."
+            className="flex-1 bg-bg-primary border border-border rounded px-2 py-1 text-[11px] text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+          />
+          <button
+            onClick={() => setCollapsed({})}
+            className="px-1.5 py-1 text-[10px] text-text-muted hover:text-text-primary transition-colors"
+            title="Expand all"
+          >
+            +
+          </button>
+          <button
+            onClick={() => {
+              const all: Record<string, boolean> = {};
+              // Collapse all type groups, schemas, and databases
+              for (const [label] of TYPE_ORDER) all[label] = true;
+              if (databases) {
+                for (const [db] of databases) {
+                  all[`db:${db}`] = true;
+                  for (const [label] of TYPE_ORDER) all[`db:${db}:${label}`] = true;
+                }
+              }
+              setCollapsed(all);
+            }}
+            className="px-1.5 py-1 text-[10px] text-text-muted hover:text-text-primary transition-colors"
+            title="Collapse all"
+          >
+            &minus;
+          </button>
+        </div>
       </div>
 
       {/* Tree */}
