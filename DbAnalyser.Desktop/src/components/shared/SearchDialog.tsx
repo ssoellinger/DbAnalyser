@@ -5,21 +5,13 @@ import { DataTable } from './DataTable';
 import { OpenInCodeButton } from '../code/OpenInCodeButton';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ColumnInfo, IndexInfo, ForeignKeyInfo, TableInfo, ViewInfo } from '../../api/types';
+import { formatColumnType } from './formatColumnType';
 
 interface SearchItem {
   name: string;
   type: string;
   definition?: string;
   matchLine?: string;
-}
-
-function formatColumnType(r: ColumnInfo): string {
-  let t = r.dataType;
-  if (r.maxLength !== null && r.maxLength > 0 && !['int', 'bigint', 'bit', 'datetime', 'date', 'float', 'real', 'uniqueidentifier'].includes(r.dataType))
-    t += `(${r.maxLength === -1 ? 'max' : r.maxLength})`;
-  if (r.precision !== null && r.scale !== null && ['decimal', 'numeric'].includes(r.dataType))
-    t += `(${r.precision},${r.scale})`;
-  return t;
 }
 
 export function SearchDialog() {

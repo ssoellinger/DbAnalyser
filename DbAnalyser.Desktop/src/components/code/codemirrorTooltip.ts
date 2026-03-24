@@ -1,6 +1,7 @@
 import { EditorView, hoverTooltip, type Tooltip } from '@codemirror/view';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { ColumnInfo } from '../../api/types';
+import { formatColumnType } from '../shared/formatColumnType';
 
 /** Info returned by the tooltip resolver */
 export interface TooltipInfo {
@@ -98,14 +99,8 @@ function buildTooltipHtml(info: TooltipInfo): string {
   return html;
 }
 
-function formatType(col: ColumnInfo): string {
-  let t = col.dataType;
-  if (col.maxLength !== null && col.maxLength > 0 && !['int', 'bigint', 'bit', 'datetime', 'date', 'float', 'real', 'uniqueidentifier'].includes(col.dataType))
-    t += `(${col.maxLength === -1 ? 'max' : col.maxLength})`;
-  if (col.precision !== null && col.scale !== null && ['decimal', 'numeric'].includes(col.dataType))
-    t += `(${col.precision},${col.scale})`;
-  return t;
-}
+// Use shared formatColumnType as formatType
+const formatType = formatColumnType;
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

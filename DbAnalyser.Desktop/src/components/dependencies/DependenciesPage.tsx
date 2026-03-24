@@ -1,14 +1,12 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
+import { useObjectNavigation } from '../../hooks/useObjectNavigation';
 import { FilterBar } from '../shared/FilterBar';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { CycleWarning } from './CycleWarning';
 import { detectCycles } from '../../hooks/useCycleDetection';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
-import { useCodeStore } from '../code/useCodeStore';
-import { generateTableDdl } from '../code/tableDdlGenerator';
 import { ForceGraph, type GraphNode, type GraphEdge } from './ForceGraph';
 
 function DependencyGraphInner() {
@@ -16,46 +14,15 @@ function DependencyGraphInner() {
   const rels = result.relationships!;
   const deps = rels.dependencies;
   const schema = result.schema;
-  const navigate = useNavigate();
-  const openTab = useCodeStore((s) => s.openTab);
-
-  const openDetailPanel = useStore((s) => s.openDetailPanel);
+  const { openDetail, openInCode } = useObjectNavigation();
 
   const handleNodeClick = useCallback((node: GraphNode) => {
-    if (!schema) return;
-    const fullName = node.id;
-    if (schema.tables.some((t) => t.fullName === fullName)) openDetailPanel(fullName, 'Table');
-    else if (schema.views.some((v) => v.fullName === fullName)) openDetailPanel(fullName, 'View');
-  }, [schema, openDetailPanel]);
+    openDetail(node.id);
+  }, [openDetail]);
 
   const handleNodeDoubleClick = useCallback((node: GraphNode) => {
-    if (!schema) return;
-    const fullName = node.id;
-    const typeMap: Record<string, () => void> = {
-      table: () => {
-        const t = schema.tables.find((t) => t.fullName === fullName);
-        if (t) openTab({ objectType: 'Table', fullName, label: t.tableName, definition: generateTableDdl(t) });
-      },
-      view: () => {
-        const v = schema.views.find((v) => v.fullName === fullName);
-        if (v) openTab({ objectType: 'View', fullName, label: v.viewName, definition: v.definition ?? '' });
-      },
-      procedure: () => {
-        const p = schema.storedProcedures.find((p) => p.fullName === fullName);
-        if (p) openTab({ objectType: 'Procedure', fullName, label: p.procedureName, definition: p.definition ?? '' });
-      },
-      function: () => {
-        const f = schema.functions.find((f) => f.fullName === fullName);
-        if (f) openTab({ objectType: 'Function', fullName, label: f.functionName, definition: f.definition ?? '' });
-      },
-      trigger: () => {
-        const t = schema.triggers.find((t) => t.fullName === fullName);
-        if (t) openTab({ objectType: 'Trigger', fullName, label: t.triggerName, definition: t.definition ?? '' });
-      },
-    };
-    typeMap[node.type]?.();
-    navigate('/code');
-  }, [schema, openTab, navigate]);
+    openInCode(node.id);
+  }, [openInCode]);
 
   // Filters
   const nodeTypes = useMemo(() => {

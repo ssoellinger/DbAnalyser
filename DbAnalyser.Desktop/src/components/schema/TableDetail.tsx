@@ -3,15 +3,7 @@ import { DataTable } from '../shared/DataTable';
 import { OpenInCodeButton } from '../code/OpenInCodeButton';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { TableInfo, ColumnInfo, IndexInfo, ForeignKeyInfo } from '../../api/types';
-
-function formatColumnType(r: ColumnInfo): string {
-  let t = r.dataType;
-  if (r.maxLength !== null && r.maxLength > 0 && !['int', 'bigint', 'bit', 'datetime', 'date', 'float', 'real', 'uniqueidentifier'].includes(r.dataType))
-    t += `(${r.maxLength === -1 ? 'max' : r.maxLength})`;
-  if (r.precision !== null && r.scale !== null && ['decimal', 'numeric'].includes(r.dataType))
-    t += `(${r.precision},${r.scale})`;
-  return t;
-}
+import { formatColumnType } from '../shared/formatColumnType';
 
 function generateDdl(table: TableInfo): string {
   const lines: string[] = [];

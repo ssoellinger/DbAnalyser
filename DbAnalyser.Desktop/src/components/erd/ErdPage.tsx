@@ -15,15 +15,13 @@ import {
   type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { FilterBar } from '../shared/FilterBar';
 import { GraphControls } from '../shared/GraphControls';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { getLayoutedElements } from '../../hooks/useDagreLayout';
-import { useCodeStore } from '../code/useCodeStore';
-import { generateTableDdl } from '../code/tableDdlGenerator';
+import { useObjectNavigation } from '../../hooks/useObjectNavigation';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
 import type { TableInfo, ColumnInfo } from '../../api/types';
 import { getDatabaseColor } from '../dashboard/DashboardPage';
@@ -135,49 +133,15 @@ function ErdGraphInner() {
   const schema = result.schema!;
   const rels = result.relationships;
   const isServerMode = useStore((s) => s.isServerMode);
-  const navigate = useNavigate();
-  const openTab = useCodeStore((s) => s.openTab);
-  const openDetailPanel = useStore((s) => s.openDetailPanel);
+  const { openDetail, openInCode } = useObjectNavigation();
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    const fullName = node.id;
-    if (schema.tables.some((t) => t.fullName === fullName)) openDetailPanel(fullName, 'Table');
-    else if (schema.views.some((v) => v.fullName === fullName)) openDetailPanel(fullName, 'View');
-  }, [schema, openDetailPanel]);
+    openDetail(node.id);
+  }, [openDetail]);
 
   const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
-    const fullName = node.id;
-    // Determine type and definition
-    const table = schema.tables.find((t) => t.fullName === fullName);
-    if (table) {
-      openTab({ objectType: 'Table', fullName, label: table.tableName, definition: generateTableDdl(table) });
-      navigate('/code');
-      return;
-    }
-    const view = schema.views.find((v) => v.fullName === fullName);
-    if (view) {
-      openTab({ objectType: 'View', fullName, label: view.viewName, definition: view.definition ?? '' });
-      navigate('/code');
-      return;
-    }
-    const proc = schema.storedProcedures.find((p) => p.fullName === fullName);
-    if (proc) {
-      openTab({ objectType: 'Procedure', fullName, label: proc.procedureName, definition: proc.definition ?? '' });
-      navigate('/code');
-      return;
-    }
-    const func = schema.functions.find((f) => f.fullName === fullName);
-    if (func) {
-      openTab({ objectType: 'Function', fullName, label: func.functionName, definition: func.definition ?? '' });
-      navigate('/code');
-      return;
-    }
-    const trig = schema.triggers.find((t) => t.fullName === fullName);
-    if (trig) {
-      openTab({ objectType: 'Trigger', fullName, label: trig.triggerName, definition: trig.definition ?? '' });
-      navigate('/code');
-    }
-  }, [schema, openTab, navigate]);
+    openInCode(node.id);
+  }, [openInCode]);
 
   // Database filters (server mode only)
   const databaseFilters = useMemo(() => {

@@ -4,7 +4,8 @@ import { useStore } from '../../hooks/useStore';
 import { useCodeStore } from '../code/useCodeStore';
 import { generateTableDdl } from '../code/tableDdlGenerator';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
-import type { ColumnInfo, ForeignKeyInfo } from '../../api/types';
+import type { ForeignKeyInfo } from '../../api/types';
+import { formatColumnType } from './formatColumnType';
 
 // ── Collapsible section ──
 
@@ -48,18 +49,6 @@ function UsageBadge({ level }: { level: string }) {
       {level}
     </span>
   );
-}
-
-// ── Column type formatter ──
-
-function formatType(col: ColumnInfo): string {
-  let type = col.dataType;
-  if (col.maxLength && col.maxLength > 0 && ['varchar', 'nvarchar', 'char', 'nchar', 'varbinary'].includes(type.toLowerCase())) {
-    type += col.maxLength === -1 ? '(MAX)' : `(${col.maxLength})`;
-  } else if (col.precision && col.scale !== null && ['decimal', 'numeric'].includes(type.toLowerCase())) {
-    type += `(${col.precision},${col.scale})`;
-  }
-  return type;
 }
 
 // ── Main component ──
@@ -251,7 +240,7 @@ export function TableDetailPanel() {
                           </span>
                         </span>
                       </td>
-                      <td className="py-1 text-text-muted text-right">{formatType(col)}</td>
+                      <td className="py-1 text-text-muted text-right">{formatColumnType(col)}</td>
                       <td className="py-1 pl-2 text-center w-6">
                         {col.isNullable && <span className="text-text-muted text-[9px]">?</span>}
                       </td>

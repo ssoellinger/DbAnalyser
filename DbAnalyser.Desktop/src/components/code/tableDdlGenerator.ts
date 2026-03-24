@@ -1,17 +1,5 @@
-import type { TableInfo, ColumnInfo, JobInfo, SequenceInfo, UserDefinedTypeInfo, SynonymInfo } from '../../api/types';
-
-function formatColumnType(c: ColumnInfo): string {
-  let t = c.dataType;
-  if (
-    c.maxLength !== null &&
-    c.maxLength > 0 &&
-    !['int', 'bigint', 'bit', 'datetime', 'date', 'float', 'real', 'uniqueidentifier'].includes(c.dataType)
-  )
-    t += `(${c.maxLength === -1 ? 'max' : c.maxLength})`;
-  if (c.precision !== null && c.scale !== null && ['decimal', 'numeric'].includes(c.dataType))
-    t += `(${c.precision},${c.scale})`;
-  return t;
-}
+import type { TableInfo, JobInfo, SequenceInfo, UserDefinedTypeInfo, SynonymInfo } from '../../api/types';
+import { formatColumnType } from '../shared/formatColumnType';
 
 export function generateTableDdl(table: TableInfo): string {
   const lines: string[] = [];

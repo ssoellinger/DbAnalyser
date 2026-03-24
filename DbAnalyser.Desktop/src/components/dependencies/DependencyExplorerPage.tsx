@@ -1,11 +1,9 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../hooks/useStore';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
+import { useObjectNavigation } from '../../hooks/useObjectNavigation';
 import { AnalyzerLoader } from '../shared/AnalyzerLoader';
 import { OBJECT_TYPE_COLORS } from '../../api/types';
-import { useCodeStore } from '../code/useCodeStore';
-import { generateTableDdl } from '../code/tableDdlGenerator';
 import { ForceGraph, type GraphNode, type GraphEdge } from './ForceGraph';
 
 function ExplorerInner() {
@@ -13,8 +11,6 @@ function ExplorerInner() {
   const rels = result.relationships!;
   const deps = rels.dependencies;
   const schema = result.schema;
-  const navigate = useNavigate();
-  const openTab = useCodeStore((s) => s.openTab);
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -142,29 +138,15 @@ function ExplorerInner() {
     };
   }, [selected, neighborhood, forwardAdj, deps]);
 
-  const openDetailPanel = useStore((s) => s.openDetailPanel);
+  const { openDetail, openInCode } = useObjectNavigation();
 
   const handleNodeClick = useCallback((node: GraphNode) => {
-    if (!schema) return;
-    const fullName = node.id;
-    if (schema.tables.some((t) => t.fullName === fullName)) openDetailPanel(fullName, 'Table');
-    else if (schema.views.some((v) => v.fullName === fullName)) openDetailPanel(fullName, 'View');
-  }, [schema, openDetailPanel]);
+    openDetail(node.id);
+  }, [openDetail]);
 
   const handleNodeDoubleClick = useCallback((node: GraphNode) => {
-    if (!schema) return;
-    const fullName = node.id;
-    const table = schema.tables.find((t) => t.fullName === fullName);
-    if (table) { openTab({ objectType: 'Table', fullName, label: table.tableName, definition: generateTableDdl(table) }); navigate('/code'); return; }
-    const view = schema.views.find((v) => v.fullName === fullName);
-    if (view) { openTab({ objectType: 'View', fullName, label: view.viewName, definition: view.definition ?? '' }); navigate('/code'); return; }
-    const proc = schema.storedProcedures.find((p) => p.fullName === fullName);
-    if (proc) { openTab({ objectType: 'Procedure', fullName, label: proc.procedureName, definition: proc.definition ?? '' }); navigate('/code'); return; }
-    const func = schema.functions.find((f) => f.fullName === fullName);
-    if (func) { openTab({ objectType: 'Function', fullName, label: func.functionName, definition: func.definition ?? '' }); navigate('/code'); return; }
-    const trig = schema.triggers.find((t) => t.fullName === fullName);
-    if (trig) { openTab({ objectType: 'Trigger', fullName, label: trig.triggerName, definition: trig.definition ?? '' }); navigate('/code'); }
-  }, [schema, openTab, navigate]);
+    openInCode(node.id);
+  }, [openInCode]);
 
   return (
     <div className="space-y-4">
