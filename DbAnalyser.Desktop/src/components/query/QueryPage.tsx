@@ -22,8 +22,9 @@ import { api } from '../../api/client';
 import type { QueryResponse, QueryHistoryEntry } from '../../api/types';
 import {
   MAX_ROWS_OPTIONS, MAX_HISTORY, MIN_EDITOR_HEIGHT, MIN_RESULTS_HEIGHT,
-  historyKey, savedQueriesKey,
+  historyKey, savedQueriesKey, queryTabsKey,
   loadHistory, saveHistory, loadSavedQueries, saveSavedQueries,
+  loadQueryTabs, saveQueryTabs,
   getStatementAtCursor, buildSqlSchema,
   type QueryTab, type SavedQuery, type ResultsView,
 } from './queryHelpers';
@@ -54,10 +55,17 @@ export function QueryPage() {
   // Connection-scoped storage keys
   const hKey = useMemo(() => historyKey(serverName), [serverName]);
   const sqKey = useMemo(() => savedQueriesKey(serverName), [serverName]);
+  const qtKey = useMemo(() => queryTabsKey(serverName), [serverName]);
 
-  // Query tabs
-  const [tabs, setTabs] = useState<QueryTab[]>([{ id: 'tab-1', title: 'Query 1', sql: '-- Write your SQL query here\n' }]);
-  const [activeTabId, setActiveTabId] = useState('tab-1');
+  // Query tabs — restore from localStorage or create default
+  const [tabs, setTabs] = useState<QueryTab[]>(() => {
+    const saved = loadQueryTabs(queryTabsKey(serverName));
+    return saved?.tabs ?? [{ id: 'tab-1', title: 'Query 1', sql: '-- Write your SQL query here\n' }];
+  });
+  const [activeTabId, setActiveTabId] = useState(() => {
+    const saved = loadQueryTabs(queryTabsKey(serverName));
+    return saved?.activeTabId ?? 'tab-1';
+  });
 
   const [maxRows, setMaxRows] = useState(1000);
   const [timeoutSeconds, setTimeoutSeconds] = useState(30);
@@ -81,6 +89,9 @@ export function QueryPage() {
   const [sessionLost, setSessionLost] = useState(false);
   const [showExplorer, setShowExplorer] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(240);
+  const [fontSize, setFontSize] = useState(() => {
+    try { return parseInt(localStorage.getItem(`dbanalyser-font-size`) ?? '13'); } catch { return 13; }
+  });
 
   const abortRef = useRef<AbortController | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -109,6 +120,22 @@ export function QueryPage() {
     setHistory(loadHistory(hKey));
     setSavedQueries(loadSavedQueries(sqKey));
   }, [hKey, sqKey]);
+
+  // Auto-save query tabs (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      // Save current editor content before persisting
+      const view = viewRef.current;
+      if (view) {
+        const currentSql = view.state.doc.toString();
+        const updatedTabs = tabs.map((t) => t.id === activeTabId ? { ...t, sql: currentSql } : t);
+        saveQueryTabs(qtKey, updatedTabs, activeTabId);
+      } else {
+        saveQueryTabs(qtKey, tabs, activeTabId);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [tabs, activeTabId, qtKey]);
 
   // ── Elapsed timer ──
   useEffect(() => {
@@ -625,11 +652,14 @@ export function QueryPage() {
           } : undefined}
           showExplorer={showExplorer}
           onToggleExplorer={() => setShowExplorer(!showExplorer)}
+          fontSize={fontSize}
+          onSetFontSize={(s) => { setFontSize(s); localStorage.setItem('dbanalyser-font-size', String(s)); }}
         />
 
         {/* Editor */}
         <div ref={editorContainerRef}
-          className="h-[calc(100%-68px)] w-full overflow-hidden [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto" />
+          className="h-[calc(100%-68px)] w-full overflow-hidden [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto [&_.cm-content]:!text-[length:var(--editor-font-size)] [&_.cm-gutters]:!text-[length:var(--editor-font-size)]"
+          style={{ '--editor-font-size': `${fontSize}px` } as React.CSSProperties} />
       </div>
 
       {/* Drag handle */}

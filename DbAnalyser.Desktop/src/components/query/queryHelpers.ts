@@ -4,6 +4,7 @@ import type { QueryHistoryEntry, DatabaseSchema } from '../../api/types';
 // ── Constants ──
 
 export const MAX_ROWS_OPTIONS = [100, 500, 1000, 5000, 10000, 0];
+const QUERY_TABS_KEY_PREFIX = 'dbanalyser-query-tabs';
 export const MAX_HISTORY = 50;
 export const MIN_EDITOR_HEIGHT = 80;
 export const MIN_RESULTS_HEIGHT = 80;
@@ -61,6 +62,27 @@ export function loadSavedQueries(key: string): SavedQuery[] {
 
 export function saveSavedQueries(key: string, queries: SavedQuery[]) {
   try { localStorage.setItem(key, JSON.stringify(queries)); } catch {}
+}
+
+// ── Query tab persistence ──
+
+export function queryTabsKey(server: string | null): string {
+  const suffix = server ? `-${server.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+  return `${QUERY_TABS_KEY_PREFIX}${suffix}`;
+}
+
+export function loadQueryTabs(key: string): { tabs: QueryTab[]; activeTabId: string } | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.tabs?.length > 0) return parsed;
+    return null;
+  } catch { return null; }
+}
+
+export function saveQueryTabs(key: string, tabs: QueryTab[], activeTabId: string) {
+  try { localStorage.setItem(key, JSON.stringify({ tabs, activeTabId })); } catch {}
 }
 
 // ── SQL statement splitting ──

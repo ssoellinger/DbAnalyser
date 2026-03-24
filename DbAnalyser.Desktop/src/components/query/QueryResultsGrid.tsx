@@ -71,6 +71,15 @@ function resultSetToInsert(resultSet: QueryResultSet, tableName = 'TableName'): 
   return lines.join('\n');
 }
 
+function resultSetToMarkdown(resultSet: QueryResultSet): string {
+  const header = '| ' + resultSet.columns.join(' | ') + ' |';
+  const separator = '| ' + resultSet.columns.map(() => '---').join(' | ') + ' |';
+  const rows = resultSet.rows.map((row) =>
+    '| ' + row.map((v) => cellToString(v).replace(/\|/g, '\\|')).join(' | ') + ' |'
+  );
+  return [header, separator, ...rows].join('\n');
+}
+
 function downloadFile(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: `${mimeType};charset=utf-8;` });
   const url = URL.createObjectURL(blob);
@@ -188,6 +197,13 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
     setShowExportMenu(false);
   }, [resultSet, showFeedback]);
 
+  const copyAsMarkdown = useCallback(() => {
+    navigator.clipboard.writeText(resultSetToMarkdown(resultSet))
+      .then(() => showFeedback('Copied as Markdown'))
+      .catch(() => showFeedback('Copy failed'));
+    setShowExportMenu(false);
+  }, [resultSet, showFeedback]);
+
   return (
     <div className="flex flex-col gap-2 flex-1 min-h-0">
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -235,6 +251,10 @@ export function QueryResultsGrid({ resultSet }: QueryResultsGridProps) {
                 <button onClick={copyAsInsert}
                   className="w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors text-text-primary">
                   Copy as INSERT
+                </button>
+                <button onClick={copyAsMarkdown}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors text-text-primary">
+                  Copy as Markdown
                 </button>
               </div>
             </>

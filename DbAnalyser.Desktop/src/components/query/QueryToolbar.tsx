@@ -35,6 +35,8 @@ interface QueryToolbarProps {
   onAiExplain?: () => void;
   showExplorer?: boolean;
   onToggleExplorer?: () => void;
+  fontSize?: number;
+  onSetFontSize?: (size: number) => void;
 }
 
 export function QueryToolbar({
@@ -46,6 +48,7 @@ export function QueryToolbar({
   onToggleHistory, onRestoreHistory,
   onBeginTransaction, onCommitTransaction, onRollbackTransaction,
   onAiExplain, showExplorer, onToggleExplorer,
+  fontSize, onSetFontSize,
 }: QueryToolbarProps) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border overflow-x-auto scrollbar-none flex-shrink-0">
@@ -138,6 +141,16 @@ export function QueryToolbar({
           {[10, 30, 60, 120, 300, 0].map((n) => <option key={n} value={n}>{n === 0 ? 'None' : `${n}s`}</option>)}
         </select>
       </label>
+
+      {onSetFontSize && (
+        <label className="flex items-center gap-1.5 text-xs text-text-secondary flex-shrink-0">
+          Font:
+          <select value={fontSize} onChange={(e) => onSetFontSize(Number(e.target.value))}
+            className="bg-bg-primary border border-border rounded px-1.5 py-0.5 text-xs text-text-primary">
+            {[10, 11, 12, 13, 14, 16, 18, 20, 24].map((s) => <option key={s} value={s}>{s}px</option>)}
+          </select>
+        </label>
+      )}
 
       {databases.length > 0 && (
         <label className="flex items-center gap-1.5 text-xs text-text-secondary ml-1 flex-shrink-0">

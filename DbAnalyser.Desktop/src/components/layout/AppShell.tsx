@@ -1,12 +1,25 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { SearchDialog } from '../shared/SearchDialog';
 import { TableDetailPanel } from '../shared/TableDetailPanel';
+import { ShortcutsPanel } from '../shared/ShortcutsPanel';
 import { useStore } from '../../hooks/useStore';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setShortcutsOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-primary">
@@ -19,6 +32,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       <SearchDialog />
       <TableDetailPanel />
+      <ShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 }
