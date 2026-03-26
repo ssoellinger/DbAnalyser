@@ -5,7 +5,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirro
 import { sql, MSSQL, PostgreSQL, PLSQL } from '@codemirror/lang-sql';
 import { bracketMatching } from '@codemirror/language';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { search, highlightSelectionMatches } from '@codemirror/search';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { defaultKeymap, history as cmHistory, historyKeymap } from '@codemirror/commands';
 import { format as formatSql } from 'sql-formatter';
 import { lintGutter } from '@codemirror/lint';
@@ -465,7 +465,7 @@ export function QueryPage() {
     bracketMatching(),
     closeBrackets(),
     cmHistory(),
-    search(),
+    search({ top: true }),
     highlightSelectionMatches(),
     autocompletion({ defaultKeymap: true, activateOnTyping: true }),
     sqlCompartment.of(sql({ dialect: sqlDialect, schema: sqlSchema })),
@@ -473,7 +473,7 @@ export function QueryPage() {
     lintGutter(),
     dbAnalyserEditorTheme,
     dbAnalyserHighlighting,
-    keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap, ...completionKeymap]),
+    keymap.of([...searchKeymap, ...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap, ...completionKeymap]),
     EditorView.lineWrapping,
   ], [sqlDialect]); // eslint-disable-line react-hooks/exhaustive-deps
 

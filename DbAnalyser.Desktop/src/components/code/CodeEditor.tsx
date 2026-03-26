@@ -4,7 +4,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { sql, MSSQL, PostgreSQL, PLSQL } from '@codemirror/lang-sql';
 import { useStore } from '../../hooks/useStore';
 import { foldGutter, bracketMatching } from '@codemirror/language';
-import { search, highlightSelectionMatches } from '@codemirror/search';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { dbAnalyserEditorTheme, dbAnalyserHighlighting } from './codemirrorTheme';
 import { clickthroughExtension } from './codemirrorClickthrough';
@@ -66,13 +66,13 @@ export function CodeEditor({
       sqlFoldService,
       bracketMatching(),
       history(),
-      search(),
+      search({ top: true }),
       highlightSelectionMatches(),
       sql({ dialect }),
       dbAnalyserEditorTheme,
       dbAnalyserHighlighting,
       EditorState.readOnly.of(true),
-      keymap.of([...defaultKeymap, ...historyKeymap]),
+      keymap.of([...searchKeymap, ...defaultKeymap, ...historyKeymap]),
       EditorView.lineWrapping,
       ...tempTableHighlightExtension,
     ];
